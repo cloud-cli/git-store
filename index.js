@@ -47,15 +47,15 @@ app.get('/repos/:owner/:repo/log', async (req, res) => {
 
   try {
     const git = getGit(repoPath);
-      try {
-        const log = await git.log();
-        res.setHeader('Content-Type', 'application/json');
-        res.write(JSON.stringify(log.all));
-        res.end();
-      } catch (e) {
-        // If git not available or other issue, return empty array
-        res.status(200).json([]);
-      }
+    try {
+      const log = await git.log();
+      res.setHeader('Content-Type', 'application/json');
+      res.write(JSON.stringify(log.all));
+      res.end();
+    } catch (e) {
+      // If git not available or other issue, return empty array
+      res.status(200).json([]);
+    }
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

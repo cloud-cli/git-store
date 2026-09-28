@@ -1,0 +1,30 @@
+{
+  "env": {
+    "browser": true,
+    "es2021": true,
+    "node": true
+  },
+  "extends": "eslint:recommended",
+  "parserOptions": {
+    "ecmaVersion": "latest",
+    "sourceType": "module"
+  },
+  "rules": {
+    "curly": ["error", "all"],
+    "no-unused-vars": ["warn", {"argsIgnorePattern": "^_"}],
+    "no-console": "warn",
+    "eqeqeq": "error",
+    "indent": ["error", 2],
+    "linebreak-style": ["error", "unix"],
+    "quotes": ["error", "double"],
+    "semi": ["error", "always"],
+    "no-use-before-define": "error",
+    "computed-property": "error",
+    "no-new-object": "error",
+    "no-undef": "error",
+    "no-return-assign": "error",
+    "no-bitwise": "warn",
+    "no-restricted-syntax": ["error", "LabeledStatement", "WithStatement"]
+  },
+  "files": ["**/*.js", "**/*.html", "**/*.css"]
+}
