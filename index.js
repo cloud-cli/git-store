@@ -7,11 +7,11 @@ const { ensureRepoDir, getRepoPath } = require('./storage');
 
 const app = express();
 app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
 const PORT = process.env.PORT || 3000;
 
 let oidcClient;
 let oidcReady = false;
-let oidcError;
 
 async function initializeOidc() {
   if (!process.env.OIDC_ISSUER || !process.env.OIDC_CLIENT_ID || !process.env.OIDC_CLIENT_SECRET) {
@@ -25,8 +25,7 @@ async function initializeOidc() {
       client_secret: process.env.OIDC_CLIENT_SECRET,
     });
     oidcReady = true;
-  } catch (error) {
-    oidcError = error;
+  } catch {
   }
 }
 initializeOidc();
@@ -47,7 +46,7 @@ async function requireAuthentication(req, res, next) {
     }
     req.user = claims;
     return next();
-  } catch (error) {
+  } catch {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 }
@@ -105,11 +104,58 @@ const apiSpec = {
   },
 };
 
+apiSpec.paths['/repos/{owner}/{repo}/tree'] = {
+  get: operation('List repository files', { 200: { description: 'Repository tree' }, 404: notFound }, null, pathParameters),
+};
+apiSpec.paths['/repos'] = {
+  get: operation('List repositories', { 200: { description: 'Repository list' } }, null, []),
+};
+apiSpec.paths['/repos/{owner}/{repo}/file'] = {
+  get: operation('Read a repository file', { 200: { description: 'File contents' }, 400: { description: 'Invalid path' }, 404: notFound }, null, [...pathParameters, { name: 'path', in: 'query', required: true, schema: { type: 'string' } }]),
+};
+apiSpec.paths['/repos/{owner}/{repo}/branches'].get = operation('List branches', { 200: { description: 'Branches' }, 404: notFound });
+apiSpec.paths['/repos/{owner}/{repo}/tags'].get = operation('List tags', { 200: { description: 'Tags' }, 404: notFound });
+apiSpec.paths['/repos/{owner}/{repo}/history'] = {
+  get: operation('List file history', { 200: { description: 'Commit history' }, 400: { description: 'Invalid path' }, 404: notFound }, null, [...pathParameters, { name: 'path', in: 'query', required: true, schema: { type: 'string' } }]),
+};
+
+function safeRepoFile(owner, repo, relativePath) {
+  const repoPath = path.resolve(getRepoPath(owner, repo));
+  const target = path.resolve(repoPath, relativePath || '');
+  if (target !== repoPath && !target.startsWith(`${repoPath}${path.sep}`)) {
+    return null;
+  }
+  return target;
+}
+
+function treeEntries(directory, relative = '') {
+  return fs.readdirSync(directory, { withFileTypes: true })
+    .map((entry) => ({
+      name: entry.name,
+      path: path.join(relative, entry.name),
+      type: entry.isDirectory() ? 'directory' : 'file',
+    }))
+    .filter((entry) => !entry.path.split(path.sep).includes('.git'));
+}
+
 const getGit = (repoPath) => simpleGit.simpleGit(repoPath);
 const repoExists = (repoPath) => fs.existsSync(repoPath) && fs.existsSync(path.join(repoPath, '.git'));
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.get('/api', (req, res) => res.json(apiSpec));
+
+app.get('/repos', (req, res) => {
+  const repositories = [];
+  if (fs.existsSync(process.env.DATA_PATH)) {
+    for (const owner of fs.readdirSync(process.env.DATA_PATH, { withFileTypes: true })) {
+      if (!owner.isDirectory()) continue;
+      for (const repo of fs.readdirSync(path.join(process.env.DATA_PATH, owner.name), { withFileTypes: true })) {
+        if (repo.isDirectory()) repositories.push({ owner: owner.name, repo: repo.name });
+      }
+    }
+  }
+  return res.json(repositories);
+});
 
 app.post('/repos/:owner/:repo', async (req, res) => {
   try {
@@ -132,6 +178,68 @@ app.get('/repos/:owner/:repo/log', async (req, res) => {
   try {
     const log = await getGit(repoPath).log();
     return res.json(log.all);
+  } catch (error) {
+    if (error.message.includes('does not have any commits yet')) {
+      return res.json([]);
+    }
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/repos/:owner/:repo/tree', (req, res) => {
+  const repoPath = getRepoPath(req.params.owner, req.params.repo);
+  if (!repoExists(repoPath)) return res.status(404).json({ error: 'Repo not found' });
+  const directory = safeRepoFile(req.params.owner, req.params.repo, req.query.path || '');
+  if (!directory || !fs.existsSync(directory) || !fs.statSync(directory).isDirectory()) {
+    return res.status(404).json({ error: 'Directory not found' });
+  }
+  return res.json(treeEntries(directory, req.query.path || ''));
+});
+
+app.get('/repos/:owner/:repo/file', (req, res) => {
+  const repoPath = getRepoPath(req.params.owner, req.params.repo);
+  const filePath = safeRepoFile(req.params.owner, req.params.repo, req.query.path);
+  if (!filePath) return res.status(400).json({ error: 'Invalid path' });
+  if (!repoExists(repoPath) || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    return res.status(404).json({ error: 'File not found' });
+  }
+  try {
+    return res.type('text/plain').send(fs.readFileSync(filePath, 'utf8'));
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/repos/:owner/:repo/branches', async (req, res) => {
+  const repoPath = getRepoPath(req.params.owner, req.params.repo);
+  if (!repoExists(repoPath)) return res.status(404).json({ error: 'Repo not found' });
+  try {
+    const branches = await getGit(repoPath).branchLocal();
+    return res.json(branches.all);
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/repos/:owner/:repo/tags', async (req, res) => {
+  const repoPath = getRepoPath(req.params.owner, req.params.repo);
+  if (!repoExists(repoPath)) return res.status(404).json({ error: 'Repo not found' });
+  try {
+    const tags = await getGit(repoPath).tags();
+    return res.json(tags.all);
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/repos/:owner/:repo/history', async (req, res) => {
+  const repoPath = getRepoPath(req.params.owner, req.params.repo);
+  const filePath = safeRepoFile(req.params.owner, req.params.repo, req.query.path);
+  if (!filePath) return res.status(400).json({ error: 'Invalid path' });
+  if (!repoExists(repoPath) || !fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
+  try {
+    const history = await getGit(repoPath).log({ file: req.query.path, strictDate: false });
+    return res.json(history.all);
   } catch (error) {
     if (error.message.includes('does not have any commits yet')) {
       return res.json([]);

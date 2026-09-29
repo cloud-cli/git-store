@@ -1,6 +1,8 @@
 const http = require('http');
 const assert = require('assert');
 const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
 const DATA_PATH = process.env.DATA_PATH || './data';
 
@@ -51,23 +53,43 @@ function request(method, apiPath, data, extraHeaders = {}) {
   assert.ok([200].includes(resLog.status), `log should return 200, got ${resLog.status}`);
   console.log('✅ GET', base, '/log =>', resLog.status);
 
+  const repoDirectory = path.join(DATA_PATH, owner, repo);
+  fs.writeFileSync(path.join(repoDirectory, 'README.md'), '# Integration test\n');
+  const resTree = await request('GET', `${base}/tree`);
+  assert.strictEqual(resTree.status, 200, 'tree should return 200');
+  assert.ok(JSON.parse(resTree.body).some((entry) => entry.path === 'README.md'));
+  const resFile = await request('GET', `${base}/file?path=README.md`);
+  assert.strictEqual(resFile.status, 200, 'file should return 200');
+  assert.strictEqual(resFile.body, '# Integration test\n');
+  const resTraversal = await request('GET', `${base}/file?path=../package.json`);
+  assert.strictEqual(resTraversal.status, 400, 'file traversal should return 400');
+  const resBranches = await request('GET', `${base}/branches`);
+  assert.strictEqual(resBranches.status, 200, 'branches should return 200');
+  const resTags = await request('GET', `${base}/tags`);
+  assert.strictEqual(resTags.status, 200, 'tags should return 200');
+  const resHistory = await request('GET', `${base}/history?path=README.md`);
+  assert.strictEqual(resHistory.status, 200, 'history should return 200');
+  console.log('✅ tree, file, branches, and tags endpoints');
+
   // 3. GET /api – OpenAPI spec
   const resApi = await request('GET', '/api');
   assert.strictEqual(resApi.status, 200, '/api should return 200');
   const spec = JSON.parse(resApi.body);
   assert.ok(spec.openapi, 'spec must have openapi version');
   assert.ok(spec.paths, 'spec must have paths');
-  const expectedPaths = ['/health', '/api', '/repos/{owner}/{repo}', '/repos/{owner}/{repo}/log',
+  const expectedPaths = ['/health', '/api', '/repos', '/repos/{owner}/{repo}', '/repos/{owner}/{repo}/log',
     '/repos/{owner}/{repo}/stage', '/repos/{owner}/{repo}/unstage',
     '/repos/{owner}/{repo}/commit', '/repos/{owner}/{repo}/tags',
     '/repos/{owner}/{repo}/tags/{name}', '/repos/{owner}/{repo}/branches',
-    '/repos/{owner}/{repo}/branches/{name}'];
+    '/repos/{owner}/{repo}/branches/{name}', '/repos/{owner}/{repo}/tree',
+    '/repos/{owner}/{repo}/file', '/repos/{owner}/{repo}/history'];
   for (const p of expectedPaths) {
     assert.ok(spec.paths[p], `spec must contain path ${p}`);
   }
   const expectedOperations = {
     '/health': ['get'],
     '/api': ['get'],
+    '/repos': ['get'],
     '/repos/{owner}/{repo}': ['post'],
     '/repos/{owner}/{repo}/log': ['get'],
     '/repos/{owner}/{repo}/stage': ['post'],
@@ -77,6 +99,9 @@ function request(method, apiPath, data, extraHeaders = {}) {
     '/repos/{owner}/{repo}/tags/{name}': ['delete'],
     '/repos/{owner}/{repo}/branches': ['post'],
     '/repos/{owner}/{repo}/branches/{name}': ['delete'],
+    '/repos/{owner}/{repo}/tree': ['get'],
+    '/repos/{owner}/{repo}/file': ['get'],
+    '/repos/{owner}/{repo}/history': ['get'],
   };
   for (const [pathName, methods] of Object.entries(expectedOperations)) {
     for (const method of methods) {

@@ -91,3 +91,11 @@ session and return **401** when no token is present or the token is invalid.
 
 The health check (`/health`) and the OpenAPI spec (`/api`) remain unauthenticated
 so that tools and monitors can inspect the service without credentials.
+
+## Web UI
+
+Open `/` after starting the service. The UI mirrors the repository viewer design,
+loads repositories and branches from the API, and opens a file preview when a file
+is selected. The selected repository, ref, and file path are kept in the query string;
+for example, `/?owner=myorg&repo=myproject&ref=main&path=README.md` can be refreshed
+without losing the preview.

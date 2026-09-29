@@ -1,7 +1,7 @@
 /** @type {import("eslint").Linter.Config} */
 export default {
   ignores: ["node_modules/**", "data/**"],
-  files: ["**/*.js", "**/*.html", "**/*.css"],
+  files: ["**/*.js"],
   languageOptions: {
     ecmaVersion: "latest",
     sourceType: "commonjs",
@@ -12,6 +12,7 @@ export default {
       process: true,
       setTimeout: true,
       console: true,
+      __dirname: true,
     },
   },
   rules: {

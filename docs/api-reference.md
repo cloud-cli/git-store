@@ -68,6 +68,36 @@ GET /repos/{owner}/{repo}/log
 
 **Response (404)** – repository directory or `.git` folder not found.
 
+### GET /repos/{owner}/{repo}/tree
+
+List the immediate files and directories in the repository or in the optional `path` query directory.
+
+**Response (200)**
+
+```json
+[{ "name": "README.md", "path": "README.md", "type": "file" }]
+```
+
+### GET /repos/{owner}/{repo}/file?path=README.md
+
+Read a text file for the browser preview. Paths are restricted to the repository root.
+
+**Response (200)** – `text/plain` file contents.
+
+**Response (400)** – path traversal or invalid path.
+
+### GET /repos/{owner}/{repo}/history?path=README.md
+
+Return commits affecting a file. A file with no history returns an empty array.
+
+### GET /repos/{owner}/{repo}/branches
+
+Return local branch names as a JSON array.
+
+### GET /repos/{owner}/{repo}/tags
+
+Return tag names as a JSON array.
+
 ### POST /repos/{owner}/{repo}/stage
 
 Stage one or more files.

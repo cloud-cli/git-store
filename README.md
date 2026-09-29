@@ -40,6 +40,11 @@ DATA_PATH="$PWD/data" npm start
 | GET | `/api` | public |
 | POST | `/repos/:owner/:repo` | public |
 | GET | `/repos/:owner/:repo/log` | public |
+| GET | `/repos/:owner/:repo/tree` | public |
+| GET | `/repos/:owner/:repo/file?path=...` | public |
+| GET | `/repos/:owner/:repo/history?path=...` | public |
+| GET | `/repos/:owner/:repo/branches` | public |
+| GET | `/repos/:owner/:repo/tags` | public |
 | POST | `/repos/:owner/:repo/stage` | OIDC |
 | POST | `/repos/:owner/:repo/unstage` | OIDC |
 | POST | `/repos/:owner/:repo/commit` | OIDC |
@@ -49,6 +54,9 @@ DATA_PATH="$PWD/data" npm start
 | DELETE | `/repos/:owner/:repo/branches/:name` | OIDC |
 
 The canonical request and response documentation is in [`docs/api-reference.md`](docs/api-reference.md).
+
+The browser UI is served at `/`. Repository and file-preview state is stored in the
+URL query string (`owner`, `repo`, `ref`, and `path`), so navigation survives refreshes.
 
 ## Configuration
 
