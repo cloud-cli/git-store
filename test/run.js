@@ -65,6 +65,24 @@ function request(method, apiPath, data, extraHeaders = {}) {
   for (const p of expectedPaths) {
     assert.ok(spec.paths[p], `spec must contain path ${p}`);
   }
+  const expectedOperations = {
+    '/health': ['get'],
+    '/api': ['get'],
+    '/repos/{owner}/{repo}': ['post'],
+    '/repos/{owner}/{repo}/log': ['get'],
+    '/repos/{owner}/{repo}/stage': ['post'],
+    '/repos/{owner}/{repo}/unstage': ['post'],
+    '/repos/{owner}/{repo}/commit': ['post'],
+    '/repos/{owner}/{repo}/tags': ['post'],
+    '/repos/{owner}/{repo}/tags/{name}': ['delete'],
+    '/repos/{owner}/{repo}/branches': ['post'],
+    '/repos/{owner}/{repo}/branches/{name}': ['delete'],
+  };
+  for (const [pathName, methods] of Object.entries(expectedOperations)) {
+    for (const method of methods) {
+      assert.ok(spec.paths[pathName][method], `spec must contain ${method.toUpperCase()} ${pathName}`);
+    }
+  }
   console.log('✅ GET /api => spec with', expectedPaths.length, 'paths');
 
   // 4. Protected endpoints should return 401 without auth
@@ -90,6 +108,27 @@ function request(method, apiPath, data, extraHeaders = {}) {
   const resHealth = await request('GET', '/health');
   assert.strictEqual(resHealth.status, 200, '/health should return 200 without auth');
   console.log('✅ GET /health => 200', JSON.parse(resHealth.body));
+
+  const missingLog = await request('GET', '/repos/missing/missing/log');
+  assert.strictEqual(missingLog.status, 404, 'missing repositories should return 404');
+  console.log('✅ GET missing log => 404');
+
+  if (process.env.TEST_OIDC_TOKEN) {
+    const auth = { Authorization: `Bearer ${process.env.TEST_OIDC_TOKEN}` };
+    const filePath = `${DATA_PATH}/${owner}/${repo}/README.md`;
+    require('fs').writeFileSync(filePath, 'integration test\n');
+    const stage = await request('POST', `${base}/stage`, { files: ['README.md'] }, auth);
+    assert.strictEqual(stage.status, 200, 'authenticated stage should return 200');
+    const commit = await request('POST', `${base}/commit`, { message: 'integration test' }, auth);
+    assert.strictEqual(commit.status, 200, 'authenticated commit should return 200');
+    const tag = await request('POST', `${base}/tags`, { name: 'v1' }, auth);
+    assert.strictEqual(tag.status, 200, 'authenticated tag creation should return 200');
+    const branch = await request('POST', `${base}/branches`, { name: 'integration' }, auth);
+    assert.strictEqual(branch.status, 200, 'authenticated branch creation should return 200');
+    assert.strictEqual((await request('DELETE', `${base}/tags/v1`, undefined, auth)).status, 200);
+    assert.strictEqual((await request('DELETE', `${base}/branches/integration`, undefined, auth)).status, 200);
+    console.log('✅ authenticated mutation flow');
+  }
 
   console.log('\n🎉 All tests passed!');
   server.kill();

@@ -7,194 +7,223 @@ const { ensureRepoDir, getRepoPath } = require('./storage');
 
 const app = express();
 app.use(express.json());
-
 const PORT = process.env.PORT || 3000;
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
-});
+let oidcClient;
+let oidcReady = false;
+let oidcError;
 
-// Helper to get git instance
-const getGit = (repoPath) => simpleGit.simpleGit(repoPath);
-
-// Create a new repo
-app.post('/repos/:owner/:repo', async (req, res) => {
-  const { owner, repo } = req.params;
+async function initializeOidc() {
+  if (!process.env.OIDC_ISSUER || !process.env.OIDC_CLIENT_ID || !process.env.OIDC_CLIENT_SECRET) {
+    return;
+  }
   try {
-    const repoPath = ensureRepoDir(owner, repo);
+    const { Issuer } = require('openid-client');
+    const issuer = await Issuer.discover(process.env.OIDC_ISSUER);
+    oidcClient = new issuer.Client({
+      client_id: process.env.OIDC_CLIENT_ID,
+      client_secret: process.env.OIDC_CLIENT_SECRET,
+    });
+    oidcReady = true;
+  } catch (error) {
+    oidcError = error;
+  }
+}
+initializeOidc();
+
+async function requireAuthentication(req, res, next) {
+  const header = req.headers.authorization || '';
+  if (!header.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  if (!oidcReady) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    const token = header.slice(7).trim();
+    const claims = await oidcClient.introspect(token);
+    if (!claims.active) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    req.user = claims;
+    return next();
+  } catch (error) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+}
+
+const pathParameters = [
+  { name: 'owner', in: 'path', required: true, schema: { type: 'string' } },
+  { name: 'repo', in: 'path', required: true, schema: { type: 'string' } },
+];
+const jsonBody = (properties, required = []) => ({
+  required: required.length > 0,
+  content: { 'application/json': { schema: { type: 'object', properties, required } } },
+});
+const operation = (summary, responses, body, parameters = pathParameters) => ({
+  summary,
+  parameters,
+  ...(body ? { requestBody: body } : {}),
+  responses,
+});
+const unauthorized = { description: 'Unauthorized' };
+const notFound = { description: 'Repository not found' };
+const apiSpec = {
+  openapi: '3.0.3',
+  info: { title: 'Git Store API', version: '1.0.0' },
+  servers: [{ url: `http://localhost:${PORT}` }],
+  paths: {
+    '/health': { get: operation('Health check', { 200: { description: 'Healthy' } }, null, []) },
+    '/api': { get: operation('Get this OpenAPI document', { 200: { description: 'OpenAPI document' } }, null, []) },
+    '/repos/{owner}/{repo}': {
+      post: operation('Create or initialize a repository', { 201: { description: 'Created' }, 500: { description: 'Git error' } }),
+    },
+    '/repos/{owner}/{repo}/log': {
+      get: operation('Fetch the repository log', { 200: { description: 'Commit array' }, 404: notFound }),
+    },
+    '/repos/{owner}/{repo}/stage': {
+      post: operation('Stage files', { 200: { description: 'Staged' }, 401: unauthorized, 404: notFound }, jsonBody({ files: { type: 'array', items: { type: 'string' } } }, ['files'])),
+    },
+    '/repos/{owner}/{repo}/unstage': {
+      post: operation('Unstage files', { 200: { description: 'Unstaged' }, 401: unauthorized, 404: notFound }, jsonBody({ files: { type: 'array', items: { type: 'string' } } }, ['files'])),
+    },
+    '/repos/{owner}/{repo}/commit': {
+      post: operation('Commit staged changes', { 200: { description: 'Committed or no changes' }, 401: unauthorized, 404: notFound }, jsonBody({ message: { type: 'string' } })),
+    },
+    '/repos/{owner}/{repo}/tags': {
+      post: operation('Add a tag', { 200: { description: 'Tag added' }, 401: unauthorized, 404: notFound }, jsonBody({ name: { type: 'string' } }, ['name'])),
+    },
+    '/repos/{owner}/{repo}/tags/{name}': {
+      delete: operation('Remove a tag', { 200: { description: 'Tag removed' }, 401: unauthorized, 404: notFound }, null, [...pathParameters, { name: 'name', in: 'path', required: true, schema: { type: 'string' } }]),
+    },
+    '/repos/{owner}/{repo}/branches': {
+      post: operation('Create a branch', { 200: { description: 'Branch created' }, 400: { description: 'Missing branch name' }, 401: unauthorized, 404: notFound }, jsonBody({ name: { type: 'string' }, startPoint: { type: 'string' } }, ['name'])),
+    },
+    '/repos/{owner}/{repo}/branches/{name}': {
+      delete: operation('Remove a branch', { 200: { description: 'Branch removed' }, 401: unauthorized, 404: notFound }, null, [...pathParameters, { name: 'name', in: 'path', required: true, schema: { type: 'string' } }]),
+    },
+  },
+};
+
+const getGit = (repoPath) => simpleGit.simpleGit(repoPath);
+const repoExists = (repoPath) => fs.existsSync(repoPath) && fs.existsSync(path.join(repoPath, '.git'));
+
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
+app.get('/api', (req, res) => res.json(apiSpec));
+
+app.post('/repos/:owner/:repo', async (req, res) => {
+  try {
+    const repoPath = ensureRepoDir(req.params.owner, req.params.repo);
     const git = getGit(repoPath);
-    
-    // Initialize git repo if it doesn't exist
     if (!fs.existsSync(path.join(repoPath, '.git'))) {
       await git.init();
     }
-    
-    res.status(201).json({ message: `Repository ${owner}/${repo} is ready`, path: repoPath });
+    return res.status(201).json({ message: `Repository ${req.params.owner}/${req.params.repo} is ready`, path: repoPath });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: error.message });
   }
 });
 
-// Fetch git log as a stream
 app.get('/repos/:owner/:repo/log', async (req, res) => {
-  const { owner, repo } = req.params;
-  const repoPath = getRepoPath(owner, repo);
-
-  if (!fs.existsSync(repoPath) || !fs.existsSync(path.join(repoPath, '.git'))) {
+  const repoPath = getRepoPath(req.params.owner, req.params.repo);
+  if (!repoExists(repoPath)) {
     return res.status(404).json({ error: 'Repository not found' });
   }
-
   try {
-    const git = getGit(repoPath);
-    try {
-      const log = await git.log();
-      res.setHeader('Content-Type', 'application/json');
-      res.write(JSON.stringify(log.all));
-      res.end();
-    } catch (e) {
-      // If git not available or other issue, return empty array
-      res.status(200).json([]);
+    const log = await getGit(repoPath).log();
+    return res.json(log.all);
+  } catch (error) {
+    if (error.message.includes('does not have any commits yet')) {
+      return res.json([]);
     }
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: error.message });
   }
 });
 
-// Stage files
-app.post('/repos/:owner/:repo/stage', async (req, res) => {
-  const { owner, repo } = req.params;
-  const { files } = req.body; // Array of file paths relative to repo root
-
-  const repoPath = getRepoPath(owner, repo);
-  if (!fs.existsSync(repoPath)) return res.status(404).json({ error: 'Repo not found' });
-
+app.post('/repos/:owner/:repo/stage', requireAuthentication, async (req, res) => {
+  const repoPath = getRepoPath(req.params.owner, req.params.repo);
+  if (!repoExists(repoPath)) return res.status(404).json({ error: 'Repo not found' });
   try {
-    const git = getGit(repoPath);
-    await git.add(files);
-    res.json({ message: 'Files staged successfully' });
+    await getGit(repoPath).add(req.body.files);
+    return res.json({ message: 'Files staged successfully' });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: error.message });
   }
 });
 
-// Unstage files
-app.post('/repos/:owner/:repo/unstage', async (req, res) => {
-  const { owner, repo } = req.params;
-  const { files } = req.body;
-
-  const repoPath = getRepoPath(owner, repo);
-  if (!fs.existsSync(repoPath)) return res.status(404).json({ error: 'Repo not found' });
-
+app.post('/repos/:owner/:repo/unstage', requireAuthentication, async (req, res) => {
+  const repoPath = getRepoPath(req.params.owner, req.params.repo);
+  if (!repoExists(repoPath)) return res.status(404).json({ error: 'Repo not found' });
   try {
-    const git = getGit(repoPath);
-    await git.reset(['--mixed', ...files]);
-    res.json({ message: 'Files unstaged successfully' });
+    await getGit(repoPath).reset(['--mixed', ...(req.body.files || [])]);
+    return res.json({ message: 'Files unstaged successfully' });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: error.message });
   }
 });
 
-// Autocommit staged changes
-app.post('/repos/:owner/:repo/commit', async (req, res) => {
-  const { owner, repo } = req.params;
-  const { message = 'autocommit' } = req.body;
-
-  const repoPath = getRepoPath(owner, repo);
-  if (!fs.existsSync(repoPath)) return res.status(404).json({ error: 'Repo not found' });
-
+app.post('/repos/:owner/:repo/commit', requireAuthentication, async (req, res) => {
+  const repoPath = getRepoPath(req.params.owner, req.params.repo);
+  if (!repoExists(repoPath)) return res.status(404).json({ error: 'Repo not found' });
   try {
-    const git = getGit(repoPath);
-    const status = await git.status();
-    
-    if (status.staged.length === 0) {
-      return res.json({ message: 'No changes to commit' });
-    }
-
-    await git.commit(message);
-    res.json({ message: 'Changes committed successfully', commit: message });
+    const status = await getGit(repoPath).status();
+    if (status.staged.length === 0) return res.json({ message: 'No changes to commit' });
+    const message = req.body.message || 'autocommit';
+    await getGit(repoPath).commit(message);
+    return res.json({ message: 'Changes committed successfully', commit: message });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: error.message });
   }
 });
 
-// Add Tag
-app.post('/repos/:owner/:repo/tags', async (req, res) => {
-  const { owner, repo } = req.params;
-  const { name } = req.body;
-
-  const repoPath = getRepoPath(owner, repo);
-  if (!fs.existsSync(repoPath)) return res.status(404).json({ error: 'Repo not found' });
-
+app.post('/repos/:owner/:repo/tags', requireAuthentication, async (req, res) => {
+  const repoPath = getRepoPath(req.params.owner, req.params.repo);
+  if (!repoExists(repoPath)) return res.status(404).json({ error: 'Repo not found' });
   try {
-    const git = getGit(repoPath);
-    await git.addTag(name);
-    res.json({ message: `Tag ${name} added` });
+    await getGit(repoPath).addTag(req.body.name);
+    return res.json({ message: `Tag ${req.body.name} added` });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: error.message });
   }
 });
 
-// Remove Tag
-app.delete('/repos/:owner/:repo/tags/:name', async (req, res) => {
-  const { owner, repo, name } = req.params;
-
-  const repoPath = getRepoPath(owner, repo);
-  if (!fs.existsSync(repoPath)) return res.status(404).json({ error: 'Repo not found' });
-
+app.delete('/repos/:owner/:repo/tags/:name', requireAuthentication, async (req, res) => {
+  const repoPath = getRepoPath(req.params.owner, req.params.repo);
+  if (!repoExists(repoPath)) return res.status(404).json({ error: 'Repo not found' });
   try {
-    const git = getGit(repoPath);
-    await git.tag(['-d', name]);
-    res.json({ message: `Tag ${name} removed` });
+    await getGit(repoPath).tag(['-d', req.params.name]);
+    return res.json({ message: `Tag ${req.params.name} removed` });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: error.message });
   }
 });
 
-// Add Branch
-app.post('/repos/:owner/:repo/branches', async (req, res) => {
-  const { owner, repo } = req.params;
-  const { name, startPoint } = req.body;
-
-  if (!name) {
-    return res.status(400).json({ error: 'Branch name is required' });
-  }
-
-  const repoPath = getRepoPath(owner, repo);
-  if (!fs.existsSync(repoPath)) return res.status(404).json({ error: 'Repo not found' });
-
+app.post('/repos/:owner/:repo/branches', requireAuthentication, async (req, res) => {
+  if (!req.body.name) return res.status(400).json({ error: 'Branch name is required' });
+  const repoPath = getRepoPath(req.params.owner, req.params.repo);
+  if (!repoExists(repoPath)) return res.status(404).json({ error: 'Repo not found' });
   try {
-    const git = getGit(repoPath);
-    const options = { name };
-    if (startPoint) {
-      options.startPoint = startPoint;
-    }
-    await git.branch(options);
-    res.json({ message: `Branch ${name} created` });
+    const args = req.body.startPoint ? ['--create', req.body.name, req.body.startPoint] : ['--create', req.body.name];
+    await getGit(repoPath).branch(args);
+    return res.json({ message: `Branch ${req.body.name} created` });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: error.message });
   }
 });
 
-// Remove Branch
-app.delete('/repos/:owner/:repo/branches/:name', async (req, res) => {
-  const { owner, repo, name } = req.params;
-
-  const repoPath = getRepoPath(owner, repo);
-  if (!fs.existsSync(repoPath)) return res.status(404).json({ error: 'Repo not found' });
-
+app.delete('/repos/:owner/:repo/branches/:name', requireAuthentication, async (req, res) => {
+  const repoPath = getRepoPath(req.params.owner, req.params.repo);
+  if (!repoExists(repoPath)) return res.status(404).json({ error: 'Repo not found' });
   try {
-    const git = getGit(repoPath);
-    await git.branch(['-D', name]);
-    res.json({ message: `Branch ${name} removed` });
+    await getGit(repoPath).branch(['-D', req.params.name]);
+    return res.json({ message: `Branch ${req.params.name} removed` });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: error.message });
   }
 });
 
 if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`Server listening on port ${PORT}`);
-  });
+  app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
 }
+
 module.exports = app;

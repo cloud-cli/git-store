@@ -1,5 +1,6 @@
 /** @type {import("eslint").Linter.Config} */
 export default {
+  ignores: ["node_modules/**", "data/**"],
   files: ["**/*.js", "**/*.html", "**/*.css"],
   languageOptions: {
     ecmaVersion: "latest",
@@ -10,6 +11,7 @@ export default {
       node: true,
       process: true,
       setTimeout: true,
+      console: true,
     },
   },
   rules: {

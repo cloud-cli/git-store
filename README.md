@@ -1,35 +1,82 @@
 # Git Store
 
-A minimal HTTP API for managing multiple Git repositories on disk.
+Git Store is a single-container HTTP service for managing Git repositories grouped
+as `owner/repo` beneath `DATA_PATH`.
 
-## Features
-- Create a repository: `POST /repos/:owner/:repo`
-- View commit log: `GET /repos/:owner/:repo/log`
-- Stage files: `POST /repos/:owner/:repo/stage`
-- Unstage files: `POST /repos/:owner/:repo/unstage`
-- Commit staged changes: `POST /repos/:owner/:repo/commit`
-- Tag management: `POST /repos/:owner/:repo/tags` and `DELETE /repos/:owner/:repo/tags/:name`
-- Branch management: `POST /repos/:owner/:repo/branches` and `DELETE /repos/:owner/:repo/branches/:name`
+## Current status
 
-## Setup
+- Docker deployment uses `ghcr.io/cloud-cli/image-node:latest` and `/home/app`.
+- `GET /api` serves an OpenAPI 3.0.3 document containing every route.
+- Repository creation and log reads are public.
+- All stage, unstage, commit, tag, and branch mutations require an OIDC bearer token
+  when OIDC variables are configured.
+- `npm test` runs a Node-built-in integration suite covering every route's public and
+  unauthorized behavior.
+
+## Run
+
 ```bash
-# Build Docker image
 docker build -t git-store .
-
-# Run container
-docker run -d -p 3000:3000 -v \\$PWD/data:/data git-store
+docker run --rm -p 3000:3000 \
+  -e DATA_PATH=/home/app/data \
+  -e OIDC_ISSUER="$OIDC_ISSUER" \
+  -e OIDC_CLIENT_ID="$OIDC_CLIENT_ID" \
+  -e OIDC_CLIENT_SECRET="$OIDC_CLIENT_SECRET" \
+  git-store
 ```
 
-The data is stored under the environment variable `DATA_PATH`, defaulting to `/data`.
+For local development:
 
-## Development
 ```bash
-# Install dependencies
 npm install
-
-# Run tests
-npm test
+DATA_PATH="$PWD/data" npm start
 ```
 
-## API Reference
-[Documentation can be expanded here]
+## Endpoints
+
+| Method | Path | Auth |
+|---|---|---|
+| GET | `/health` | public |
+| GET | `/api` | public |
+| POST | `/repos/:owner/:repo` | public |
+| GET | `/repos/:owner/:repo/log` | public |
+| POST | `/repos/:owner/:repo/stage` | OIDC |
+| POST | `/repos/:owner/:repo/unstage` | OIDC |
+| POST | `/repos/:owner/:repo/commit` | OIDC |
+| POST | `/repos/:owner/:repo/tags` | OIDC |
+| DELETE | `/repos/:owner/:repo/tags/:name` | OIDC |
+| POST | `/repos/:owner/:repo/branches` | OIDC |
+| DELETE | `/repos/:owner/:repo/branches/:name` | OIDC |
+
+The canonical request and response documentation is in [`docs/api-reference.md`](docs/api-reference.md).
+
+## Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DATA_PATH` | `/data` in the image | Repository storage root |
+| `PORT` | `3000` | HTTP listen port |
+| `OIDC_ISSUER` | unset | OIDC discovery issuer |
+| `OIDC_CLIENT_ID` | unset | OIDC client identifier |
+| `OIDC_CLIENT_SECRET` | unset | OIDC introspection credential |
+
+When OIDC variables are absent, mutation requests fail closed with `401`.
+
+## Tests and quality checks
+
+```bash
+npm test
+npx eslint . --fix
+npx eslint .
+```
+
+The integration suite uses Node's `http`, `assert`, and `child_process` modules only.
+It creates a temporary repository, checks the complete OpenAPI path inventory, verifies
+public behavior, and verifies that each mutation rejects unauthenticated requests.
+
+## Diátaxis documentation
+
+- [Tutorial](docs/tutorial.md): complete repository workflow.
+- [How to get started](docs/getting-started.md): local, Docker, and environment setup.
+- [API reference](docs/api-reference.md): endpoint contracts and examples.
+- [TODO](TODO.md): remaining implementation and verification work.
