@@ -121,7 +121,7 @@
         };
         const restoreRoute = () => {
           const route = urlState();
-          const repo = repositories.value.find((item) => item.owner === route.owner && item.repo === route.repo) || null;
+          const repo = repositories.value.find((item) => item.owner === route.owner && item.repo === route.repo) || (route.owner && route.repo ? { owner: route.owner, repo: route.repo } : null);
           selectedRepo.value = repo;
           if (repo) loadRepo(repo, route.path).catch(() => { entries.value = []; });
         };
