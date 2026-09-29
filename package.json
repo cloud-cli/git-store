@@ -1,5 +1,5 @@
 {
-  "name": "git-store",
+  "name": "@cloud-cli/git-store",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -20,6 +20,10 @@
     "url": "https://github.com/cloud-cli/git-store/issues"
   },
   "homepage": "https://github.com/cloud-cli/git-store#readme",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "dependencies": {
     "dotenv": "^18.0.4",
     "express": "^5.2.1",
