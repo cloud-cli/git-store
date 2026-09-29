@@ -99,3 +99,7 @@ loads repositories and branches from the API, and opens a file preview when a fi
 is selected. The selected repository, ref, and file path are kept in the query string;
 for example, `/?owner=myorg&repo=myproject&ref=main&path=README.md` can be refreshed
 without losing the preview.
+
+The UI is built with Li³ `@li3/web`: the app state uses `ref` and `computed`, events use
+`on-*` bindings, and the page is split into HTML custom-element files loaded with
+`<link rel="component">`. The component files live in `public/components/`.

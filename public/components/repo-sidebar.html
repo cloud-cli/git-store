@@ -1,0 +1,14 @@
+<template component="repo-sidebar">
+  <aside bind-class="{ '-translate-x-full': !open, 'translate-x-0': open }" class="absolute z-30 flex h-full w-64 flex-col border-r border-gray-200 bg-gray-50 transition-transform dark:border-gray-800 dark:bg-gray-900 md:relative md:translate-x-0" class-open="open">
+    <div class="flex items-center justify-between border-b border-gray-200 p-3 dark:border-gray-800"><h2 class="text-xs font-semibold uppercase tracking-wider text-gray-500">Repositories</h2><button class="text-gray-400" on-click="$$emit('new-repository')"><i class="fa-solid fa-plus"></i></button></div>
+    <div class="flex-1 space-y-1 overflow-y-auto p-2">
+      <template if="!repositories.length"><p class="px-3 py-2 text-xs text-gray-500">No repositories found.</p></template>
+      <template for="item of repositories"><a href="#" on-click.prevent="$$emit('select', item)" class="flex items-center gap-2 rounded-md px-3 py-2 text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800" class-selected="selected && selected.owner === item.owner && selected.repo === item.repo"><i class="fa-solid fa-book-bookmark text-xs text-gray-400"></i>{{ item.owner }}/{{ item.repo }}</a></template>
+    </div>
+  </aside>
+  <template if="open"><div class="fixed inset-0 z-20 bg-black/50 md:hidden" on-click="$$emit('close')"></div></template>
+  <script setup>
+    import { defineProp } from '@li3/web';
+    export default function () { const repositories = defineProp('repositories', { default: () => [] }); const selected = defineProp('selected', { default: null }); const open = defineProp('open', { default: false }); return { repositories, selected, open }; }
+  </script>
+</template>

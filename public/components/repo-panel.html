@@ -1,0 +1,10 @@
+<template component="repo-panel">
+  <template if="repo"><aside class="hidden w-64 flex-shrink-0 overflow-y-auto border-l border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-900 md:block">
+    <div class="mb-6"><h3 class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500"><i class="fa-solid fa-code-branch"></i> Branches</h3><ul class="space-y-1"><template for="branch of branches"><li><a href="#" class="block rounded px-2 py-1.5 text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800" on-click.prevent="selectBranch(branch)">{{ branch }}</a></li></template></ul></div>
+    <div><h3 class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500"><i class="fa-solid fa-tags"></i> Tags</h3><ul class="space-y-1"><template for="tag of tags"><li><a href="#" class="flex items-center gap-2 rounded px-2 py-1.5 text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800" on-click.prevent="selectTag(tag)"><i class="fa-solid fa-tag text-xs opacity-50"></i>{{ tag }}</a></li></template></ul></div>
+  </aside></template>
+  <script setup>
+    import { defineProp } from '@li3/web';
+    export default function () { const repo = defineProp('repo', { default: null }); const branches = defineProp('branches', { default: () => [] }); const tags = defineProp('tags', { default: () => [] }); const selectBranch = (branch) => { window.history.pushState({}, '', `${window.location.pathname}?owner=${repo.value.owner}&repo=${repo.value.repo}&ref=${branch}`); window.dispatchEvent(new PopStateEvent('popstate')); }; const selectTag = (tag) => { window.history.pushState({}, '', `${window.location.pathname}?owner=${repo.value.owner}&repo=${repo.value.repo}&ref=${tag}`); window.dispatchEvent(new PopStateEvent('popstate')); }; return { repo, branches, tags, selectBranch, selectTag }; }
+  </script>
+</template>

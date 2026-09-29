@@ -1,349 +1,98 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en" class="dark">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Git Repo Manager</title>
-    
-    <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
-    <style>
-        /* Custom scrollbar for a cleaner, compact look */
-        ::-webkit-scrollbar {
-            width: 6px;
-            height: 6px;
-        }
-        ::-webkit-scrollbar-track {
-            background: transparent;
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #d1d5db;
-            border-radius: 4px;
-        }
-        .dark ::-webkit-scrollbar-thumb {
-            background: #4b5563;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Git API</title>
+  <script type="importmap">{"imports":{"@li3/":"https://cdn.li3.dev/@li3/"}}</script>
+  <script type="module">import '@li3/web';</script>
+  <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="component" href="/components/repo-sidebar.html">
+  <link rel="component" href="/components/repo-viewer.html">
+  <link rel="component" href="/components/repo-panel.html">
+  <link rel="component" href="/components/file-preview.html">
+  <style>
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+  </style>
 </head>
-<body class="h-screen w-full flex flex-col bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100 overflow-hidden text-sm transition-colors duration-200">
-
-    <!-- Topbar -->
-    <header class="h-14 flex-shrink-0 flex items-center justify-between px-4 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 z-20 relative">
-        <div class="flex items-center gap-3">
-            <!-- Mobile Hamburger Menu Button -->
-            <button id="mobileMenuBtn" class="md:hidden p-2 -ml-2 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white rounded-md focus:outline-none">
-                <i class="fa-solid fa-bars text-lg"></i>
-            </button>
-            
-            <!-- App Title -->
-            <div class="flex items-center gap-2 font-semibold text-lg tracking-tight">
-                <i class="fa-brands fa-git-alt text-orange-500 text-xl"></i>
-                <span>Git API</span>
-            </div>
-        </div>
-
-        <div class="flex items-center gap-4">
-            <!-- Theme Toggle -->
-            <button id="themeToggle" class="text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white p-1 rounded-full transition-colors">
-                <i class="fa-solid fa-moon dark:hidden"></i>
-                <i class="fa-solid fa-sun hidden dark:inline"></i>
-            </button>
-
-            <!-- User Card -->
-            <div class="flex items-center gap-3 pl-4 border-l border-gray-200 dark:border-gray-700">
-                <div class="hidden sm:block text-right leading-tight">
-                    <div class="font-medium text-gray-900 dark:text-gray-100">Jane Doe</div>
-                    <div class="text-xs text-gray-500 dark:text-gray-400">jane@example.com</div>
-                </div>
-                <img src="https://placehold.co/100x100/6366f1/ffffff?text=JD" alt="User Avatar" class="w-8 h-8 rounded-full border border-gray-200 dark:border-gray-700 shadow-sm object-cover">
-            </div>
-        </div>
+<body class="h-screen w-full overflow-hidden bg-white text-sm text-gray-900 transition-colors dark:bg-gray-950 dark:text-gray-100">
+  <template app>
+    <div class="h-screen bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100" class-dark="darkMode">
+    <header class="relative z-20 flex h-14 flex-shrink-0 items-center justify-between border-b border-gray-200 bg-gray-50 px-4 dark:border-gray-800 dark:bg-gray-900">
+      <div class="flex items-center gap-3">
+        <button class="p-2 text-gray-500 md:hidden" on-click="toggleMenu()" aria-label="Open menu"><i class="fa-solid fa-bars text-lg"></i></button>
+        <div class="flex items-center gap-2 text-lg font-semibold tracking-tight"><i class="fa-brands fa-git-alt text-xl text-orange-500"></i><span>Git API</span></div>
+      </div>
+      <div class="flex items-center gap-4">
+        <button class="rounded-full p-1 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white" on-click="toggleTheme()" aria-label="Toggle theme"><i class="fa-solid fa-moon"></i></button>
+        <div class="flex items-center gap-3 border-l border-gray-200 pl-4 dark:border-gray-700"><div class="hidden text-right leading-tight sm:block"><div class="font-medium">Jane Doe</div><div class="text-xs text-gray-500 dark:text-gray-400">jane@example.com</div></div><img src="https://placehold.co/100x100/6366f1/ffffff?text=JD" alt="User Avatar" class="h-8 w-8 rounded-full border border-gray-200 object-cover dark:border-gray-700"></div>
+      </div>
     </header>
-
-    <!-- Main Workspace Container -->
-    <div class="flex flex-1 overflow-hidden relative">
-        
-        <!-- Mobile Sidebar Overlay -->
-        <div id="sidebarOverlay" class="fixed inset-0 bg-black/50 z-20 hidden md:hidden transition-opacity"></div>
-
-        <!-- Left Sidebar (Repositories) -->
-        <aside id="leftSidebar" class="absolute md:relative z-30 w-64 h-full bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col transform -translate-x-full md:translate-x-0 transition-transform duration-300 ease-in-out">
-            <div class="p-3 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
-                <h2 class="font-semibold text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">Repositories</h2>
-                <button class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"><i class="fa-solid fa-plus"></i></button>
-            </div>
-            
-            <!-- Repo List -->
-            <div class="flex-1 overflow-y-auto p-2 space-y-1">
-                <a href="#" class="flex items-center gap-2 px-3 py-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 rounded-md font-medium">
-                    <i class="fa-solid fa-book-bookmark text-xs"></i>
-                    configuration-api
-                </a>
-                <a href="#" class="flex items-center gap-2 px-3 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md">
-                    <i class="fa-solid fa-book-bookmark text-gray-400 text-xs"></i>
-                    user-service-docs
-                </a>
-                <a href="#" class="flex items-center gap-2 px-3 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md">
-                    <i class="fa-solid fa-book-bookmark text-gray-400 text-xs"></i>
-                    frontend-assets-repo
-                </a>
-                <a href="#" class="flex items-center gap-2 px-3 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md">
-                    <i class="fa-solid fa-book-bookmark text-gray-400 text-xs"></i>
-                    deployment-scripts
-                </a>
-            </div>
-        </aside>
-
-        <!-- Content Area (Center Main + Right Sidebar) -->
-        <main class="flex-1 flex flex-col md:flex-row overflow-hidden bg-white dark:bg-gray-950 w-full">
-            
-            <!-- Center Area (Repository Details & Files) -->
-            <div class="flex-1 flex flex-col overflow-y-auto p-4 md:p-6 w-full">
-                
-                <!-- Repo Header & Commit Info -->
-                <div class="mb-6">
-                    <div class="flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 mt-4">
-                        <div class="flex items-center justify-center w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-800 text-gray-600 dark:text-gray-300">
-                            <i class="fa-solid fa-code-commit"></i>
-                        </div>
-                        <div class="flex-1">
-                            <div class="font-medium text-gray-900 dark:text-gray-100">Update database connection strings</div>
-                            <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Committed 2 hours ago by Jane Doe</div>
-                        </div>
-                        
-                        <!-- Commit Hash & Copy Button -->
-                        <div class="flex items-center gap-2">
-                            <code id="commitHash" class="px-2 py-1 bg-gray-200 dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded text-xs font-mono">a1b2c3d</code>
-                            <div class="relative">
-                                <button onclick="copyCommitHash()" class="p-1.5 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white rounded hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none transition-colors" title="Copy commit hash">
-                                    <i class="fa-regular fa-copy"></i>
-                                </button>
-                                <!-- Tooltip -->
-                                <span id="copyTooltip" class="absolute -top-8 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs py-1 px-2 rounded opacity-0 transition-opacity duration-200 pointer-events-none whitespace-nowrap">
-                                    Copied!
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- File Tree -->
-                <div class="flex-1 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
-                    <div class="bg-gray-100 dark:bg-gray-900 px-4 py-2 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center text-xs font-medium text-gray-600 dark:text-gray-300">
-                        <span>Name</span>
-                        <span>Last commit message</span>
-                    </div>
-                    
-                    <ul class="divide-y divide-gray-100 dark:divide-gray-800 text-sm">
-                        <!-- Folder -->
-                        <li data-file-path="config" class="flex items-center justify-between px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-900/50 cursor-pointer group">
-                            <div class="flex items-center gap-3 text-gray-700 dark:text-gray-200">
-                                <i class="fa-solid fa-folder text-blue-400 dark:text-blue-500 text-base w-4 text-center"></i>
-                                <span class="group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">config</span>
-                            </div>
-                            <span class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[50%]">Add production env vars</span>
-                        </li>
-                        <!-- Folder -->
-                        <li data-file-path="scripts" class="flex items-center justify-between px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-900/50 cursor-pointer group">
-                            <div class="flex items-center gap-3 text-gray-700 dark:text-gray-200">
-                                <i class="fa-solid fa-folder text-blue-400 dark:text-blue-500 text-base w-4 text-center"></i>
-                                <span class="group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">scripts</span>
-                            </div>
-                            <span class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[50%]">Update startup script</span>
-                        </li>
-                        <!-- File -->
-                        <li data-file-path=".gitignore" class="flex items-center justify-between px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-900/50 cursor-pointer group">
-                            <div class="flex items-center gap-3 text-gray-700 dark:text-gray-200">
-                                <i class="fa-regular fa-file-lines text-gray-400 dark:text-gray-500 text-base w-4 text-center"></i>
-                                <span class="group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">.gitignore</span>
-                            </div>
-                            <span class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[50%]">Initial commit</span>
-                        </li>
-                        <!-- File -->
-                        <li data-file-path="README.md" class="flex items-center justify-between px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-900/50 cursor-pointer group">
-                            <div class="flex items-center gap-3 text-gray-700 dark:text-gray-200">
-                                <i class="fa-regular fa-file-lines text-gray-400 dark:text-gray-500 text-base w-4 text-center"></i>
-                                <span class="group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">README.md</span>
-                            </div>
-                            <span class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[50%]">Fix typo in docs</span>
-                        </li>
-                        <!-- File -->
-                        <li data-file-path="settings.json" class="flex items-center justify-between px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-900/50 cursor-pointer group bg-yellow-50/50 dark:bg-yellow-900/10">
-                            <div class="flex items-center gap-3 text-gray-700 dark:text-gray-200 font-medium">
-                                <i class="fa-regular fa-file-code text-gray-400 dark:text-gray-500 text-base w-4 text-center"></i>
-                                <span class="group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">settings.json</span>
-                            </div>
-                            <span class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[50%] font-medium">Update database connection strings</span>
-                        </li>
-                    </ul>
-                </div>
-            </div>
-
-            <!-- Right Sidebar (Branches & Tags) wraps to bottom on mobile -->
-            <aside class="w-full md:w-64 border-t md:border-t-0 md:border-l border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 p-4 overflow-y-auto flex-shrink-0">
-                
-                <!-- Branches Section -->
-                <div class="mb-6">
-                    <h3 class="font-semibold text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-3 flex items-center gap-2">
-                        <i class="fa-solid fa-code-branch"></i> Branches
-                    </h3>
-                    <ul class="space-y-1">
-                        <li>
-                            <a href="#" class="block px-2 py-1.5 bg-gray-200 dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm font-medium flex items-center justify-between">
-                                <span>main</span>
-                                <i class="fa-solid fa-check text-green-500 text-xs"></i>
-                            </a>
-                        </li>
-                        <li>
-                            <a href="#" class="block px-2 py-1.5 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-sm transition-colors">
-                                staging
-                            </a>
-                        </li>
-                        <li>
-                            <a href="#" class="block px-2 py-1.5 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-sm transition-colors">
-                                feature/new-auth
-                            </a>
-                        </li>
-                        <li>
-                            <a href="#" class="block px-2 py-1.5 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-sm transition-colors">
-                                hotfix/db-leak
-                            </a>
-                        </li>
-                    </ul>
-                </div>
-
-                <!-- Tags Section -->
-                <div>
-                    <h3 class="font-semibold text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-3 flex items-center gap-2">
-                        <i class="fa-solid fa-tags"></i> Tags
-                    </h3>
-                    <ul class="space-y-1">
-                        <li>
-                            <a href="#" class="block px-2 py-1.5 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-sm transition-colors flex items-center gap-2">
-                                <i class="fa-solid fa-tag text-xs opacity-50"></i> v1.2.4
-                            </a>
-                        </li>
-                        <li>
-                            <a href="#" class="block px-2 py-1.5 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-sm transition-colors flex items-center gap-2">
-                                <i class="fa-solid fa-tag text-xs opacity-50"></i> v1.2.3
-                            </a>
-                        </li>
-                        <li>
-                            <a href="#" class="block px-2 py-1.5 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-sm transition-colors flex items-center gap-2">
-                                <i class="fa-solid fa-tag text-xs opacity-50"></i> v1.2.0
-                            </a>
-                        </li>
-                    </ul>
-                </div>
-            </aside>
-            
-        </main>
+    <div class="relative flex flex-1 overflow-hidden">
+      <repo-sidebar bind-repositories="repositories" bind-selected="selectedRepo" bind-open="menuOpen" on-select="selectRepo($event)"></repo-sidebar>
+      <main class="flex min-w-0 flex-1 flex-col overflow-hidden bg-white dark:bg-gray-950 md:flex-row">
+        <repo-viewer class="min-w-0 flex-1" bind-repo="selectedRepo" bind-entries="entries" bind-commits="commits" on-select-file="selectFile($event)"></repo-viewer>
+        <repo-panel bind-repo="selectedRepo" bind-branches="branches" bind-tags="tags"></repo-panel>
+      </main>
+      <file-preview bind-path="previewPath" bind-content="previewContent" bind-visible="previewVisible" on-close="closePreview()"></file-preview>
     </div>
-
-    <div id="filePreview" class="fixed inset-0 z-50 hidden bg-black/60 p-4 md:p-10">
-        <div class="mx-auto flex h-full max-w-5xl flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900">
-            <div class="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-800">
-                <div><div id="previewPath" class="font-medium"></div><div id="previewMeta" class="text-xs text-gray-500"></div></div>
-                <button id="closePreview" class="rounded px-2 py-1 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800" aria-label="Close preview"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-            <pre id="previewContent" class="flex-1 overflow-auto p-4 text-xs leading-5"></pre>
-        </div>
     </div>
+    <script setup>
+      import { ref, computed, onInit, watch } from '@li3/web';
 
-    <script>
-        // DOM Elements
-        const mobileMenuBtn = document.getElementById('mobileMenuBtn');
-        const leftSidebar = document.getElementById('leftSidebar');
-        const sidebarOverlay = document.getElementById('sidebarOverlay');
-        const themeToggle = document.getElementById('themeToggle');
-        const htmlElement = document.documentElement;
-        const preview = document.getElementById('filePreview');
-        const previewPath = document.getElementById('previewPath');
-        const previewMeta = document.getElementById('previewMeta');
-        const previewContent = document.getElementById('previewContent');
+      export default function () {
+        const repositories = ref([]);
+        const selectedRepo = ref(null);
+        const entries = ref([]);
+        const commits = ref([]);
+        const branches = ref([]);
+        const tags = ref([]);
+        const previewPath = ref('');
+        const previewContent = ref('');
+        const menuOpen = ref(false);
+        const darkMode = ref(true);
+        const previewVisible = computed(() => Boolean(previewPath.value));
 
-        function toggleSidebar() {
-            const closed = leftSidebar.classList.contains('-translate-x-full');
-            leftSidebar.classList.toggle('-translate-x-full', !closed);
-            sidebarOverlay.classList.toggle('hidden', !closed);
-        }
-        mobileMenuBtn.addEventListener('click', toggleSidebar);
-        sidebarOverlay.addEventListener('click', toggleSidebar);
-        themeToggle.addEventListener('click', () => htmlElement.classList.toggle('dark'));
-        document.getElementById('closePreview').addEventListener('click', closePreview);
-
-        function params() {
-            return new URLSearchParams(window.location.search);
-        }
-        function route(owner, repo, file) {
-            const query = new URLSearchParams({ owner, repo });
-            if (file) query.set('path', file);
-            history.pushState({}, '', `${window.location.pathname}?${query}`);
-        }
-        function closePreview() {
-            preview.classList.add('hidden');
-            const query = params();
-            query.delete('path');
-            history.pushState({}, '', `${window.location.pathname}?${query}`);
-        }
-        async function openFile(owner, repo, file) {
-            route(owner, repo, file);
-            preview.classList.remove('hidden');
-            previewPath.textContent = file;
-            previewMeta.textContent = 'Loading…';
-            previewContent.textContent = '';
-            try {
-                const response = await fetch(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/file?path=${encodeURIComponent(file)}`);
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                previewContent.textContent = await response.text();
-                previewMeta.textContent = 'Read-only preview';
-            } catch (error) {
-                previewMeta.textContent = 'Unable to load file';
-                previewContent.textContent = error.message;
-            }
-        }
-        function wireFileRows(owner, repo) {
-            document.querySelectorAll('[data-file-path]').forEach((row) => {
-                row.addEventListener('click', () => openFile(owner, repo, row.dataset.filePath));
-                row.setAttribute('role', 'button');
-                row.setAttribute('tabindex', '0');
-                row.addEventListener('keydown', (event) => { if (event.key === 'Enter') openFile(owner, repo, row.dataset.filePath); });
-            });
-        }
-        async function loadRepository() {
-            const query = params();
-            let owner = query.get('owner');
-            let repo = query.get('repo');
-            try {
-                const repositories = await fetch('/repos').then((response) => response.ok ? response.json() : []);
-                const repoList = document.querySelector('#leftSidebar .flex-1');
-                if (repositories.length) {
-                    if (!owner || !repo) ({ owner, repo } = repositories[0]);
-                    repoList.innerHTML = repositories.map((item) => `<a href="?owner=${encodeURIComponent(item.owner)}&repo=${encodeURIComponent(item.repo)}" class="flex items-center gap-2 px-3 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md"><i class="fa-solid fa-book-bookmark text-gray-400 text-xs"></i>${item.owner}/${item.repo}</a>`).join('');
-                }
-            } catch (error) {
-                // Keep the designed fallback repository list when the API is unavailable.
-            }
-            owner = owner || 'jane-doe';
-            repo = repo || 'configuration-api';
-            const tree = document.querySelector('ul.divide-y');
-            try {
-                const response = await fetch(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/tree`);
-                if (response.ok) {
-                    const entries = await response.json();
-                    tree.innerHTML = entries.map((entry) => `<li data-file-path="${entry.path}" class="flex items-center justify-between px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-900/50 cursor-pointer group"><div class="flex items-center gap-3 text-gray-700 dark:text-gray-200"><i class="fa-solid ${entry.type === 'directory' ? 'fa-folder text-blue-400' : 'fa-regular fa-file-lines text-gray-400'} text-base w-4 text-center"></i><span class="group-hover:text-blue-600 dark:group-hover:text-blue-400">${entry.name}</span></div><span class="text-xs text-gray-500">${entry.type}</span></li>`).join('');
-                }
-                const branchResponse = await fetch(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches`);
-                if (branchResponse.ok) document.querySelector('main > aside ul').innerHTML = (await branchResponse.json()).map((branch) => `<li><a href="?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&ref=${encodeURIComponent(branch)}" class="block px-2 py-1.5 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-sm">${branch}</a></li>`).join('');
-                wireFileRows(owner, repo);
-                if (query.get('path')) await openFile(owner, repo, query.get('path'));
-            } catch (error) {
-                wireFileRows(owner, repo);
-            }
-        }
-        loadRepository();
-        window.addEventListener('popstate', loadRepository);
+        const urlState = () => {
+          const url = new URL(window.location.href);
+          return { owner: url.searchParams.get('owner'), repo: url.searchParams.get('repo'), path: url.searchParams.get('path') };
+        };
+        const setUrl = (repo, file) => {
+          const url = new URL(window.location.href);
+          if (repo) { url.searchParams.set('owner', repo.owner); url.searchParams.set('repo', repo.repo); } else { url.searchParams.delete('owner'); url.searchParams.delete('repo'); }
+          if (file) url.searchParams.set('path', file); else url.searchParams.delete('path');
+          window.history.pushState({}, '', url);
+        };
+        const api = async (url) => { const response = await fetch(url); if (!response.ok) throw new Error(`Request failed: ${response.status}`); return response.json(); };
+        const loadRepo = async (repo, file = '') => {
+          if (!repo) { entries.value = []; commits.value = []; branches.value = []; tags.value = []; previewPath.value = ''; return; }
+          const base = `/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}`;
+          const [tree, log, branchList, tagList] = await Promise.all([api(`${base}/tree`), api(`${base}/log`), api(`${base}/branches`), api(`${base}/tags`)]);
+          entries.value = tree;
+          commits.value = log;
+          branches.value = branchList;
+          tags.value = tagList;
+          if (file) { previewPath.value = file; previewContent.value = await fetch(`${base}/file?path=${encodeURIComponent(file)}`).then((response) => response.text()); } else { previewPath.value = ''; previewContent.value = ''; }
+        };
+        const selectRepo = (event) => { const repo = event.detail; selectedRepo.value = repo; menuOpen.value = false; setUrl(repo); loadRepo(repo).catch(() => { entries.value = []; }); };
+        const selectFile = (event) => { const file = event.detail; if (!selectedRepo.value) return; setUrl(selectedRepo.value, file.path); loadRepo(selectedRepo.value, file.path).catch(() => { previewContent.value = 'Unable to load file'; }); };
+        const closePreview = () => { previewPath.value = ''; setUrl(selectedRepo.value); };
+        const toggleTheme = () => { darkMode.value = !darkMode.value; };
+        const toggleMenu = () => { menuOpen.value = !menuOpen.value; };
+        const restoreRoute = () => {
+          const route = urlState();
+          const repo = repositories.value.find((item) => item.owner === route.owner && item.repo === route.repo) || null;
+          selectedRepo.value = repo;
+          if (repo) loadRepo(repo, route.path).catch(() => { entries.value = []; });
+        };
+        onInit(async () => { repositories.value = await api('/repos').catch(() => []); restoreRoute(); window.addEventListener('popstate', restoreRoute); });
+        watch(selectedRepo, (repo) => { if (!repo) loadRepo(null); });
+        return { darkMode, repositories, selectedRepo, entries, commits, branches, tags, previewPath, previewContent, previewVisible, menuOpen, selectRepo, selectFile, closePreview, toggleTheme, toggleMenu };
+      }
     </script>
+  </template>
 </body>
 </html>

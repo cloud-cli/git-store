@@ -1,0 +1,7 @@
+<template component="file-preview">
+  <template if="visible"><div class="fixed inset-0 z-50 bg-black/60 p-4 md:p-10"><div class="mx-auto flex h-full max-w-5xl flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900"><div class="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-800"><div class="font-medium">{{ path }}</div><button class="rounded px-2 py-1 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800" on-click="$$emit('close')" aria-label="Close preview"><i class="fa-solid fa-xmark"></i></button></div><pre class="flex-1 overflow-auto p-4 text-xs leading-5">{{ content }}</pre></div></div></template>
+  <script setup>
+    import { defineProp } from '@li3/web';
+    export default function () { const path = defineProp('path', { default: '' }); const content = defineProp('content', { default: '' }); const visible = defineProp('visible', { default: false }); return { path, content, visible }; }
+  </script>
+</template>

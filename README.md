@@ -57,6 +57,8 @@ The canonical request and response documentation is in [`docs/api-reference.md`]
 
 The browser UI is served at `/`. Repository and file-preview state is stored in the
 URL query string (`owner`, `repo`, `ref`, and `path`), so navigation survives refreshes.
+The UI is a Li³ single-page application using refs, computed values, event bindings,
+and HTML-loaded custom elements. Its framework reference is https://li3.static.apphor.de/docs.html.
 
 ## Configuration
 
