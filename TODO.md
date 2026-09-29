@@ -13,7 +13,7 @@
 ## Next iteration
 
 - [ ] Run authenticated end-to-end mutation tests with provisioned OIDC credentials.
-- [ ] Run the same integration suite inside the published Docker image.
+- [x] Build and smoke-test the Docker image locally, including `/health` and `/api`.
 - [ ] Add validation for request bodies and repository-name/path safety.
 - [ ] Verify CI workflow status and build logs after the next pushed commit.
 - [ ] Decide whether repository creation should also require authentication.

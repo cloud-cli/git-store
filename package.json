@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "test": "node test/run.js"
+    "test": "node test/run.js",
+    "build": "echo true"
   },
   "repository": {
     "type": "git",
