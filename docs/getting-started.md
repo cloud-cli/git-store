@@ -1,8 +1,9 @@
 # Getting Started
 
 ## Purpose
+
 Git Store is a minimal HTTP API for managing multiple Git repositories on disk.
-Repositories are grouped under an *owner/name* path and stored on the host under the
+Repositories are grouped under an _owner/name_ path and stored on the host under the
 `DATA_PATH` environment variable (default `/data`).
 
 ## Quick start (Docker)
@@ -33,13 +34,13 @@ npm start
 
 ## Environment variables
 
-| Variable | Required? | Default | Description |
-|---|---|---|---|
-| `DATA_PATH` | no | `/data` | Absolute path where all `owner/repo` directories are created. |
-| `PORT` | no | `3000` | TCP port on which the HTTP server listens. |
-| `OIDC_ISSUER` | yes (when OIDC is enabled) | `https://auth.api.apphor.de` | OpenID Connect issuer URL (used for discovery). |
-| `OIDC_CLIENT_ID` | yes (when OIDC is enabled) | – | Client identifier registered with the OIDC provider. |
-| `OIDC_CLIENT_SECRET` | yes (when OIDC is enabled) | – | secret for the client. |
+| Variable             | Required?                  | Default                      | Description                                                   |
+| -------------------- | -------------------------- | ---------------------------- | ------------------------------------------------------------- |
+| `DATA_PATH`          | no                         | `/data`                      | Absolute path where all `owner/repo` directories are created. |
+| `PORT`               | no                         | `3000`                       | TCP port on which the HTTP server listens.                    |
+| `OIDC_ISSUER`        | yes (when OIDC is enabled) | `https://auth.api.apphor.de` | OpenID Connect issuer URL (used for discovery).               |
+| `OIDC_CLIENT_ID`     | yes (when OIDC is enabled) | –                            | Client identifier registered with the OIDC provider.          |
+| `OIDC_CLIENT_SECRET` | yes (when OIDC is enabled) | –                            | secret for the client.                                        |
 
 ## Basic API calls (using `curl`)
 
@@ -84,7 +85,7 @@ curl -X POST http://localhost:3000/repos/myorg/myproject/branches \
 ## OIDC authentication
 
 The server uses `express-openid-connect` with configuration read from environment
-variables (`OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`).  All
+variables (`OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`). All
 endpoints that mutate data (`/stage`, `/unstage`, `/commit`, `/tags`,
 `/tags/{name}`, `/branches`, `/branches/{name}`) check for a valid OIDC
 session and return **401** when no token is present or the token is invalid.
@@ -100,6 +101,8 @@ is selected. The selected repository, ref, and file path are kept in the query s
 for example, `/?owner=myorg&repo=myproject&ref=main&path=README.md` can be refreshed
 without losing the preview.
 
-The UI is built with Li³ `@li3/web`: the app state uses `ref` and `computed`, events use
-`on-*` bindings, and the page is split into HTML custom-element files loaded with
-`<link rel="component">`. The component files live in `public/components/`.
+The UI is built with Li³ `@li3/web`: four independent `<template app>` islands own the
+topbar/session, repository navigation, selected-repository viewer, and branches/tags
+panel. Each island declares initial JSON using `<script state>` and hydrates its own
+state in setup with refs, computed values, lifecycle hooks, and `on-*` bindings. The
+URL query string shares navigation state across islands and preserves it on refresh.

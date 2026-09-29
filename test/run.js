@@ -114,6 +114,13 @@ function request(method, apiPath, data, extraHeaders = {}) {
   }
   console.log('✅ GET /api => spec with', expectedPaths.length, 'paths');
 
+  const resUi = await request('GET', '/');
+  assert.strictEqual(resUi.status, 200, 'SPA entry point should return 200');
+  assert.strictEqual((resUi.body.match(/<template app>/g) || []).length, 4, 'UI should contain four independent Li³ app islands');
+  assert.strictEqual((resUi.body.match(/<script state type="application\/json">/g) || []).length, 4, 'each island should declare its own JSON state');
+  assert.ok(resUi.body.includes('git-api-theme'), 'islands should synchronize theme through an event');
+  console.log('✅ GET / => four independent Li³ app islands');
+
   // 4. Protected endpoints should return 401 without auth
   const protectedEndpoints = [
     { method: 'POST', path: `${base}/stage`, body: { files: [] } },
