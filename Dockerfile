@@ -1,6 +1,6 @@
 FROM ghcr.io/cloud-cli/image-node:latest
 
-WORKDIR /app
+WORKDIR /home/app
 
 # Copy package files
 COPY package*.json ./
