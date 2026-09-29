@@ -13,6 +13,7 @@ export default {
       setTimeout: true,
       console: true,
       __dirname: true,
+      Buffer: true,
     },
   },
   rules: {

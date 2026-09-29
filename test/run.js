@@ -77,18 +77,19 @@ function request(method, apiPath, data, extraHeaders = {}) {
   const spec = JSON.parse(resApi.body);
   assert.ok(spec.openapi, 'spec must have openapi version');
   assert.ok(spec.paths, 'spec must have paths');
-  const expectedPaths = ['/health', '/api', '/repos', '/repos/{owner}/{repo}', '/repos/{owner}/{repo}/log',
+  const expectedPaths = ['/health', '/api', '/config', '/repos', '/repos/{owner}/{repo}', '/repos/{owner}/{repo}/log',
     '/repos/{owner}/{repo}/stage', '/repos/{owner}/{repo}/unstage',
     '/repos/{owner}/{repo}/commit', '/repos/{owner}/{repo}/tags',
     '/repos/{owner}/{repo}/tags/{name}', '/repos/{owner}/{repo}/branches',
     '/repos/{owner}/{repo}/branches/{name}', '/repos/{owner}/{repo}/tree',
-    '/repos/{owner}/{repo}/file', '/repos/{owner}/{repo}/history'];
+    '/repos/{owner}/{repo}/file', '/repos/{owner}/{repo}/history', '/repos/{owner}/{repo}/files'];
   for (const p of expectedPaths) {
     assert.ok(spec.paths[p], `spec must contain path ${p}`);
   }
   const expectedOperations = {
     '/health': ['get'],
     '/api': ['get'],
+    '/config': ['get'],
     '/repos': ['get'],
     '/repos/{owner}/{repo}': ['post'],
     '/repos/{owner}/{repo}/log': ['get'],
@@ -102,6 +103,7 @@ function request(method, apiPath, data, extraHeaders = {}) {
     '/repos/{owner}/{repo}/tree': ['get'],
     '/repos/{owner}/{repo}/file': ['get'],
     '/repos/{owner}/{repo}/history': ['get'],
+    '/repos/{owner}/{repo}/files': ['post'],
   };
   for (const [pathName, methods] of Object.entries(expectedOperations)) {
     for (const method of methods) {
@@ -119,6 +121,7 @@ function request(method, apiPath, data, extraHeaders = {}) {
     { method: 'DELETE', path: `${base}/tags/v1` },
     { method: 'POST', path: `${base}/branches`, body: { name: 'main' } },
     { method: 'DELETE', path: `${base}/branches/main` },
+    { method: 'POST', path: `${base}/files`, body: { path: 'upload.txt', content: 'aGk=' } },
   ];
 
   for (const ep of protectedEndpoints) {

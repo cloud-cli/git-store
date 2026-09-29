@@ -1,10 +1,44 @@
 <template component="repo-viewer">
-  <section class="flex min-w-0 flex-1 flex-col overflow-y-auto p-4 md:p-6">
-    <template if="!repo"><div class="flex flex-1 items-center justify-center text-center"><div><i class="fa-solid fa-code-branch mb-3 text-3xl text-gray-300"></i><h1 class="text-lg font-semibold">Select a repository</h1><p class="mt-1 text-gray-500">Choose a repository from the sidebar to browse its files.</p></div></div></template>
-    <template if="repo"><div class="mb-6"><div class="flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-900/50"><div class="flex h-8 w-8 items-center justify-center rounded-full bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-300"><i class="fa-solid fa-code-commit"></i></div><div class="flex-1"><div class="font-medium">{{ commits[0] ? commits[0].message : 'No commits yet' }}</div><div class="mt-0.5 text-xs text-gray-500">{{ commits[0] ? commits[0].author_name : 'Empty repository' }}</div></div><code class="rounded bg-gray-200 px-2 py-1 font-mono text-xs dark:bg-gray-800">{{ commits[0] ? commits[0].hash : '—' }}</code></div></div><div class="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800"><div class="flex justify-between border-b border-gray-200 bg-gray-100 px-4 py-2 text-xs font-medium text-gray-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300"><span>Name</span><span>Last commit</span></div><ul class="divide-y divide-gray-100 dark:divide-gray-800"><template for="entry of entries"><li class="flex cursor-pointer items-center justify-between px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-900/50" on-click="$$emit('select-file', entry)"><div class="flex items-center gap-3"><i class="fa-solid w-4 text-center text-base" bind-class="{ 'fa-folder': entry.type === 'directory', 'fa-file-lines': entry.type === 'file', 'text-blue-400': entry.type === 'directory', 'text-gray-400': entry.type === 'file' }"></i><span>{{ entry.name }}</span></div><span class="max-w-[50%] truncate text-xs text-gray-500">{{ entry.type }}</span></li></template></ul></div></template>
+  <section class="flex h-full min-w-0 flex-1 flex-col overflow-y-auto p-4 md:p-6">
+    <template if="!repo">
+      <div class="flex min-h-full flex-1 items-center justify-center text-center">
+        <div class="mx-auto max-w-md rounded-2xl border border-amber-200 bg-amber-50/70 p-8 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/20">
+          <img src="https://placehold.co/240x160/fef3c7/92400e?text=Git+API" alt="Welcome illustration" class="mx-auto mb-6 rounded-xl">
+          <h1 class="text-2xl font-semibold">Welcome to your Git API</h1>
+          <p class="mt-2 text-gray-600 dark:text-gray-300">Create your first repository to start browsing files, commits, branches, and tags.</p>
+          <form class="mt-6 flex gap-2" on-submit.prevent="createFirstRepository()"><input class="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900" placeholder="my-first-repository" on-input="setRepositoryName($event.target.value)"><button class="rounded-md bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-500">Create</button></form>
+        </div>
+      </div>
+    </template>
+    <template if="repo">
+      <div class="mb-6"><div class="flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-900/50"><div class="flex h-8 w-8 items-center justify-center rounded-full bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-300"><i class="fa-solid fa-code-commit"></i></div><div class="flex-1"><div class="font-medium">{{ commits[0] ? commits[0].message : 'No commits yet' }}</div><div class="mt-0.5 text-xs text-gray-500">{{ commits[0] ? commits[0].author_name : 'Empty repository' }}</div></div><code class="rounded bg-gray-200 px-2 py-1 font-mono text-xs dark:bg-gray-800">{{ commits[0] ? commits[0].hash : '—' }}</code></div></div>
+      <template if="hasUncommitted"><form class="mb-3 flex gap-2" on-submit.prevent="commitChanges()"><input class="min-w-0 flex-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 dark:border-amber-800 dark:bg-amber-950/30" placeholder="Commit message" on-input="setCommitMessage($event.target.value)"><button class="rounded-md bg-indigo-600 px-3 py-2 font-medium text-white hover:bg-indigo-500">Commit</button></form></template>
+      <div class="flex min-h-64 flex-1 flex-col overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800" on-dragover.prevent="setDragging(true)" on-dragleave="setDragging(false)" on-drop.prevent="upload($event)"><div class="flex justify-between border-b border-gray-200 bg-gray-100 px-4 py-2 text-xs font-medium text-gray-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300"><span>Name</span><span>Last commit</span></div><ul class="divide-y divide-gray-100 dark:divide-gray-800"><template for="entry of entries"><li class="flex cursor-pointer items-center justify-between px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-900/50" on-click="selectEntry(entry)"><div class="flex items-center gap-3"><i class="fa-solid w-4 text-center text-base" bind-class="{ 'fa-folder': entry.type === 'directory', 'fa-file-lines': entry.type === 'file', 'text-blue-400': entry.type === 'directory', 'text-gray-400': entry.type === 'file' }"></i><span>{{ entry.name }}<sup class="ml-1 text-amber-500">{{ entry.uncommitted ? '*' : '' }}</sup></span></div><span class="max-w-[50%] truncate text-xs text-gray-500">{{ entry.uncommitted ? 'Uncommitted' : entry.type }}</span></li></template></ul><div class="mt-auto border-t border-dashed border-gray-300 p-4 text-center text-xs text-gray-500 dark:border-gray-700" class-dragging="dragging">Drop files here to upload them unstaged</div></div>
+    </template>
   </section>
   <script setup>
-    import { defineProp } from '@li3/web';
-    export default function () { const repo = defineProp('repo', { default: null }); const entries = defineProp('entries', { default: () => [] }); const commits = defineProp('commits', { default: () => [] }); return { repo, entries, commits }; }
+    import { defineProp, defineEvent, computed, ref } from '@li3/web';
+    export default function () {
+      const repo = defineProp('repo', { default: null });
+      const repositories = defineProp('repositories', { default: () => [] });
+      const entries = defineProp('entries', { default: () => [] });
+      const commits = defineProp('commits', { default: () => [] });
+      const emitSelect = defineEvent('select-file');
+      const emitUpload = defineEvent('upload');
+      const emitCommit = defineEvent('commit');
+      const emitCreate = defineEvent('create-repository');
+      const repositoryName = ref('');
+      const commitMessage = ref('');
+      const dragging = ref(false);
+      const hasUncommitted = computed(() => entries.value.some((entry) => entry.uncommitted));
+      const setRepositoryName = (value) => { repositoryName.value = value; };
+      const setCommitMessage = (value) => { commitMessage.value = value; };
+      const setDragging = (value) => { dragging.value = value; };
+      const createFirstRepository = () => { if (repositoryName.value.trim()) emitCreate(repositoryName.value.trim()); };
+      const selectEntry = (entry) => { if (entry.type === 'file') emitSelect(entry); };
+      const upload = (event) => { dragging.value = false; emitUpload(event.dataTransfer.files); };
+      const commitChanges = () => { emitCommit(commitMessage.value || 'autocommit'); commitMessage.value = ''; };
+      return { repo, repositories, entries, commits, repositoryName, commitMessage, dragging, hasUncommitted, setRepositoryName, setCommitMessage, setDragging, createFirstRepository, selectEntry, upload, commitChanges };
+    }
   </script>
 </template>

@@ -13,6 +13,7 @@
   <link rel="component" href="/components/repo-panel.html">
   <link rel="component" href="/components/file-preview.html">
   <style>
+    @custom-variant dark (&:where(.dark, .dark *));
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
@@ -28,13 +29,13 @@
       </div>
       <div class="flex items-center gap-4">
         <button class="rounded-full p-1 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white" on-click="toggleTheme()" aria-label="Toggle theme"><i class="fa-solid fa-moon"></i></button>
-        <div class="flex items-center gap-3 border-l border-gray-200 pl-4 dark:border-gray-700"><div class="hidden text-right leading-tight sm:block"><div class="font-medium">Jane Doe</div><div class="text-xs text-gray-500 dark:text-gray-400">jane@example.com</div></div><img src="https://placehold.co/100x100/6366f1/ffffff?text=JD" alt="User Avatar" class="h-8 w-8 rounded-full border border-gray-200 object-cover dark:border-gray-700"></div>
+        <a attr-href="userUrl" class="flex items-center gap-3 border-l border-gray-200 pl-4 dark:border-gray-700" title="Open profile"><div class="hidden text-right leading-tight sm:block"><div class="font-medium">Jane Doe</div><div class="text-xs text-gray-500 dark:text-gray-400">jane@example.com</div></div><img src="https://placehold.co/100x100/6366f1/ffffff?text=JD" alt="User Avatar" class="h-8 w-8 rounded-full border border-gray-200 object-cover dark:border-gray-700"></a>
       </div>
     </header>
     <div class="relative flex flex-1 overflow-hidden">
-      <repo-sidebar bind-repositories="repositories" bind-selected="selectedRepo" bind-open="menuOpen" on-select="selectRepo($event)"></repo-sidebar>
+      <repo-sidebar bind-repositories="repositories" bind-selected="selectedRepo" bind-open="menuOpen" on-select="selectRepo($event)" on-create-repository="createRepository($event)"></repo-sidebar>
       <main class="flex min-w-0 flex-1 flex-col overflow-hidden bg-white dark:bg-gray-950 md:flex-row">
-        <repo-viewer class="min-w-0 flex-1" bind-repo="selectedRepo" bind-entries="entries" bind-commits="commits" on-select-file="selectFile($event)"></repo-viewer>
+        <repo-viewer class="min-h-0 min-w-0 flex-1" bind-repo="selectedRepo" bind-repositories="repositories" bind-entries="entries" bind-commits="commits" on-select-file="selectFile($event)" on-upload="uploadFiles($event)" on-commit="commitChanges($event)" on-create-repository="createRepository($event)"></repo-viewer>
         <repo-panel bind-repo="selectedRepo" bind-branches="branches" bind-tags="tags"></repo-panel>
       </main>
       <file-preview bind-path="previewPath" bind-content="previewContent" bind-visible="previewVisible" on-close="closePreview()"></file-preview>
@@ -54,6 +55,7 @@
         const previewContent = ref('');
         const menuOpen = ref(false);
         const darkMode = ref(true);
+        const userUrl = ref('#');
         const previewVisible = computed(() => Boolean(previewPath.value));
 
         const urlState = () => {
@@ -82,15 +84,42 @@
         const closePreview = () => { previewPath.value = ''; setUrl(selectedRepo.value); };
         const toggleTheme = () => { darkMode.value = !darkMode.value; };
         const toggleMenu = () => { menuOpen.value = !menuOpen.value; };
+        const refreshRepositories = async () => { repositories.value = await api('/repos').catch(() => []); };
+        const createRepository = async (event) => {
+          const name = (event.detail || '').trim();
+          if (!name || !/^[a-zA-Z0-9._-]+$/.test(name)) return;
+          const owner = 'jane-doe';
+          const response = await fetch(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`, { method: 'POST' });
+          if (!response.ok) return;
+          await refreshRepositories();
+          selectRepo({ detail: { owner, repo: name } });
+        };
+        const tokenHeaders = () => { const token = window.localStorage.getItem('access_token'); return token ? { Authorization: `Bearer ${token}` } : {}; };
+        const commitChanges = async (event) => {
+          if (!selectedRepo.value) return;
+          const base = `/repos/${encodeURIComponent(selectedRepo.value.owner)}/${encodeURIComponent(selectedRepo.value.repo)}`;
+          await fetch(`${base}/commit`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...tokenHeaders() }, body: JSON.stringify({ message: event.detail || 'autocommit' }) });
+          await loadRepo(selectedRepo.value);
+        };
+        const uploadFiles = async (event) => {
+          if (!selectedRepo.value) return;
+          const files = Array.from(event.detail || []);
+          const base = `/repos/${encodeURIComponent(selectedRepo.value.owner)}/${encodeURIComponent(selectedRepo.value.repo)}`;
+          for (const file of files) {
+            const content = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.onerror = reject; reader.readAsDataURL(file); });
+            await fetch(`${base}/files`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...tokenHeaders() }, body: JSON.stringify({ path: file.name, content }) });
+          }
+          await loadRepo(selectedRepo.value);
+        };
         const restoreRoute = () => {
           const route = urlState();
           const repo = repositories.value.find((item) => item.owner === route.owner && item.repo === route.repo) || null;
           selectedRepo.value = repo;
           if (repo) loadRepo(repo, route.path).catch(() => { entries.value = []; });
         };
-        onInit(async () => { repositories.value = await api('/repos').catch(() => []); restoreRoute(); window.addEventListener('popstate', restoreRoute); });
+        onInit(async () => { repositories.value = await api('/repos').catch(() => []); userUrl.value = (await api('/config').catch(() => ({}))).oidcUserUrl || '#'; restoreRoute(); window.addEventListener('popstate', restoreRoute); });
         watch(selectedRepo, (repo) => { if (!repo) loadRepo(null); });
-        return { darkMode, repositories, selectedRepo, entries, commits, branches, tags, previewPath, previewContent, previewVisible, menuOpen, selectRepo, selectFile, closePreview, toggleTheme, toggleMenu };
+        return { darkMode, userUrl, repositories, selectedRepo, entries, commits, branches, tags, previewPath, previewContent, previewVisible, menuOpen, selectRepo, selectFile, closePreview, toggleTheme, toggleMenu, createRepository, uploadFiles, commitChanges };
       }
     </script>
   </template>

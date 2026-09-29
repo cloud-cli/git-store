@@ -118,6 +118,10 @@ apiSpec.paths['/repos/{owner}/{repo}/tags'].get = operation('List tags', { 200: 
 apiSpec.paths['/repos/{owner}/{repo}/history'] = {
   get: operation('List file history', { 200: { description: 'Commit history' }, 400: { description: 'Invalid path' }, 404: notFound }, null, [...pathParameters, { name: 'path', in: 'query', required: true, schema: { type: 'string' } }]),
 };
+apiSpec.paths['/config'] = { get: operation('Get browser configuration', { 200: { description: 'Public configuration' } }, null, []) };
+apiSpec.paths['/repos/{owner}/{repo}/files'] = {
+  post: operation('Upload an unstaged file', { 201: { description: 'File written' }, 400: { description: 'Invalid file' }, 401: unauthorized, 404: notFound }, jsonBody({ path: { type: 'string' }, content: { type: 'string', description: 'Base64-encoded bytes' } }, ['path', 'content'])),
+};
 
 function safeRepoFile(owner, repo, relativePath) {
   const repoPath = path.resolve(getRepoPath(owner, repo));
@@ -128,12 +132,15 @@ function safeRepoFile(owner, repo, relativePath) {
   return target;
 }
 
-function treeEntries(directory, relative = '') {
+async function treeEntries(directory, relative = '') {
+  const status = await getGit(path.resolve(directory)).status();
+  const dirty = new Set([...status.not_added, ...status.modified, ...status.created, ...status.deleted]);
   return fs.readdirSync(directory, { withFileTypes: true })
     .map((entry) => ({
       name: entry.name,
       path: path.join(relative, entry.name),
       type: entry.isDirectory() ? 'directory' : 'file',
+      uncommitted: dirty.has(path.join(relative, entry.name)),
     }))
     .filter((entry) => !entry.path.split(path.sep).includes('.git'));
 }
@@ -143,6 +150,10 @@ const repoExists = (repoPath) => fs.existsSync(repoPath) && fs.existsSync(path.j
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.get('/api', (req, res) => res.json(apiSpec));
+app.get('/config', (req, res) => {
+  const issuer = process.env.OIDC_USSUER || process.env.OIDC_ISSUER;
+  return res.json({ oidcUserUrl: issuer ? `${issuer.replace(/\/$/, '')}/me` : null });
+});
 
 app.get('/repos', (req, res) => {
   const repositories = [];
@@ -186,14 +197,18 @@ app.get('/repos/:owner/:repo/log', async (req, res) => {
   }
 });
 
-app.get('/repos/:owner/:repo/tree', (req, res) => {
+app.get('/repos/:owner/:repo/tree', async (req, res) => {
   const repoPath = getRepoPath(req.params.owner, req.params.repo);
   if (!repoExists(repoPath)) return res.status(404).json({ error: 'Repo not found' });
   const directory = safeRepoFile(req.params.owner, req.params.repo, req.query.path || '');
   if (!directory || !fs.existsSync(directory) || !fs.statSync(directory).isDirectory()) {
     return res.status(404).json({ error: 'Directory not found' });
   }
-  return res.json(treeEntries(directory, req.query.path || ''));
+  try {
+    return res.json(await treeEntries(directory, req.query.path || ''));
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
 });
 
 app.get('/repos/:owner/:repo/file', (req, res) => {
@@ -205,6 +220,20 @@ app.get('/repos/:owner/:repo/file', (req, res) => {
   }
   try {
     return res.type('text/plain').send(fs.readFileSync(filePath, 'utf8'));
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/repos/:owner/:repo/files', requireAuthentication, (req, res) => {
+  const repoPath = getRepoPath(req.params.owner, req.params.repo);
+  const filePath = safeRepoFile(req.params.owner, req.params.repo, req.body.path);
+  if (!filePath || typeof req.body.content !== 'string') return res.status(400).json({ error: 'Invalid file' });
+  if (!repoExists(repoPath)) return res.status(404).json({ error: 'Repo not found' });
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, Buffer.from(req.body.content, 'base64'));
+    return res.status(201).json({ path: req.body.path, staged: false });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }

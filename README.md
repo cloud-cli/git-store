@@ -59,6 +59,9 @@ The browser UI is served at `/`. Repository and file-preview state is stored in 
 URL query string (`owner`, `repo`, `ref`, and `path`), so navigation survives refreshes.
 The UI is a Li³ single-page application using refs, computed values, event bindings,
 and HTML-loaded custom elements. Its framework reference is https://li3.static.apphor.de/docs.html.
+The user card links to `${OIDC_USSUER}/me` (falling back to `OIDC_ISSUER`), the repository
+plus button opens the create dialog, and the first-run page provides the same create flow.
+Files can be dropped into the browser file list; uploads remain unstaged and are marked with `*`.
 
 ## Configuration
 

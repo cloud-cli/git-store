@@ -1,14 +1,15 @@
 <template component="repo-sidebar">
   <aside bind-class="{ '-translate-x-full': !open, 'translate-x-0': open }" class="absolute z-30 flex h-full w-64 flex-col border-r border-gray-200 bg-gray-50 transition-transform dark:border-gray-800 dark:bg-gray-900 md:relative md:translate-x-0" class-open="open">
-    <div class="flex items-center justify-between border-b border-gray-200 p-3 dark:border-gray-800"><h2 class="text-xs font-semibold uppercase tracking-wider text-gray-500">Repositories</h2><button class="text-gray-400" on-click="$$emit('new-repository')"><i class="fa-solid fa-plus"></i></button></div>
+    <div class="flex items-center justify-between border-b border-gray-200 p-3 dark:border-gray-800"><h2 class="text-xs font-semibold uppercase tracking-wider text-gray-500">Repositories</h2><button class="text-gray-400" on-click="openDialog()" aria-label="Create repository"><i class="fa-solid fa-plus"></i></button></div>
     <div class="flex-1 space-y-1 overflow-y-auto p-2">
       <template if="!repositories.length"><p class="px-3 py-2 text-xs text-gray-500">No repositories found.</p></template>
       <template for="item of repositories"><a href="#" on-click.prevent="$$emit('select', item)" class="flex items-center gap-2 rounded-md px-3 py-2 text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800" class-selected="selected && selected.owner === item.owner && selected.repo === item.repo"><i class="fa-solid fa-book-bookmark text-xs text-gray-400"></i>{{ item.owner }}/{{ item.repo }}</a></template>
     </div>
   </aside>
   <template if="open"><div class="fixed inset-0 z-20 bg-black/50 md:hidden" on-click="$$emit('close')"></div></template>
+  <template if="dialogOpen"><div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"><form class="w-full max-w-md rounded-lg border border-gray-200 bg-white p-5 shadow-2xl dark:border-gray-700 dark:bg-gray-900" on-submit.prevent="submitCreate()"><h2 class="text-lg font-semibold">Create repository</h2><p class="mt-1 text-sm text-gray-500">Choose a name for your first repository.</p><input ref="nameInput" class="mt-4 w-full rounded-md border border-gray-300 bg-transparent px-3 py-2 outline-none focus:border-indigo-500 dark:border-gray-700" placeholder="repository-name" on-input="setRepoName($event.target.value)" /><div class="mt-4 flex justify-end gap-2"><button type="button" class="rounded-md px-3 py-2 text-gray-500" on-click="closeDialog()">Cancel</button><button class="rounded-md bg-indigo-600 px-3 py-2 font-medium text-white hover:bg-indigo-500">Create</button></div></form></div></template>
   <script setup>
-    import { defineProp } from '@li3/web';
-    export default function () { const repositories = defineProp('repositories', { default: () => [] }); const selected = defineProp('selected', { default: null }); const open = defineProp('open', { default: false }); return { repositories, selected, open }; }
+    import { defineProp, defineEvent, ref } from '@li3/web';
+    export default function () { const repositories = defineProp('repositories', { default: () => [] }); const selected = defineProp('selected', { default: null }); const open = defineProp('open', { default: false }); const dialogOpen = ref(false); const repoName = ref(''); const emitCreate = defineEvent('create-repository'); const openDialog = () => { dialogOpen.value = true; }; const closeDialog = () => { dialogOpen.value = false; repoName.value = ''; }; const setRepoName = (name) => { repoName.value = name; }; const submitCreate = () => { if (repoName.value.trim()) { emitCreate(repoName.value); closeDialog(); } }; return { repositories, selected, open, dialogOpen, openDialog, closeDialog, setRepoName, submitCreate }; }
   </script>
 </template>

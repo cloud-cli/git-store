@@ -98,6 +98,22 @@ Return local branch names as a JSON array.
 
 Return tag names as a JSON array.
 
+### GET /config
+
+Return public browser configuration, including the profile URL derived from
+`OIDC_USSUER` (or `OIDC_ISSUER`).
+
+### POST /repos/{owner}/{repo}/files
+
+Upload one file without staging it. This endpoint requires OIDC authentication.
+
+```json
+{ "path": "notes.txt", "content": "base64-encoded-bytes" }
+```
+
+The response contains `staged: false`. Uncommitted files appear with an asterisk in the UI;
+the commit form calls `POST /repos/{owner}/{repo}/commit` after a message is entered.
+
 ### POST /repos/{owner}/{repo}/stage
 
 Stage one or more files.
