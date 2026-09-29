@@ -70,7 +70,7 @@ const notFound = { description: 'Repository not found' };
 const apiSpec = {
   openapi: '3.0.3',
   info: { title: 'Git Store API', version: '1.0.0' },
-  servers: [{ url: `http://localhost:${PORT}` }],
+  servers: [{ url: '/', description: 'This git store server' }],
   paths: {
     '/health': { get: operation('Health check', { 200: { description: 'Healthy' } }, null, []) },
     '/api': { get: operation('Get this OpenAPI document', { 200: { description: 'OpenAPI document' } }, null, []) },

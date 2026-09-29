@@ -63,7 +63,7 @@
         const profile = ref(null);
         const userName = computed(() => profile.value?.name || profile.value?.preferred_username || 'Guest');
         const userEmail = computed(() => profile.value?.email || 'Not signed in');
-        const userAvatar = computed(() => profile.value?.picture || 'https://placehold.co/100x100/6366f1/ffffff?text=G');
+        const userAvatar = computed(() => profile.value?.picture || profile.value?.avatar || profile.value?.avatar_url || profile.value?.image || profile.value?.photo || `https://placehold.co/100x100/6366f1/ffffff?text=${encodeURIComponent(userName.value.slice(0, 1).toUpperCase())}`);
         const previewVisible = computed(() => Boolean(previewPath.value));
 
         const urlState = () => {

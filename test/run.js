@@ -77,6 +77,7 @@ function request(method, apiPath, data, extraHeaders = {}) {
   const spec = JSON.parse(resApi.body);
   assert.ok(spec.openapi, 'spec must have openapi version');
   assert.ok(spec.paths, 'spec must have paths');
+  assert.deepStrictEqual(spec.servers, [{ url: '/', description: 'This git store server' }]);
   const expectedPaths = ['/health', '/api', '/config', '/session', '/repos', '/repos/{owner}/{repo}', '/repos/{owner}/{repo}/log',
     '/repos/{owner}/{repo}/stage', '/repos/{owner}/{repo}/unstage',
     '/repos/{owner}/{repo}/commit', '/repos/{owner}/{repo}/tags',
