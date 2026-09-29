@@ -119,6 +119,7 @@ apiSpec.paths['/repos/{owner}/{repo}/history'] = {
   get: operation('List file history', { 200: { description: 'Commit history' }, 400: { description: 'Invalid path' }, 404: notFound }, null, [...pathParameters, { name: 'path', in: 'query', required: true, schema: { type: 'string' } }]),
 };
 apiSpec.paths['/config'] = { get: operation('Get browser configuration', { 200: { description: 'Public configuration' } }, null, []) };
+apiSpec.paths['/session'] = { get: operation('Get the current OIDC session profile', { 200: { description: 'Session profile or unauthenticated state' } }, null, []) };
 apiSpec.paths['/repos/{owner}/{repo}/files'] = {
   post: operation('Upload an unstaged file', { 201: { description: 'File written' }, 400: { description: 'Invalid file' }, 401: unauthorized, 404: notFound }, jsonBody({ path: { type: 'string' }, content: { type: 'string', description: 'Base64-encoded bytes' } }, ['path', 'content'])),
 };
@@ -153,6 +154,18 @@ app.get('/api', (req, res) => res.json(apiSpec));
 app.get('/config', (req, res) => {
   const issuer = process.env.OIDC_USSUER || process.env.OIDC_ISSUER;
   return res.json({ oidcUserUrl: issuer ? `${issuer.replace(/\/$/, '')}/me` : null });
+});
+app.get('/session', async (req, res) => {
+  const issuer = process.env.OIDC_ISSUER || process.env.OIDC_USSUER;
+  const cookie = req.headers.cookie;
+  if (!issuer || !cookie) return res.json({ authenticated: false, profile: null });
+  try {
+    const response = await fetch(new URL('/profile', issuer), { headers: { cookie } });
+    if (!response.ok) return res.json({ authenticated: false, profile: null });
+    return res.json({ authenticated: true, profile: await response.json() });
+  } catch (error) {
+    return res.json({ authenticated: false, profile: null });
+  }
 });
 
 app.get('/repos', (req, res) => {

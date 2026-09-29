@@ -103,6 +103,11 @@ Return tag names as a JSON array.
 Return public browser configuration, including the profile URL derived from
 `OIDC_USSUER` (or `OIDC_ISSUER`).
 
+### GET /session
+
+Return `{ "authenticated": true, "profile": { ... } }` when the current OIDC session
+cookie is valid, otherwise `{ "authenticated": false, "profile": null }`.
+
 ### POST /repos/{owner}/{repo}/files
 
 Upload one file without staging it. This endpoint requires OIDC authentication.

@@ -14,6 +14,8 @@ export default {
       console: true,
       __dirname: true,
       Buffer: true,
+      fetch: true,
+      URL: true,
     },
   },
   rules: {

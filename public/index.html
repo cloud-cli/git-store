@@ -14,6 +14,10 @@
   <link rel="component" href="/components/file-preview.html">
   <style>
     @custom-variant dark (&:where(.dark, .dark *));
+    repo-sidebar { display: block; height: 100%; width: 16rem; flex-shrink: 0; }
+    repo-viewer { display: block; height: 100%; min-height: 0; min-width: 0; flex: 1 1 auto; }
+    repo-panel { display: block; height: 100%; width: 16rem; flex-shrink: 0; }
+    file-preview { display: contents; }
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
@@ -21,7 +25,7 @@
 </head>
 <body class="h-screen w-full overflow-hidden bg-white text-sm text-gray-900 transition-colors dark:bg-gray-950 dark:text-gray-100">
   <template app>
-    <div class="h-screen bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100" class-dark="darkMode">
+    <div class="flex h-screen flex-col bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100" class-dark="darkMode">
     <header class="relative z-20 flex h-14 flex-shrink-0 items-center justify-between border-b border-gray-200 bg-gray-50 px-4 dark:border-gray-800 dark:bg-gray-900">
       <div class="flex items-center gap-3">
         <button class="p-2 text-gray-500 md:hidden" on-click="toggleMenu()" aria-label="Open menu"><i class="fa-solid fa-bars text-lg"></i></button>
@@ -29,7 +33,7 @@
       </div>
       <div class="flex items-center gap-4">
         <button class="rounded-full p-1 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white" on-click="toggleTheme()" aria-label="Toggle theme"><i class="fa-solid fa-moon"></i></button>
-        <a attr-href="userUrl" class="flex items-center gap-3 border-l border-gray-200 pl-4 dark:border-gray-700" title="Open profile"><div class="hidden text-right leading-tight sm:block"><div class="font-medium">Jane Doe</div><div class="text-xs text-gray-500 dark:text-gray-400">jane@example.com</div></div><img src="https://placehold.co/100x100/6366f1/ffffff?text=JD" alt="User Avatar" class="h-8 w-8 rounded-full border border-gray-200 object-cover dark:border-gray-700"></a>
+        <a attr-href="userUrl" class="flex items-center gap-3 border-l border-gray-200 pl-4 dark:border-gray-700" title="Open profile"><div class="hidden text-right leading-tight sm:block"><div class="font-medium">{{ userName }}</div><div class="text-xs text-gray-500 dark:text-gray-400">{{ userEmail }}</div></div><img attr-src="userAvatar" attr-alt="userName" class="h-8 w-8 rounded-full border border-gray-200 object-cover dark:border-gray-700"></a>
       </div>
     </header>
     <div class="relative flex flex-1 overflow-hidden">
@@ -56,6 +60,10 @@
         const menuOpen = ref(false);
         const darkMode = ref(true);
         const userUrl = ref('#');
+        const profile = ref(null);
+        const userName = computed(() => profile.value?.name || profile.value?.preferred_username || 'Guest');
+        const userEmail = computed(() => profile.value?.email || 'Not signed in');
+        const userAvatar = computed(() => profile.value?.picture || 'https://placehold.co/100x100/6366f1/ffffff?text=G');
         const previewVisible = computed(() => Boolean(previewPath.value));
 
         const urlState = () => {
@@ -117,9 +125,9 @@
           selectedRepo.value = repo;
           if (repo) loadRepo(repo, route.path).catch(() => { entries.value = []; });
         };
-        onInit(async () => { repositories.value = await api('/repos').catch(() => []); userUrl.value = (await api('/config').catch(() => ({}))).oidcUserUrl || '#'; restoreRoute(); window.addEventListener('popstate', restoreRoute); });
+        onInit(async () => { repositories.value = await api('/repos').catch(() => []); userUrl.value = (await api('/config').catch(() => ({}))).oidcUserUrl || '#'; const session = await api('/session').catch(() => ({ authenticated: false })); profile.value = session.authenticated ? session.profile : null; restoreRoute(); window.addEventListener('popstate', restoreRoute); });
         watch(selectedRepo, (repo) => { if (!repo) loadRepo(null); });
-        return { darkMode, userUrl, repositories, selectedRepo, entries, commits, branches, tags, previewPath, previewContent, previewVisible, menuOpen, selectRepo, selectFile, closePreview, toggleTheme, toggleMenu, createRepository, uploadFiles, commitChanges };
+        return { darkMode, userUrl, userName, userEmail, userAvatar, repositories, selectedRepo, entries, commits, branches, tags, previewPath, previewContent, previewVisible, menuOpen, selectRepo, selectFile, closePreview, toggleTheme, toggleMenu, createRepository, uploadFiles, commitChanges };
       }
     </script>
   </template>

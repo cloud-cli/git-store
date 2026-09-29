@@ -77,7 +77,7 @@ function request(method, apiPath, data, extraHeaders = {}) {
   const spec = JSON.parse(resApi.body);
   assert.ok(spec.openapi, 'spec must have openapi version');
   assert.ok(spec.paths, 'spec must have paths');
-  const expectedPaths = ['/health', '/api', '/config', '/repos', '/repos/{owner}/{repo}', '/repos/{owner}/{repo}/log',
+  const expectedPaths = ['/health', '/api', '/config', '/session', '/repos', '/repos/{owner}/{repo}', '/repos/{owner}/{repo}/log',
     '/repos/{owner}/{repo}/stage', '/repos/{owner}/{repo}/unstage',
     '/repos/{owner}/{repo}/commit', '/repos/{owner}/{repo}/tags',
     '/repos/{owner}/{repo}/tags/{name}', '/repos/{owner}/{repo}/branches',
@@ -90,6 +90,7 @@ function request(method, apiPath, data, extraHeaders = {}) {
     '/health': ['get'],
     '/api': ['get'],
     '/config': ['get'],
+    '/session': ['get'],
     '/repos': ['get'],
     '/repos/{owner}/{repo}': ['post'],
     '/repos/{owner}/{repo}/log': ['get'],
@@ -136,6 +137,9 @@ function request(method, apiPath, data, extraHeaders = {}) {
   const resHealth = await request('GET', '/health');
   assert.strictEqual(resHealth.status, 200, '/health should return 200 without auth');
   console.log('✅ GET /health => 200', JSON.parse(resHealth.body));
+  const resSession = await request('GET', '/session');
+  assert.strictEqual(resSession.status, 200, '/session should return 200 without a session');
+  console.log('✅ GET /session => 200');
 
   const missingLog = await request('GET', '/repos/missing/missing/log');
   assert.strictEqual(missingLog.status, 404, 'missing repositories should return 404');

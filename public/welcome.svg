@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 320" role="img" aria-labelledby="title desc">
+  <title id="title">Welcome to Git API</title>
+  <desc id="desc">A warm cartoon illustration of a friendly folder holding a git branch.</desc>
+  <rect width="480" height="320" rx="32" fill="#fff7ed"/>
+  <circle cx="385" cy="70" r="34" fill="#fbbf24"/>
+  <path d="M0 250c70-35 120 24 190-4 70-28 112 30 178 1 55-24 83-7 112 3v70H0z" fill="#fed7aa"/>
+  <path d="M102 112h91l23 26h128c14 0 25 11 25 25v92c0 14-11 25-25 25H102c-14 0-25-11-25-25v-118c0-14 11-25 25-25z" fill="#fb923c" stroke="#9a3412" stroke-width="8"/>
+  <path d="M102 143h242c14 0 25 11 25 25v87c0 14-11 25-25 25H102c-14 0-25-11-25-25v-87c0-14 11-25 25-25z" fill="#fdba74"/>
+  <path d="M155 194c0-19 15-34 34-34s34 15 34 34v33m0-33c0 19 15 34 34 34h17c19 0 34-15 34-34v-20" fill="none" stroke="#7c2d12" stroke-linecap="round" stroke-width="8"/>
+  <circle cx="155" cy="194" r="12" fill="#7c2d12"/><circle cx="257" cy="227" r="12" fill="#7c2d12"/><circle cx="308" cy="174" r="12" fill="#7c2d12"/>
+  <circle cx="166" cy="121" r="5" fill="#7c2d12"/><circle cx="202" cy="121" r="5" fill="#7c2d12"/>
+  <path d="M166 137c10 9 24 9 34 0" fill="none" stroke="#7c2d12" stroke-linecap="round" stroke-width="5"/>
+</svg>

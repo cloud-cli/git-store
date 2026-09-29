@@ -3,7 +3,7 @@
     <template if="!repo">
       <div class="flex min-h-full flex-1 items-center justify-center text-center">
         <div class="mx-auto max-w-md rounded-2xl border border-amber-200 bg-amber-50/70 p-8 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/20">
-          <img src="https://placehold.co/240x160/fef3c7/92400e?text=Git+API" alt="Welcome illustration" class="mx-auto mb-6 rounded-xl">
+          <img src="/welcome.svg" alt="Welcome illustration" class="mx-auto mb-6 w-60 rounded-xl">
           <h1 class="text-2xl font-semibold">Welcome to your Git API</h1>
           <p class="mt-2 text-gray-600 dark:text-gray-300">Create your first repository to start browsing files, commits, branches, and tags.</p>
           <form class="mt-6 flex gap-2" on-submit.prevent="createFirstRepository()"><input class="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900" placeholder="my-first-repository" on-input="setRepositoryName($event.target.value)"><button class="rounded-md bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-500">Create</button></form>

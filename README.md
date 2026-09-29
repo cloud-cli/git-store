@@ -62,6 +62,8 @@ and HTML-loaded custom elements. Its framework reference is https://li3.static.a
 The user card links to `${OIDC_USSUER}/me` (falling back to `OIDC_ISSUER`), the repository
 plus button opens the create dialog, and the first-run page provides the same create flow.
 Files can be dropped into the browser file list; uploads remain unstaged and are marked with `*`.
+The topbar reads the current session profile from `/session`, displaying the authenticated
+OIDC name, email, and picture when available, or a signed-out state otherwise.
 
 ## Configuration
 
