@@ -338,7 +338,14 @@ async function run() {
     assert.ok(uiResponse.body.includes('type="file"'));
     assert.ok(uiResponse.body.includes('on-change="handleFileSelect($event.target.files)"'));
     assert.ok(uiResponse.body.includes('on-drop.prevent="upload($event)"'));
-    assert.ok(!uiResponse.body.includes('document.getElementById'), 'UI should use Li³ bindings rather than direct DOM lookups');
+    assert.ok(
+      uiResponse.body.includes('<template if="dragging"'),
+      'drag/drop helper should only appear while dragging',
+    );
+    assert.ok(
+      !uiResponse.body.includes('document.getElementById'),
+      'UI should use Li³ bindings rather than direct DOM lookups',
+    );
     assert.ok(uiResponse.body.includes('No branches.'));
     assert.ok(uiResponse.body.includes('No tags.'));
     const mainStart = uiResponse.body.indexOf('<main ');
