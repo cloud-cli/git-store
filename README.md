@@ -53,6 +53,9 @@ DATA_PATH="$PWD/data" npm start
 | GET    | `/api`                        | public |
 | GET    | `/config`                     | public |
 | GET    | `/session`                    | public |
+| GET    | `/auth/login`                 | public |
+| GET    | `/auth/callback`              | OIDC   |
+| POST   | `/auth/logout`                | OIDC   |
 | GET    | `/repos`                      | OIDC   |
 | POST   | `/repos/:repo`                | OIDC   |
 | GET    | `/repos/:repo/log`            | OIDC   |
@@ -79,8 +82,9 @@ Each island hydrates JSON state and independently fetches its own API data; URL 
 parameters synchronize repository/file navigation across reloads. The UI uses refs,
 computed values, lifecycle hooks, and event bindings. Framework reference:
 https://li3.static.apphor.de/docs.html.
-The user card links to `${OIDC_ISSUER}/me`; the repository plus button opens an anchored
-HTML popover. Empty repositories offer a file upload that creates the initial commit;
+The signed-out user card starts OIDC authorization-code + PKCE sign-in; signed-in users
+can open `${OIDC_ISSUER}/me`. Access tokens stay server-side in an opaque signed session.
+The repository plus button opens an anchored HTML popover. Empty repositories offer a file upload that creates the initial commit;
 files dropped into or selected for an existing repository remain unstaged and are marked
 with `*`. Branch and tag empty states provide matching create popovers.
 The topbar reads the current session profile from `/session`, displaying the authenticated
@@ -88,13 +92,15 @@ OIDC name, email, and picture when available, or a signed-out state otherwise.
 
 ## Configuration
 
-| Variable             | Default              | Purpose                       |
-| -------------------- | -------------------- | ----------------------------- |
-| `DATA_PATH`          | `/data` in the image | Repository storage root       |
-| `PORT`               | `3000`               | HTTP listen port              |
-| `OIDC_ISSUER`        | unset                | OIDC discovery issuer         |
-| `OIDC_CLIENT_ID`     | unset                | OIDC client identifier        |
-| `OIDC_CLIENT_SECRET` | unset                | OIDC introspection credential |
+| Variable             | Default              | Purpose                                       |
+| -------------------- | -------------------- | --------------------------------------------- |
+| `DATA_PATH`          | `/data` in the image | Repository storage root                       |
+| `PORT`               | `3000`               | HTTP listen port                              |
+| `OIDC_ISSUER`        | unset                | OIDC discovery issuer                         |
+| `OIDC_CLIENT_ID`     | unset                | OIDC client identifier                        |
+| `OIDC_CLIENT_SECRET` | unset                | OIDC introspection credential                 |
+| `OIDC_REDIRECT_URI`  | derived              | Registered `/auth/callback` URL (recommended) |
+| `PUBLIC_URL`         | derived              | Public origin used to derive the callback URL |
 
 When OIDC variables are absent, repository requests fail closed with `401`.
 

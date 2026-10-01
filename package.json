@@ -25,7 +25,6 @@
     "provenance": true
   },
   "dependencies": {
-    "dotenv": "^18.0.4",
     "express": "^5.2.1",
     "express-openid-connect": "^3.4.0",
     "openid-client": "^5.7.1",

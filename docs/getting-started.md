@@ -38,13 +38,15 @@ npm start
 
 ## Environment variables
 
-| Variable             | Required?                  | Default | Description                                          |
-| -------------------- | -------------------------- | ------- | ---------------------------------------------------- |
-| `DATA_PATH`          | yes                        | none    | Absolute path where all repositories are created.    |
-| `PORT`               | no                         | `3000`  | TCP port on which the HTTP server listens.           |
-| `OIDC_ISSUER`        | yes (when OIDC is enabled) | unset   | OpenID Connect issuer URL (used for discovery).      |
-| `OIDC_CLIENT_ID`     | yes (when OIDC is enabled) | –       | Client identifier registered with the OIDC provider. |
-| `OIDC_CLIENT_SECRET` | yes (when OIDC is enabled) | –       | secret for the client.                               |
+| Variable             | Required?                  | Default | Description                                                                             |
+| -------------------- | -------------------------- | ------- | --------------------------------------------------------------------------------------- |
+| `DATA_PATH`          | yes                        | none    | Absolute path where all repositories are created.                                       |
+| `PORT`               | no                         | `3000`  | TCP port on which the HTTP server listens.                                              |
+| `OIDC_ISSUER`        | yes (when OIDC is enabled) | unset   | OpenID Connect issuer URL (used for discovery).                                         |
+| `OIDC_CLIENT_ID`     | yes (when OIDC is enabled) | –       | Client identifier registered with the OIDC provider.                                    |
+| `OIDC_CLIENT_SECRET` | yes (when OIDC is enabled) | –       | secret for the client.                                                                  |
+| `OIDC_REDIRECT_URI`  | recommended                | derived | Exact registered callback URL ending in `/auth/callback`.                               |
+| `PUBLIC_URL`         | no                         | derived | Public service origin used to build the callback URL when `OIDC_REDIRECT_URI` is unset. |
 
 ## Basic API calls (using `curl`)
 
@@ -98,11 +100,18 @@ The server uses OIDC bearer token introspection for API clients. Read operations
 Forbidden**; unauthenticated requests return **401 Unauthorized**. A guest or read-only
 token cannot create a repository.
 
-The browser UI authenticates via same-origin session cookies validated by the configured OIDC issuer.
-Sessions are accepted only after:
+The topbar's **Sign in** action starts an OIDC authorization-code flow with PKCE. The
+callback validates state, nonce, and the ID token, confirms the access token is active,
+then establishes an HttpOnly, SameSite=Lax application session. The access token is kept
+server-side. Register the exact callback URL (preferably configured with
+`OIDC_REDIRECT_URI`) with the OIDC client. If that variable is unset, the service derives
+the callback from `PUBLIC_URL` or reverse-proxy forwarded host/protocol headers.
+
+Browser-session and bearer requests are accepted only after:
 
 1. The request is same-origin with this Git Store server
-2. The configured OIDC issuer's `/profile` endpoint confirms a profile with a non-empty `sub`
+2. The configured OIDC issuer introspects the token as active and confirms a non-empty `sub`.
+3. Each repository route checks the token's `repo:read` or `repo:write` scope.
 
 Cross-origin cookie requests are rejected for security. The `/session` endpoint allows
 clients to verify the current authentication state.

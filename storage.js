@@ -1,11 +1,11 @@
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
 
 const DATA_PATH = process.env.DATA_PATH;
 
 if (!DATA_PATH) {
-  throw new Error('DATA_PATH environment variable is not set');
+  throw new Error("DATA_PATH environment variable is not set");
 }
 
 if (!fs.existsSync(DATA_PATH)) {
@@ -21,7 +21,7 @@ if (!fs.existsSync(DATA_PATH)) {
  * @returns {string} A filesystem-safe hashed directory name (hex-encoded, lowercase)
  */
 function encodeSubjectDir(sub) {
-  const hash = crypto.createHash('sha256').update(sub).digest('hex');
+  const hash = crypto.createHash("sha256").update(sub).digest("hex");
   return hash;
 }
 
@@ -68,15 +68,25 @@ function ensureRepoDir(hashedSub, repo) {
  * @returns {boolean} True if the repo name is valid
  */
 function validateRepoName(repo) {
-  if (!repo || typeof repo !== 'string') return false;
-  if (repo.length > 100) return false;
-  if (repo.length === 0) return false;
+  if (!repo || typeof repo !== "string") {
+    return false;
+  }
+  if (repo.length > 100) {
+    return false;
+  }
+  if (repo.length === 0) {
+    return false;
+  }
   // Allow alphanumeric, dash, underscore, and dot for scoped packages-like names
   // but require at least one character that's not a special char at start/end
   const trimmed = repo.trim();
-  if (trimmed.length === 0) return false;
+  if (trimmed.length === 0) {
+    return false;
+  }
   // Repo name must be alphanumeric with possible internal dashes/underscores/dots
-  if (!/^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$/.test(repo)) return false;
+  if (!/^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$/.test(repo)) {
+    return false;
+  }
   return true;
 }
 

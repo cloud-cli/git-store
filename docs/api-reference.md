@@ -19,11 +19,11 @@ claim. Tokens need scopes as follows:
 - A valid token without the required scope returns **403 Forbidden**. Missing or
   invalid authentication returns **401 Unauthorized**.
 
-The browser UI may use a same-origin cookie session. Before accepting it, the server
-forwards the cookie to `/profile` on the configured OIDC issuer and requires a non-empty
-`sub`; requests with a cross-origin `Origin` are rejected. Profile nicknames and display
-names never determine repository ownership. Other applications can use bearer tokens
-with the documented scopes; they are not restricted to the browser session.
+The browser UI signs in through `/auth/login` using authorization code + PKCE. The callback
+validates state, nonce, ID-token claims, and active-token introspection before issuing a
+signed HttpOnly same-origin cookie. Access tokens stay server-side. Cookie-authenticated
+repository writes require same-origin requests. Profile nicknames and display names never
+determine repository ownership. Other applications can use scoped bearer tokens.
 
 Public endpoints (`/health`, `/api`, `/config`, `/session`) do not require authentication.
 
@@ -55,14 +55,14 @@ GET /api
 
 ### GET /config
 
-Return public browser configuration, including the profile URL derived from
-`OIDC_ISSUER` when configured.
+Return public browser configuration, including the profile URL and the local sign-in URL
+when OIDC is configured.
 
 ```http
 GET /config
 ```
 
-**Response (200)** – JSON body includes `oidcUserUrl`.
+**Response (200)** – JSON body includes `oidcUserUrl` and `oidcLoginUrl`.
 
 ### GET /session
 
@@ -72,6 +72,23 @@ cookie is valid, otherwise `{ "authenticated": false, "profile": null }`.
 ```http
 GET /session
 ```
+
+The endpoint can also identify an active bearer token passed in the `Authorization` header.
+
+### GET /auth/login
+
+Start the OIDC authorization-code flow with PKCE. The service saves short-lived state,
+nonce, and verifier cookies and redirects to the configured issuer. An optional same-origin
+`returnTo` path is restored after sign-in.
+
+### GET /auth/callback
+
+Configured OIDC redirect URI. Validates the response, exchanges the authorization code,
+confirms the access token and subject, then establishes the local HttpOnly browser session.
+
+### POST /auth/logout
+
+Clear the local browser session and redirect to `/`.
 
 ### GET /repos
 

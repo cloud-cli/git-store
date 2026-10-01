@@ -69,7 +69,7 @@
           <a
             attr-href="userUrl"
             class="flex items-center gap-3 border-l border-gray-200 pl-4 dark:border-gray-700"
-            title="Open profile"
+            attr-title="userLinkTitle"
           >
             <span class="hidden text-right leading-tight sm:block"
               ><span class="block font-medium">{{ userName }}</span
@@ -91,9 +91,16 @@
         export default function () {
           const profile = ref(null);
           const userUrl = ref("#");
+          const loginUrl = ref("#");
+          const profileUrl = ref("#");
           const darkMode = ref(localStorage.getItem("theme") !== "light");
-          const userName = computed(() => profile.value?.name || profile.value?.preferred_username || "Guest");
-          const userEmail = computed(() => profile.value?.email || "Not signed in");
+          const userName = computed(
+            () => profile.value?.name || profile.value?.preferred_username || profile.value?.email || "Sign in",
+          );
+          const userEmail = computed(
+            () => profile.value?.email || (profile.value ? "Signed in" : "Connect your OIDC account"),
+          );
+          const userLinkTitle = computed(() => (profile.value ? "Open profile" : "Sign in with OIDC"));
           const userAvatar = computed(
             () =>
               profile.value?.picture ||
@@ -110,21 +117,38 @@
           };
           const toggleSidebar = () => window.dispatchEvent(new CustomEvent("git-api-sidebar-toggle"));
           onInit(async () => {
-            const [config, session] = await Promise.all([
-              fetch("/config")
-                .then((response) => response.json())
-                .catch(() => ({})),
-              fetch("/session")
-                .then((response) => response.json())
-                .catch(() => ({ authenticated: false })),
-            ]);
-            userUrl.value = config.oidcUserUrl || "#";
+            const config = await fetch("/config")
+              .then((response) => response.json())
+              .catch(() => ({}));
+            const token = localStorage.getItem("access_token");
+            const sessionResponse = await fetch("/session", {
+              headers: token ? { Authorization: `Bearer ${token}` } : {},
+            }).catch(() => null);
+            const session = sessionResponse?.ok
+              ? await sessionResponse.json().catch(() => ({ authenticated: false }))
+              : { authenticated: false };
             profile.value = session.authenticated ? session.profile : null;
+            profileUrl.value = config.oidcUserUrl || "#";
+            const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+            loginUrl.value = config.oidcLoginUrl
+              ? `${config.oidcLoginUrl}?returnTo=${encodeURIComponent(returnTo)}`
+              : "#";
+            userUrl.value = profile.value ? profileUrl.value : loginUrl.value;
             window.addEventListener("git-api-theme", (event) => {
               darkMode.value = event.detail;
             });
           });
-          return { profile, userUrl, darkMode, userName, userEmail, userAvatar, toggleTheme, toggleSidebar };
+          return {
+            profile,
+            userUrl,
+            userLinkTitle,
+            darkMode,
+            userName,
+            userEmail,
+            userAvatar,
+            toggleTheme,
+            toggleSidebar,
+          };
         }
       </script>
     </template>
@@ -255,9 +279,20 @@
               }
             };
             onInit(async () => {
-              repositories.value = await fetch("/repos", { headers: tokenHeaders() })
+              const session = await fetch("/session", { headers: tokenHeaders() })
                 .then((response) => response.json())
-                .catch(() => []);
+                .catch(() => ({ authenticated: false }));
+              if (!session.authenticated) {
+                repositories.value = [];
+                return;
+              }
+              const response = await fetch("/repos", { headers: tokenHeaders() }).catch(() => null);
+              if (response?.ok) {
+                const result = await response.json().catch(() => []);
+                repositories.value = Array.isArray(result) ? result : [];
+              } else {
+                repositories.value = [];
+              }
               window.addEventListener("git-api-theme", (event) => {
                 darkMode.value = event.detail;
               });
