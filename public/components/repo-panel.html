@@ -1,10 +1,244 @@
 <template component="repo-panel">
-  <template if="repo"><aside class="hidden w-64 flex-shrink-0 overflow-y-auto border-l border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-900 md:block">
-    <div class="mb-6"><h3 class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500"><i class="fa-solid fa-code-branch"></i> Branches</h3><ul class="space-y-1"><template for="branch of branches"><li><a href="#" class="block rounded px-2 py-1.5 text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800" on-click.prevent="selectBranch(branch)">{{ branch }}</a></li></template></ul></div>
-    <div><h3 class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500"><i class="fa-solid fa-tags"></i> Tags</h3><ul class="space-y-1"><template for="tag of tags"><li><a href="#" class="flex items-center gap-2 rounded px-2 py-1.5 text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800" on-click.prevent="selectTag(tag)"><i class="fa-solid fa-tag text-xs opacity-50"></i>{{ tag }}</a></li></template></ul></div>
-  </aside></template>
+  <template if="repo"
+    ><aside
+      class="hidden w-64 flex-shrink-0 overflow-y-auto border-l border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-900 md:block"
+    >
+      <div class="mb-6">
+        <h3 class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
+          <i class="fa-solid fa-code-branch"></i> Branches
+          <button
+            popovertarget="branch-popover"
+            style="anchor-name: --branch-popover-anchor"
+            class="text-xs text-indigo-600 hover:underline"
+            aria-label="Create branch"
+          >
+            +
+          </button>
+        </h3>
+        <div
+          popover="auto"
+          id="branch-popover"
+          style="
+            position: fixed;
+            inset: auto;
+            margin: 0;
+            position-anchor: --branch-popover-anchor;
+            top: anchor(bottom);
+            left: anchor(left);
+          "
+        >
+          <form on-submit.prevent="createBranch()" class="space-y-4">
+            <h3 class="text-sm font-semibold">Create branch</h3>
+            <label class="block text-xs text-gray-600 dark:text-gray-300"
+              >Branch name<input
+                class="mt-1 w-full rounded-md border border-gray-300 bg-transparent px-3 py-2 outline-none focus:border-indigo-500 dark:border-gray-700"
+                placeholder="main"
+                required
+                on-input="setBranchName($event.target.value)"
+            /></label>
+            <p class="text-xs text-red-600" role="alert" if="errorMessage">{{ errorMessage }}</p>
+            <div class="flex justify-end gap-2">
+              <button
+                type="button"
+                class="rounded-md px-2 py-1 text-gray-500"
+                popovertarget="branch-popover"
+                popovertargetaction="hide"
+              >
+                Cancel
+              </button>
+              <button
+                class="rounded-md bg-indigo-600 px-2 py-1 text-sm font-medium text-white hover:bg-indigo-500"
+                type="submit"
+              >
+                Create
+              </button>
+            </div>
+          </form>
+        </div>
+        <ul class="space-y-1">
+          <template for="branch of branches"
+            ><li>
+              <a
+                href="#"
+                class="block rounded px-2 py-1.5 text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+                on-click.prevent="selectBranch(branch)"
+                >{{ branch }}</a
+              >
+            </li></template
+          >
+          <template if="!branches.length"
+            ><p class="px-2 py-1 text-xs text-gray-500">
+              No branches.
+              <button
+                type="button"
+                class="underline text-indigo-600 hover:text-indigo-800"
+                popovertarget="branch-popover"
+              >
+                Create one
+              </button>
+            </p></template
+          >
+        </ul>
+      </div>
+      <div>
+        <h3 class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
+          <i class="fa-solid fa-tags"></i> Tags
+          <button
+            popovertarget="tag-popover"
+            style="anchor-name: --tag-popover-anchor"
+            class="text-xs text-indigo-600 hover:underline"
+            aria-label="Create tag"
+          >
+            +
+          </button>
+        </h3>
+        <div
+          popover="auto"
+          id="tag-popover"
+          style="
+            position: fixed;
+            inset: auto;
+            margin: 0;
+            position-anchor: --tag-popover-anchor;
+            top: anchor(bottom);
+            left: anchor(left);
+          "
+        >
+          <form on-submit.prevent="createTag()" class="space-y-4">
+            <h3 class="text-sm font-semibold">Create tag</h3>
+            <label class="block text-xs text-gray-600 dark:text-gray-300"
+              >Tag name<input
+                class="mt-1 w-full rounded-md border border-gray-300 bg-transparent px-3 py-2 outline-none focus:border-indigo-500 dark:border-gray-700"
+                placeholder="v1.0.0"
+                required
+                on-input="setTagName($event.target.value)"
+            /></label>
+            <p class="text-xs text-red-600" role="alert" if="errorMessage">{{ errorMessage }}</p>
+            <div class="flex justify-end gap-2">
+              <button
+                type="button"
+                class="rounded-md px-2 py-1 text-gray-500"
+                popovertarget="tag-popover"
+                popovertargetaction="hide"
+              >
+                Cancel
+              </button>
+              <button
+                class="rounded-md bg-indigo-600 px-2 py-1 text-sm font-medium text-white hover:bg-indigo-500"
+                type="submit"
+              >
+                Create
+              </button>
+            </div>
+          </form>
+        </div>
+        <ul class="space-y-1">
+          <template for="tag of tags"
+            ><li>
+              <a
+                href="#"
+                class="flex items-center gap-2 rounded px-2 py-1.5 text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+                on-click.prevent="selectTag(tag)"
+                ><i class="fa-solid fa-tag text-xs opacity-50"></i>{{ tag }}</a
+              >
+            </li></template
+          >
+          <template if="!tags.length"
+            ><p class="px-2 py-1 text-xs text-gray-500">
+              No tags.
+              <button type="button" class="underline text-indigo-600 hover:text-indigo-800" popovertarget="tag-popover">
+                Create one
+              </button>
+            </p></template
+          >
+        </ul>
+      </div>
+    </aside></template
+  >
   <script setup>
-    import { defineProp } from '@li3/web';
-    export default function () { const repo = defineProp('repo', { default: null }); const branches = defineProp('branches', { default: () => [] }); const tags = defineProp('tags', { default: () => [] }); const selectBranch = (branch) => { window.history.pushState({}, '', `${window.location.pathname}?owner=${repo.value.owner}&repo=${repo.value.repo}&ref=${branch}`); window.dispatchEvent(new PopStateEvent('popstate')); }; const selectTag = (tag) => { window.history.pushState({}, '', `${window.location.pathname}?owner=${repo.value.owner}&repo=${repo.value.repo}&ref=${tag}`); window.dispatchEvent(new PopStateEvent('popstate')); }; return { repo, branches, tags, selectBranch, selectTag }; }
+    import { defineProp, ref } from '@li3/web';
+    export default function () {
+      const repo = defineProp('repo', { default: null });
+      const branches = defineProp('branches', { default: () => [] });
+      const tags = defineProp('tags', { default: () => [] });
+      const branchName = ref('');
+      const tagName = ref('');
+      const errorMessage = ref('');
+      const setBranchName = (value) => {
+        branchName.value = value;
+      };
+      const setTagName = (value) => {
+        tagName.value = value;
+      };
+      const tokenHeaders = () => {
+        const token = localStorage.getItem('access_token');
+        return token ? { Authorization: `Bearer ${token}` } : {};
+      };
+      const selectRef = (ref) => {
+        const query = new URLSearchParams({ repo: repo.value.repo, ref });
+        window.history.pushState({}, '', `${window.location.pathname}?${query}`);
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      };
+      const selectBranch = (branch) => selectRef(branch);
+      const selectTag = (tag) => selectRef(tag);
+      const createBranch = async () => {
+        const name = branchName.value.trim();
+        if (!name) return;
+        errorMessage.value = '';
+        try {
+          const response = await fetch(`/repos/${encodeURIComponent(repo.value.repo)}/branches`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...tokenHeaders(),
+            },
+            body: JSON.stringify({ name }),
+          });
+          if (response.ok) {
+            window.location.reload();
+          } else {
+            errorMessage.value = 'Failed to create branch.';
+          }
+        } catch {
+          errorMessage.value = 'Failed to create branch.';
+        }
+      };
+      const createTag = async () => {
+        const name = tagName.value.trim();
+        if (!name) return;
+        errorMessage.value = '';
+        try {
+          const response = await fetch(`/repos/${encodeURIComponent(repo.value.repo)}/tags`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...tokenHeaders(),
+            },
+            body: JSON.stringify({ name }),
+          });
+          if (response.ok) {
+            window.location.reload();
+          } else {
+            errorMessage.value = 'Failed to create tag.';
+          }
+        } catch {
+          errorMessage.value = 'Failed to create tag.';
+        }
+      };
+      return {
+        repo,
+        branches,
+        tags,
+        branchName,
+        tagName,
+        errorMessage,
+        setBranchName,
+        setTagName,
+        selectBranch,
+        selectTag,
+        createBranch,
+        createTag,
+      };
+    }
   </script>
 </template>

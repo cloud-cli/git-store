@@ -1,44 +1,64 @@
 # Tutorial – Managing a Git repository through the API
 
 This step‑by‑step guide assumes the server is running at `http://localhost:3000`
-and that you have an OIDC access token (obtained from `https://auth.api.apphor.de`
-or any OIDC‑compatible provider).  Replace `<TOKEN>` with that token throughout.
+and that you have an OIDC access token (obtained from your configured OIDC issuer).
+Replace `<TOKEN>` with that token throughout. The token must carry `repo:read` for
+listing repositories and `repo:write` for mutations—the latter includes read access.
 
-## 1. Create a repository
+The browser UI uses a same-origin session cookie only after the configured issuer's
+`/profile` endpoint confirms a non-empty `sub`. API clients without the required scope
+receive 403; unauthenticated requests receive 401.
+
+## 1. Create a repository (empty onboarding)
 
 ```bash
-curl -X POST http://localhost:3000/repos/myorg/myproject
+curl -X POST http://localhost:3000/repos/myproject \
+  -H "Authorization: Bearer <TOKEN>"
 ```
 
-Response:
+Response (201):
 
 ```json
-{ "message": "Repository myorg/myproject is ready", "path": "/data/myorg/myproject" }
+{ "message": "Repository myproject is ready", "repo": "myproject" }
 ```
+
+The new repository starts empty. The UI presents a welcome screen with a file input;
+uploading the first file stages and commits it. API clients can add content with the JSON
+upload endpoint and then stage and commit it.
 
 ## 2. Verify the repo is empty
 
 ```bash
-curl http://localhost:3000/repos/myorg/myproject/log
+curl -H "Authorization: Bearer <TOKEN>" http://localhost:3000/repos/myproject/log
 ```
 
-Response (empty array):
+Response (empty array for new repository):
 
 ```json
 []
 ```
 
-## 3. Add a file and stage it
+### Uploading a file through the API
+
+The API accepts base64-encoded bytes in a JSON body:
 
 ```bash
-# Create a dummy file inside the repo (the container has the data volume at /data)
-echo "Hello Git Store" > ./data/myorg/myproject/README.md
+# Encode a file and send the required JSON body
+curl -X POST http://localhost:3000/repos/myproject/files \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d "{\"path\":\"README.md\",\"content\":\"$(base64 -w0 myfile.txt)\"}"
 ```
 
-Stage the file:
+The endpoint writes the file unstaged and returns **201 Created**. Use an empty
+`"content"` string to create an empty file.
+
+## 3. Add a file and stage it
+
+Stage the existing README.md (or any file you added earlier):
 
 ```bash
-curl -X POST http://localhost:3000/repos/myorg/myproject/stage \
+curl -X POST http://localhost:3000/repos/myproject/stage \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"files":["README.md"]}'
@@ -50,10 +70,19 @@ Response:
 { "message": "Files staged successfully" }
 ```
 
+### Add-file form behavior (UI)
+
+The repository viewer's **Add file** popover creates a file at the supplied full relative
+path, stages it, and commits it. The file may be empty. In an empty repository, the
+welcome screen's file input instead uploads and commits the selected file.
+
+For existing repositories, dropping files on the file list or selecting files from the
+upload button writes them unstaged. Use the commit form to stage and commit changes.
+
 ## 4. Autocommit the staged changes
 
 ```bash
-curl -X POST http://localhost:3000/repos/myorg/myproject/commit \
+curl -X POST http://localhost:3000/repos/myproject/commit \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"message":"initial commit"}'
@@ -68,7 +97,7 @@ Response:
 ## 5. Add a tag
 
 ```bash
-curl -X POST http://localhost:3000/repos/myorg/myproject/tags \
+curl -X POST http://localhost:3000/repos/myproject/tags \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"name":"v1.0"}'
@@ -80,25 +109,28 @@ Response:
 { "message": "Tag v1.0 added" }
 ```
 
-## 6. Create a branch
+## 6. Create a branch (after an initial commit)
 
 ```bash
-curl -X POST http://localhost:3000/repos/myorg/myproject/branches \
+curl -X POST http://localhost:3000/repos/myproject/branches \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"name":"dev"}'
 ```
 
-Response:
+Response (200):
 
 ```json
 { "message": "Branch dev created" }
 ```
 
+An empty repository has no branches or tags until it has a commit. The UI still displays
+“No branches. Create one” and “No tags. Create one” actions, with a popover form for each.
+
 ## 7. Delete the branch (cleanup)
 
 ```bash
-curl -X DELETE http://localhost:3000/repos/myorg/myproject/branches/dev \
+curl -X DELETE http://localhost:3000/repos/myproject/branches/dev \
   -H "Authorization: Bearer <TOKEN>"
 ```
 
@@ -111,7 +143,7 @@ Response:
 ## 8. Remove the tag (optional)
 
 ```bash
-curl -X DELETE http://localhost:3000/repos/myorg/myproject/tags/v1.0 \
+curl -X DELETE http://localhost:3000/repos/myproject/tags/v1.0 \
   -H "Authorization: Bearer <TOKEN>"
 ```
 
@@ -124,18 +156,25 @@ Response:
 ## 9. (Optional) View the full log after commits
 
 ```bash
-curl http://localhost:3000/repos/myorg/myproject/log
+curl -H "Authorization: Bearer <TOKEN>" http://localhost:3000/repos/myproject/log
 ```
 
 You should now see at least one commit object containing `oid`, `message`, `author`, `date`, etc.
 
 ## Summary of flow
 
-1. `POST /repos` – create the directory.
-2. (Optional) edit files on disk – the server does not provide a fetch/write API; you edit files in the `DATA_PATH` directory directly.
-3. `POST /repos/{owner}/{repo}/stage` – tell Git to stage selected files.
-4. `POST /repos/{owner}/{repo}/commit` – create a commit with a message.
-5. `POST /repos/{owner}/{repo}/tags` / `DELETE /repos/{owner}/{repo}/tags/{name}` – version marking.
-6. `POST /repos/{owner}/{repo}/branches` / `DELETE /repos/{owner}/{repo}/branches/{name}` – line‑of‑development isolation.
+1. `POST /repos/{repo}` – create a repository for the authenticated subject (empty by default)
+2. **(Optional) JSON upload** to add initial content, or use the browser's empty-repository file input
+3. `POST /repos/{repo}/stage` – tell Git to stage selected files
+4. `POST /repos/{repo}/commit` – create a commit with a message
+5. `POST /repos/{repo}/tags` / `DELETE /repos/{repo}/tags/{name}` – version marking (release/tag model)
+6. `POST /repos/{repo}/branches` / `DELETE /repos/{repo}/branches/{name}` – line‑of‑development isolation
 
-All mutating endpoints require a valid OIDC bearer token; `GET /health` and `GET /api` are public.
+**Form and UI behavior notes:**
+
+- **Add-file popover**: accepts a full relative path; creates, stages, and commits an empty file.
+- **HTML popovers**: anchored forms create repositories, branches, and tags.
+- **Drag-drop/file-input upload**: sends base64-encoded file bytes as JSON; existing-repository uploads remain unstaged.
+- **Empty repo onboarding**: the first UI file upload is staged and committed automatically.
+
+All repository endpoints require authentication. `/health`, `/api`, `/config`, and `/session` are public. Tags/branches empty states use HTML popovers only—no additional routes required.

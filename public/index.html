@@ -8,7 +8,7 @@
       { "imports": { "@li3/": "https://cdn.li3.dev/@li3/" } }
     </script>
     <script type="module">
-      import "@li3/web";
+      import '@li3/web';
     </script>
     <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
@@ -87,13 +87,13 @@
         { "profile": null, "userUrl": "#", "darkMode": true }
       </script>
       <script setup>
-        import { ref, computed, onInit } from "@li3/web";
+        import { ref, computed, onInit } from '@li3/web';
         export default function () {
           const profile = ref(null);
-          const userUrl = ref("#");
-          const darkMode = ref(localStorage.getItem("theme") !== "light");
-          const userName = computed(() => profile.value?.name || profile.value?.preferred_username || "Guest");
-          const userEmail = computed(() => profile.value?.email || "Not signed in");
+          const userUrl = ref('#');
+          const darkMode = ref(localStorage.getItem('theme') !== 'light');
+          const userName = computed(() => profile.value?.name || profile.value?.preferred_username || 'Guest');
+          const userEmail = computed(() => profile.value?.email || 'Not signed in');
           const userAvatar = computed(
             () =>
               profile.value?.picture ||
@@ -105,22 +105,22 @@
           );
           const toggleTheme = () => {
             darkMode.value = !darkMode.value;
-            localStorage.setItem("theme", darkMode.value ? "dark" : "light");
-            window.dispatchEvent(new CustomEvent("git-api-theme", { detail: darkMode.value }));
+            localStorage.setItem('theme', darkMode.value ? 'dark' : 'light');
+            window.dispatchEvent(new CustomEvent('git-api-theme', { detail: darkMode.value }));
           };
-          const toggleSidebar = () => window.dispatchEvent(new CustomEvent("git-api-sidebar-toggle"));
+          const toggleSidebar = () => window.dispatchEvent(new CustomEvent('git-api-sidebar-toggle'));
           onInit(async () => {
             const [config, session] = await Promise.all([
-              fetch("/config")
+              fetch('/config')
                 .then((response) => response.json())
                 .catch(() => ({})),
-              fetch("/session")
+              fetch('/session')
                 .then((response) => response.json())
                 .catch(() => ({ authenticated: false })),
             ]);
-            userUrl.value = config.oidcUserUrl || "#";
+            userUrl.value = config.oidcUserUrl || '#';
             profile.value = session.authenticated ? session.profile : null;
-            window.addEventListener("git-api-theme", (event) => {
+            window.addEventListener('git-api-theme', (event) => {
               darkMode.value = event.detail;
             });
           });
@@ -141,8 +141,9 @@
               Repositories
             </h2>
             <button
-              class="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-              on-click="openDialog()"
+              popovertarget="create-repo-popover"
+              style="anchor-name: --create-repository-anchor"
+              class="p-2 text-gray-500"
               aria-label="Create repository"
             >
               <i class="fa-solid fa-plus"></i>
@@ -157,99 +158,125 @@
                 attr-href="repoHref(repo)"
                 class="flex items-center gap-2 rounded-md px-3 py-2 text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
                 class-selected="isSelected(repo)"
-                ><i class="fa-solid fa-book-bookmark text-xs text-gray-400"></i>{{ repo.owner }}/{{ repo.repo }}</a
+                on-click="closeMenu()"
+                ><i class="fa-solid fa-book-bookmark text-xs text-gray-400"></i>{{ repo.repo }}</a
               ></template
             >
           </div>
-          <template if="menuOpen"
-            ><div class="fixed inset-0 -z-10 bg-black/40 md:hidden" on-click="closeMenu()"></div
-          ></template>
-          <template if="dialogOpen"
-            ><div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-              <form
-                class="w-full max-w-md rounded-xl border border-gray-200 bg-white p-5 shadow-2xl dark:border-gray-700 dark:bg-gray-900"
-                on-submit.prevent="createRepository()"
-              >
-                <h2 class="text-lg font-semibold">Create repository</h2>
-                <label class="mt-4 block text-sm text-gray-600 dark:text-gray-300"
-                  >Repository name<input
-                    class="mt-1 w-full rounded-md border border-gray-300 bg-transparent px-3 py-2 outline-none focus:border-indigo-500 dark:border-gray-700"
-                    placeholder="my-project"
-                    on-input="setRepoName($event.target.value)"
-                /></label>
-                <div class="mt-4 flex justify-end gap-2">
-                  <button type="button" class="rounded-md px-3 py-2 text-gray-500" on-click="closeDialog()">
-                    Cancel</button
-                  ><button class="rounded-md bg-indigo-600 px-3 py-2 font-medium text-white hover:bg-indigo-500">
-                    Create
-                  </button>
-                </div>
-              </form>
-            </div></template
+          <div
+            popover="auto"
+            id="create-repo-popover"
+            style="
+              position: fixed;
+              inset: auto;
+              margin: 0;
+              position-anchor: --create-repository-anchor;
+              top: anchor(bottom);
+              left: anchor(left);
+            "
+            class="w-64 rounded-lg border border-gray-200 bg-white p-4 shadow-xl dark:border-gray-700 dark:bg-gray-900"
           >
+            <form on-submit.prevent="createRepository()" class="space-y-4">
+              <h2 class="text-lg font-semibold">Create repository</h2>
+              <label class="block text-sm text-gray-600 dark:text-gray-300"
+                >Repository name<input
+                  class="mt-1 w-full rounded-md border border-gray-300 bg-transparent px-3 py-2 outline-none focus:border-indigo-500 dark:border-gray-700"
+                  placeholder="my-project"
+                  required
+                  on-input="setRepoName($event.target.value)"
+              /></label>
+              <p class="text-xs text-red-600" role="alert" if="errorMessage">{{ errorMessage }}</p>
+              <div class="flex justify-end gap-2">
+                <button
+                  type="button"
+                  class="rounded-md px-3 py-2 text-gray-500"
+                  popovertarget="create-repo-popover"
+                  popovertargetaction="hide"
+                >
+                  Cancel
+                </button>
+                <button
+                  class="rounded-md bg-indigo-600 px-3 py-2 font-medium text-white hover:bg-indigo-500"
+                  type="submit"
+                >
+                  Create
+                </button>
+              </div>
+            </form>
+          </div>
         </aside>
+        <template if="menuOpen"
+          ><div class="fixed inset-0 z-30 bg-black/40 md:hidden" on-click="closeMenu()"></div
+        ></template>
         <script state type="application/json">
-          { "repositories": [], "dialogOpen": false, "menuOpen": false, "repoName": "", "darkMode": true }
+          { "repositories": [], "menuOpen": false, "repoName": "", "errorMessage": "", "darkMode": true }
         </script>
         <script setup>
-          import { ref, onInit } from "@li3/web";
+          import { ref, onInit } from '@li3/web';
           export default function () {
             const repositories = ref([]);
-            const dialogOpen = ref(false);
             const menuOpen = ref(false);
-            const repoName = ref("");
-            const darkMode = ref(localStorage.getItem("theme") !== "light");
+            const repoName = ref('');
+            const errorMessage = ref('');
+            const darkMode = ref(localStorage.getItem('theme') !== 'light');
             const route = () => new URL(window.location.href).searchParams;
-            const repoHref = (repo) =>
-              `/?owner=${encodeURIComponent(repo.owner)}&repo=${encodeURIComponent(repo.repo)}`;
-            const isSelected = (repo) => route().get("owner") === repo.owner && route().get("repo") === repo.repo;
-            const closeMenu = () => {
-              menuOpen.value = false;
-            };
-            const openDialog = () => {
-              repoName.value = "";
-              dialogOpen.value = true;
-            };
-            const closeDialog = () => {
-              dialogOpen.value = false;
-            };
+            const repoHref = (repo) => `/?repo=${encodeURIComponent(repo.repo)}`;
+            const isSelected = (repo) => route().get('repo') === repo.repo;
             const setRepoName = (value) => {
               repoName.value = value;
             };
+            const tokenHeaders = () => {
+              const token = localStorage.getItem('access_token');
+              return token ? { Authorization: `Bearer ${token}` } : {};
+            };
+            const closeMenu = () => {
+              menuOpen.value = false;
+            };
             const createRepository = async () => {
               const name = repoName.value.trim();
-              if (!/^[a-zA-Z0-9._-]+$/.test(name)) return;
-              const session = await fetch("/session")
-                .then((response) => response.json())
-                .catch(() => ({}));
-              const owner = session.profile?.preferred_username || session.profile?.username || "jane-doe";
-              const response = await fetch(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`, {
-                method: "POST",
-              });
-              if (response.ok) window.location.assign(repoHref({ owner, repo: name }));
+              errorMessage.value = '';
+              if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
+                errorMessage.value = 'Use letters, numbers, dots, underscores, or hyphens.';
+                return;
+              }
+              try {
+                const response = await fetch(`/repos/${encodeURIComponent(name)}`, {
+                  method: 'POST',
+                  headers: tokenHeaders(),
+                });
+                if (response.ok) window.location.assign(repoHref({ repo: name }));
+                else
+                  errorMessage.value =
+                    response.status === 401 || response.status === 403
+                      ? 'Sign in with repository write access.'
+                      : 'Repository creation failed.';
+              } catch {
+                errorMessage.value = 'Repository creation failed.';
+              }
             };
             onInit(async () => {
-              repositories.value = await fetch("/repos")
+              repositories.value = await fetch('/repos', { headers: tokenHeaders() })
                 .then((response) => response.json())
                 .catch(() => []);
-              window.addEventListener("git-api-theme", (event) => {
+              window.addEventListener('git-api-theme', (event) => {
                 darkMode.value = event.detail;
               });
-              window.addEventListener("git-api-sidebar-toggle", () => {
+              window.addEventListener('git-api-sidebar-toggle', () => {
                 menuOpen.value = !menuOpen.value;
+              });
+              window.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape' && menuOpen.value) closeMenu();
               });
             });
             return {
               repositories,
-              dialogOpen,
               menuOpen,
               repoName,
+              errorMessage,
               darkMode,
               repoHref,
               isSelected,
               closeMenu,
-              openDialog,
-              closeDialog,
               setRepoName,
               createRepository,
             };
@@ -281,93 +308,189 @@
                     <input
                       class="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900"
                       placeholder="my-first-repository"
+                      required
                       on-input="setRepoName($event.target.value)"
                     /><button class="rounded-md bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-500">
                       Create
                     </button>
                   </form>
-                  <p class="mt-2 text-xs text-red-600" if="errorMessage">{{ errorMessage }}</p>
+                  <p class="mt-2 text-xs text-red-600" role="alert" if="errorMessage">{{ errorMessage }}</p>
                 </div>
               </div></template
             >
             <template if="repo"
               ><div class="mb-4 flex items-center gap-2 text-xs text-gray-500">
+                <h1 class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ repo.repo }}</h1>
                 <a attr-href="rootHref" class="hover:text-indigo-600">Repository root</a><span>/</span
-                ><span>{{ directory || '.' }}</span>
-              </div>
-              <div
-                class="mb-4 flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-900/50"
-              >
-                <div
-                  class="flex h-8 w-8 items-center justify-center rounded-full bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                ><span>{{ directory || 'Root' }}</span>
+                <button
+                  popovertarget="add-file-popover"
+                  style="anchor-name: --add-file-anchor"
+                  class="ml-2 text-xs text-indigo-600 hover:underline"
                 >
-                  <i class="fa-solid fa-code-commit"></i>
+                  + Add file
+                </button>
+              </div>
+              <p class="mb-3 text-xs text-red-600" role="alert" if="errorMessage">{{ errorMessage }}</p>
+              <div
+                popover="auto"
+                id="add-file-popover"
+                style="
+                  position: fixed;
+                  inset: auto;
+                  margin: 0;
+                  position-anchor: --add-file-anchor;
+                  top: anchor(bottom);
+                  left: anchor(left);
+                "
+                class="w-64 rounded-lg border border-gray-200 bg-white p-4 shadow-xl dark:border-gray-700 dark:bg-gray-900"
+              >
+                <form on-submit.prevent="addFileToRepo()" class="space-y-4">
+                  <h3 class="text-sm font-semibold">Add file</h3>
+                  <label class="block text-xs text-gray-600 dark:text-gray-300"
+                    >Full relative path<input
+                      class="mt-1 w-full rounded-md border border-gray-300 bg-transparent px-3 py-2 outline-none focus:border-indigo-500 dark:border-gray-700"
+                      placeholder="src/index.html"
+                      required
+                      on-input="setAddFilePath($event.target.value)"
+                  /></label>
+                  <p class="text-xs text-red-600" role="alert" if="errorMessage">{{ errorMessage }}</p>
+                  <div class="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      class="rounded-md px-2 py-1 text-gray-500"
+                      popovertarget="add-file-popover"
+                      popovertargetaction="hide"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      class="rounded-md bg-indigo-600 px-2 py-1 text-sm font-medium text-white hover:bg-indigo-500"
+                      type="submit"
+                    >
+                      Create
+                    </button>
+                  </div>
+                </form>
+              </div>
+              <template if="commits.length > 0">
+                <div
+                  class="mb-4 flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-900/50"
+                >
+                  <div
+                    class="flex h-8 w-8 items-center justify-center rounded-full bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                  >
+                    <i class="fa-solid fa-code-commit"></i>
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="truncate font-medium">{{ commits[0].message }}</div>
+                    <div class="mt-0.5 text-xs text-gray-500">{{ commits[0].author_name }}</div>
+                  </div>
+                  <code class="rounded bg-gray-200 px-2 py-1 font-mono text-xs dark:bg-gray-800"
+                    >{{ commits[0].hash.slice(0, 7) }}</code
+                  >
                 </div>
-                <div class="min-w-0 flex-1">
-                  <div class="truncate font-medium">{{ commits[0] ? commits[0].message : 'No commits yet' }}</div>
-                  <div class="mt-0.5 text-xs text-gray-500">
-                    {{ commits[0] ? commits[0].author_name : 'Empty repository' }}
+                <template if="hasUncommitted"
+                  ><form class="mb-3 flex gap-2" on-submit.prevent="commitChanges()">
+                    <input
+                      class="min-w-0 flex-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 dark:border-amber-800 dark:bg-amber-950/30"
+                      placeholder="Commit message"
+                      on-input="setCommitMessage($event.target.value)"
+                    /><button class="rounded-md bg-indigo-600 px-3 py-2 font-medium text-white hover:bg-indigo-500">
+                      Commit
+                    </button>
+                  </form>
+                  <p class="mb-3 text-xs text-red-600" role="alert" if="errorMessage">{{ errorMessage }}</p></template
+                >
+                <div
+                  class="flex min-h-64 flex-1 flex-col overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800"
+                  on-dragover.prevent="setDragging(true)"
+                  on-dragleave.prevent="setDragging(false)"
+                  on-drop.prevent="upload($event)"
+                >
+                  <div
+                    class="flex items-center gap-2 p-2 border-b border-gray-200 dark:border-gray-800 dark:bg-gray-900/50"
+                  >
+                    <input
+                      id="repo-upload-input"
+                      class="hidden"
+                      type="file"
+                      multiple
+                      on-change="handleFileSelect($event.target.files)"
+                    />
+                    <button
+                      class="rounded-md px-2 py-1 text-xs text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-400"
+                      type="button"
+                      on-click="openFilePicker()"
+                      aria-label="Upload files"
+                    >
+                      <i class="fa-solid fa-upload text-xs"></i>
+                    </button>
+                  </div>
+                  <ul class="divide-y divide-gray-100 overflow-y-auto dark:divide-gray-800">
+                    <template for="entry of entries"
+                      ><li
+                        class="flex items-center justify-between px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-900/50"
+                      >
+                        <a attr-href="entryHref(entry)" class="flex min-w-0 flex-1 items-center gap-3"
+                          ><i
+                            class="fa-solid w-4 text-center text-base"
+                            bind-class="{ 'fa-folder': entry.type === 'directory', 'fa-file-lines': entry.type === 'file', 'text-blue-400': entry.type === 'directory', 'text-gray-400': entry.type === 'file' }"
+                          ></i
+                          ><span class="truncate"
+                            >{{ entry.name }}<sup class="ml-1 text-amber-500"
+                              >{{ entry.uncommitted ? '*' : '' }}</sup
+                            ></span
+                          ></a
+                        ><span class="ml-3 max-w-[45%] truncate text-xs text-gray-500"
+                          >{{ entry.uncommitted ? 'Uncommitted' : entry.type }}</span
+                        >
+                      </li></template
+                    >
+                  </ul>
+                  <div
+                    class="mt-auto border-t border-dashed border-gray-300 p-4 text-center text-xs text-gray-500 dark:border-gray-700"
+                    class-dragging="dragging"
+                  >
+                    Drop files here to upload them unstaged
                   </div>
                 </div>
-                <code class="rounded bg-gray-200 px-2 py-1 font-mono text-xs dark:bg-gray-800"
-                  >{{ commits[0] ? commits[0].hash.slice(0, 7) : '—' }}</code
-                >
-              </div>
-              <template if="hasUncommitted"
-                ><form class="mb-3 flex gap-2" on-submit.prevent="commitChanges()">
-                  <input
-                    class="min-w-0 flex-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 dark:border-amber-800 dark:bg-amber-950/30"
-                    placeholder="Commit message"
-                    on-input="setCommitMessage($event.target.value)"
-                  /><button class="rounded-md bg-indigo-600 px-3 py-2 font-medium text-white hover:bg-indigo-500">
-                    Commit
-                  </button>
-                </form>
-                <p class="mb-3 text-xs text-red-600" if="errorMessage">{{ errorMessage }}</p></template
-              >
-              <div
-                class="flex min-h-64 flex-1 flex-col overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800"
-                on-dragover.prevent="setDragging(true)"
-                on-dragleave="setDragging(false)"
-                on-drop.prevent="upload($event)"
-              >
-                <div
-                  class="flex justify-between border-b border-gray-200 bg-gray-100 px-4 py-2 text-xs font-medium text-gray-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300"
-                >
-                  <span>Name</span><span>Last commit</span>
-                </div>
-                <ul class="divide-y divide-gray-100 overflow-y-auto dark:divide-gray-800">
-                  <template for="entry of entries"
-                    ><li
-                      class="flex items-center justify-between px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-900/50"
-                    >
-                      <a attr-href="entryHref(entry)" class="flex min-w-0 flex-1 items-center gap-3"
-                        ><i
-                          class="fa-solid w-4 text-center text-base"
-                          bind-class="{ 'fa-folder': entry.type === 'directory', 'fa-file-lines': entry.type === 'file', 'text-blue-400': entry.type === 'directory', 'text-gray-400': entry.type === 'file' }"
-                        ></i
-                        ><span class="truncate"
-                          >{{ entry.name }}<sup class="ml-1 text-amber-500"
-                            >{{ entry.uncommitted ? '*' : '' }}</sup
-                          ></span
-                        ></a
-                      ><span class="ml-3 max-w-[45%] truncate text-xs text-gray-500"
-                        >{{ entry.uncommitted ? 'Uncommitted' : entry.type }}</span
-                      >
-                    </li></template
+              </template>
+              <template if="commits.length === 0">
+                <div class="flex min-h-full flex-1 items-center justify-center text-center">
+                  <div
+                    class="mx-auto max-w-md rounded-2xl border border-amber-200 bg-amber-50/70 p-8 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/20"
                   >
-                </ul>
-                <div
-                  class="mt-auto border-t border-dashed border-gray-300 p-4 text-center text-xs text-gray-500 dark:border-gray-700"
-                  class-dragging="dragging"
-                >
-                  Drop files here to upload them unstaged
+                    <img
+                      src="/welcome.svg"
+                      alt="A friendly Git folder illustration"
+                      class="mx-auto mb-6 w-60 rounded-xl"
+                    />
+                    <h1 class="text-2xl font-semibold">Welcome to your Git API</h1>
+                    <p class="mt-2 text-gray-600 dark:text-gray-300">Start by uploading your first file.</p>
+                    <form class="mt-6 flex gap-2" on-submit.prevent="uploadFileFromInput()">
+                      <label for="repo-file-input" class="sr-only">Select files to upload</label>
+                      <input
+                        id="repo-file-input"
+                        class="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-950"
+                        type="file"
+                        multiple
+                      />
+                      <button class="rounded-md bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-500">
+                        Upload
+                      </button>
+                    </form>
+                    <p class="mt-2 text-xs text-red-600" role="alert" if="errorMessage">{{ errorMessage }}</p>
+                  </div>
                 </div>
-              </div>
+              </template>
               <template if="previewPath"
                 ><div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 md:p-10">
                   <section
                     class="flex h-full w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="File preview"
                   >
                     <header
                       class="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-800"
@@ -402,148 +525,238 @@
             }
           </script>
           <script setup>
-            import { ref, computed, onInit } from "@li3/web";
+            import { ref, computed, onInit } from '@li3/web';
             export default function () {
               const repo = ref(null);
               const entries = ref([]);
               const commits = ref([]);
-              const directory = ref("");
-              const previewPath = ref("");
-              const fileContent = ref("");
-              const repoName = ref("");
-              const commitMessage = ref("");
+              const directory = ref('');
+              const previewPath = ref('');
+              const fileContent = ref('');
+              const repoName = ref('');
+              const addFilePath = ref('');
+              const commitMessage = ref('');
               const dragging = ref(false);
-              const errorMessage = ref("");
-              const darkMode = ref(localStorage.getItem("theme") !== "light");
+              const errorMessage = ref('');
+              const darkMode = ref(localStorage.getItem('theme') !== 'light');
               const hasUncommitted = computed(() => entries.value.some((entry) => entry.uncommitted));
               const url = () => new URL(window.location.href);
-              const base = () =>
-                `/repos/${encodeURIComponent(repo.value.owner)}/${encodeURIComponent(repo.value.repo)}`;
-              const rootHref = computed(
-                () =>
-                  `/?owner=${encodeURIComponent(repo.value?.owner || "")}&repo=${encodeURIComponent(repo.value?.repo || "")}`,
-              );
+              const base = () => `/repos/${encodeURIComponent(repo.value.repo)}`;
+              const rootHref = computed(() => `/?repo=${encodeURIComponent(repo.value?.repo || '')}`);
               const setRepoName = (value) => {
                 repoName.value = value;
               };
               const setCommitMessage = (value) => {
                 commitMessage.value = value;
               };
+              const setAddFilePath = (value) => {
+                addFilePath.value = value;
+              };
               const setDragging = (value) => {
                 dragging.value = value;
               };
               const entryHref = (entry) => {
-                const target = entry.type === "directory" ? { dir: entry.path } : { path: entry.path };
+                const target = entry.type === 'directory' ? { dir: entry.path } : { path: entry.path };
                 const current = url();
-                current.searchParams.set("owner", repo.value.owner);
-                current.searchParams.set("repo", repo.value.repo);
-                current.searchParams.delete("path");
-                current.searchParams.delete("dir");
+                current.searchParams.set('repo', repo.value.repo);
+                current.searchParams.delete('path');
+                current.searchParams.delete('dir');
                 current.searchParams.set(
-                  entry.type === "directory" ? "dir" : "path",
-                  target[entry.type === "directory" ? "dir" : "path"],
+                  entry.type === 'directory' ? 'dir' : 'path',
+                  target[entry.type === 'directory' ? 'dir' : 'path'],
                 );
                 return `${current.pathname}${current.search}${current.hash}`;
               };
               const tokenHeaders = () => {
-                const token = localStorage.getItem("access_token");
+                const token = localStorage.getItem('access_token');
                 return token ? { Authorization: `Bearer ${token}` } : {};
               };
+              const openFilePicker = () => document.getElementById('repo-upload-input')?.click();
               const load = async () => {
                 const current = url();
-                const owner = current.searchParams.get("owner");
-                const name = current.searchParams.get("repo");
-                directory.value = current.searchParams.get("dir") || "";
-                previewPath.value = current.searchParams.get("path") || "";
-                if (!owner || !name) {
+                const name = current.searchParams.get('repo');
+                directory.value = current.searchParams.get('dir') || '';
+                previewPath.value = current.searchParams.get('path') || '';
+                if (!name) {
                   repo.value = null;
                   return;
                 }
-                repo.value = { owner, repo: name };
-                const apiBase = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
+                repo.value = { repo: name };
+                const apiBase = `/repos/${encodeURIComponent(name)}`;
                 const [treeResponse, logResponse] = await Promise.all([
-                  fetch(`${apiBase}/tree${directory.value ? `?path=${encodeURIComponent(directory.value)}` : ""}`),
-                  fetch(`${apiBase}/log`),
+                  fetch(`${apiBase}/tree${directory.value ? `?path=${encodeURIComponent(directory.value)}` : ''}`, {
+                    headers: tokenHeaders(),
+                  }),
+                  fetch(`${apiBase}/log`, { headers: tokenHeaders() }),
                 ]);
                 if (treeResponse.ok) entries.value = await treeResponse.json();
                 if (logResponse.ok) commits.value = await logResponse.json();
                 if (previewPath.value) {
-                  const response = await fetch(`${apiBase}/file?path=${encodeURIComponent(previewPath.value)}`);
-                  fileContent.value = response.ok ? await response.text() : "Unable to load file";
+                  const response = await fetch(`${apiBase}/file?path=${encodeURIComponent(previewPath.value)}`, {
+                    headers: tokenHeaders(),
+                  });
+                  fileContent.value = response.ok ? await response.text() : 'Unable to load file';
                 }
               };
               const createFirstRepository = async () => {
                 const name = repoName.value.trim();
                 if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
-                  errorMessage.value = "Use letters, numbers, dots, underscores, or hyphens.";
+                  errorMessage.value = 'Use letters, numbers, dots, underscores, or hyphens.';
                   return;
                 }
-                const session = await fetch("/session")
-                  .then((response) => response.json())
-                  .catch(() => ({}));
-                const owner = session.profile?.preferred_username || session.profile?.username || "jane-doe";
-                const response = await fetch(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`, {
-                  method: "POST",
-                });
-                if (response.ok)
-                  window.location.assign(`/?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(name)}`);
-                else errorMessage.value = "Repository creation failed.";
+                try {
+                  const response = await fetch(`/repos/${encodeURIComponent(name)}`, {
+                    method: 'POST',
+                    headers: tokenHeaders(),
+                  });
+                  if (response.ok) window.location.assign(`/?repo=${encodeURIComponent(name)}`);
+                  else errorMessage.value = 'Repository creation failed.';
+                } catch {
+                  errorMessage.value = 'Repository creation failed.';
+                }
+              };
+              const addFileToRepo = async () => {
+                const filePath = addFilePath.value.trim();
+                if (!filePath) {
+                  errorMessage.value = 'Enter a file path.';
+                  return;
+                }
+                if (filePath.startsWith('/') || filePath.split('/').includes('..') || filePath.includes('\\')) {
+                  errorMessage.value = "Invalid path: use a repository-relative path without '..'.";
+                  return;
+                }
+
+                errorMessage.value = '';
+                try {
+                  const fileResponse = await fetch(`${base()}/files`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...tokenHeaders() },
+                    body: JSON.stringify({ path: filePath, content: '' }),
+                  });
+                  if (!fileResponse.ok) {
+                    errorMessage.value = 'Failed to create file.';
+                    return;
+                  }
+                  const stageResponse = await fetch(`${base()}/stage`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...tokenHeaders() },
+                    body: JSON.stringify({ files: [filePath] }),
+                  });
+                  if (!stageResponse.ok) {
+                    errorMessage.value = 'Failed to stage file.';
+                    return;
+                  }
+                  const commitResponse = await fetch(`${base()}/commit`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...tokenHeaders() },
+                    body: JSON.stringify({ message: `Add ${filePath}` }),
+                  });
+                  if (!commitResponse.ok) {
+                    errorMessage.value = 'Failed to commit file.';
+                    return;
+                  }
+                  window.location.reload();
+                } catch {
+                  errorMessage.value = 'Could not create and commit the file.';
+                }
               };
               const commitChanges = async () => {
-                errorMessage.value = "";
+                errorMessage.value = '';
                 try {
                   const files = entries.value
-                    .filter((entry) => entry.uncommitted && entry.type === "file")
+                    .filter((entry) => entry.uncommitted && entry.type === 'file')
                     .map((entry) => entry.path);
                   if (files.length) {
                     const stage = await fetch(`${base()}/stage`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json", ...tokenHeaders() },
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', ...tokenHeaders() },
                       body: JSON.stringify({ files }),
                     });
-                    if (!stage.ok) throw new Error("Could not stage files. Sign in and try again.");
+                    if (!stage.ok) throw new Error('Could not stage files. Sign in and try again.');
                   }
                   const response = await fetch(`${base()}/commit`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json", ...tokenHeaders() },
-                    body: JSON.stringify({ message: commitMessage.value || "autocommit" }),
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...tokenHeaders() },
+                    body: JSON.stringify({ message: commitMessage.value || 'autocommit' }),
                   });
-                  if (!response.ok) throw new Error("Could not commit changes. Sign in and try again.");
+                  if (!response.ok) throw new Error('Could not commit changes. Sign in and try again.');
                   const current = url();
-                  current.searchParams.delete("path");
+                  current.searchParams.delete('path');
                   window.location.assign(current);
                 } catch (error) {
                   errorMessage.value = error.message;
                 }
               };
-              const upload = async (event) => {
-                dragging.value = false;
-                for (const file of Array.from(event.dataTransfer.files)) {
+              const uploadFiles = async (files) => {
+                const uploadedPaths = [];
+                for (const file of Array.from(files)) {
                   const content = await new Promise((resolve, reject) => {
                     const reader = new FileReader();
-                    reader.onload = () => resolve(String(reader.result).split(",")[1]);
+                    reader.onload = () => resolve(String(reader.result).split(',')[1]);
                     reader.onerror = reject;
                     reader.readAsDataURL(file);
                   });
-                  await fetch(`${base()}/files`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json", ...tokenHeaders() },
-                    body: JSON.stringify({
-                      path: directory.value ? `${directory.value}/${file.name}` : file.name,
-                      content,
-                    }),
+                  const filePath = directory.value ? `${directory.value}/${file.name}` : file.name;
+                  const response = await fetch(`${base()}/files`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...tokenHeaders() },
+                    body: JSON.stringify({ path: filePath, content }),
                   });
+                  if (!response.ok) {
+                    throw new Error('Upload failed. Sign in with repository write access and try again.');
+                  }
+                  uploadedPaths.push(filePath);
                 }
-                window.location.reload();
+                if (commits.value.length === 0 && uploadedPaths.length > 0) {
+                  const stage = await fetch(`${base()}/stage`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...tokenHeaders() },
+                    body: JSON.stringify({ files: uploadedPaths }),
+                  });
+                  if (!stage.ok) throw new Error('Could not stage the uploaded files.');
+                  const commit = await fetch(`${base()}/commit`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...tokenHeaders() },
+                    body: JSON.stringify({ message: 'Initial commit' }),
+                  });
+                  if (!commit.ok) throw new Error('Could not commit the uploaded files.');
+                }
+              };
+              const upload = async (event) => {
+                dragging.value = false;
+                errorMessage.value = '';
+                try {
+                  await uploadFiles(event.dataTransfer.files);
+                  window.location.reload();
+                } catch (error) {
+                  errorMessage.value = error.message;
+                }
               };
               onInit(() => {
                 load().catch(() => {
-                  errorMessage.value = "Unable to load this repository.";
+                  errorMessage.value = 'Unable to load this repository.';
                 });
-                window.addEventListener("git-api-theme", (event) => {
+                window.addEventListener('git-api-theme', (event) => {
                   darkMode.value = event.detail;
                 });
               });
+              const handleFileSelect = async (files) => {
+                errorMessage.value = '';
+                try {
+                  await uploadFiles(files);
+                  window.location.reload();
+                } catch (error) {
+                  errorMessage.value = error.message;
+                }
+              };
+              const uploadFileFromInput = async () => {
+                const input = document.getElementById('repo-file-input');
+                if (input && input.files && input.files.length) {
+                  await handleFileSelect(input.files);
+                } else {
+                  errorMessage.value = 'No files selected.';
+                }
+              };
               return {
                 repo,
                 entries,
@@ -552,6 +765,7 @@
                 previewPath,
                 fileContent,
                 repoName,
+                addFilePath,
                 commitMessage,
                 dragging,
                 errorMessage,
@@ -559,12 +773,17 @@
                 hasUncommitted,
                 rootHref,
                 setRepoName,
+                setAddFilePath,
                 setCommitMessage,
                 setDragging,
                 entryHref,
                 createFirstRepository,
+                addFileToRepo,
                 commitChanges,
                 upload,
+                openFilePicker,
+                handleFileSelect,
+                uploadFileFromInput,
               };
             }
           </script>
@@ -579,7 +798,56 @@
               <div class="mb-6">
                 <h3 class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
                   <i class="fa-solid fa-code-branch"></i> Branches
+                  <button
+                    popovertarget="branch-popover"
+                    style="anchor-name: --branch-popover-anchor"
+                    class="text-xs text-indigo-600 hover:underline"
+                    aria-label="Create branch"
+                  >
+                    +
+                  </button>
                 </h3>
+                <div
+                  popover="auto"
+                  id="branch-popover"
+                  style="
+                    position: fixed;
+                    inset: auto;
+                    margin: 0;
+                    position-anchor: --branch-popover-anchor;
+                    top: anchor(bottom);
+                    left: anchor(left);
+                  "
+                  class="w-48 rounded-lg border border-gray-200 bg-white p-4 shadow-xl dark:border-gray-700 dark:bg-gray-900"
+                >
+                  <form on-submit.prevent="createBranch()" class="space-y-4">
+                    <h3 class="text-sm font-semibold">Create branch</h3>
+                    <label class="block text-xs text-gray-600 dark:text-gray-300"
+                      >Branch name<input
+                        class="mt-1 w-full rounded-md border border-gray-300 bg-transparent px-3 py-2 outline-none focus:border-indigo-500 dark:border-gray-700"
+                        placeholder="main"
+                        required
+                        on-input="setBranchName($event.target.value)"
+                    /></label>
+                    <p class="text-xs text-red-600" role="alert" if="errorMessage">{{ errorMessage }}</p>
+                    <div class="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        class="rounded-md px-2 py-1 text-gray-500"
+                        popovertarget="branch-popover"
+                        popovertargetaction="hide"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        class="rounded-md bg-indigo-600 px-2 py-1 text-sm font-medium text-white hover:bg-indigo-500"
+                        type="submit"
+                      >
+                        Create
+                      </button>
+                    </div>
+                  </form>
+                </div>
                 <ul class="space-y-1">
                   <template for="branch of branches"
                     ><li>
@@ -590,12 +858,73 @@
                       >
                     </li></template
                   >
+                  <template if="!branches.length"
+                    ><p class="text-xs text-gray-500">
+                      No branches.
+                      <button
+                        type="button"
+                        class="underline text-indigo-600 hover:text-indigo-800"
+                        popovertarget="branch-popover"
+                      >
+                        Create one
+                      </button>
+                    </p></template
+                  >
                 </ul>
               </div>
               <div>
                 <h3 class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
                   <i class="fa-solid fa-tags"></i> Tags
+                  <button
+                    popovertarget="tag-popover"
+                    style="anchor-name: --tag-popover-anchor"
+                    class="text-xs text-indigo-600 hover:underline"
+                    aria-label="Create tag"
+                  >
+                    +
+                  </button>
                 </h3>
+                <div
+                  popover="auto"
+                  id="tag-popover"
+                  style="
+                    position: fixed;
+                    inset: auto;
+                    margin: 0;
+                    position-anchor: --tag-popover-anchor;
+                    top: anchor(bottom);
+                    left: anchor(left);
+                  "
+                  class="w-48 rounded-lg border border-gray-200 bg-white p-4 shadow-xl dark:border-gray-700 dark:bg-gray-900"
+                >
+                  <form on-submit.prevent="createTag()" class="space-y-4">
+                    <h3 class="text-sm font-semibold">Create tag</h3>
+                    <label class="block text-xs text-gray-600 dark:text-gray-300"
+                      >Tag name<input
+                        class="mt-1 w-full rounded-md border border-gray-300 bg-transparent px-3 py-2 outline-none focus:border-indigo-500 dark:border-gray-700"
+                        placeholder="v1.0.0"
+                        required
+                        on-input="setTagName($event.target.value)"
+                    /></label>
+                    <p class="text-xs text-red-600" role="alert" if="errorMessage">{{ errorMessage }}</p>
+                    <div class="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        class="rounded-md px-2 py-1 text-gray-500"
+                        popovertarget="tag-popover"
+                        popovertargetaction="hide"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        class="rounded-md bg-indigo-600 px-2 py-1 text-sm font-medium text-white hover:bg-indigo-500"
+                        type="submit"
+                      >
+                        Create
+                      </button>
+                    </div>
+                  </form>
+                </div>
                 <ul class="space-y-1">
                   <template for="tag of tags"
                     ><li>
@@ -606,44 +935,113 @@
                       >
                     </li></template
                   >
+                  <template if="!tags.length"
+                    ><p class="text-xs text-gray-500">
+                      No tags.
+                      <button
+                        type="button"
+                        class="underline text-indigo-600 hover:text-indigo-800"
+                        popovertarget="tag-popover"
+                      >
+                        Create one
+                      </button>
+                    </p></template
+                  >
                 </ul>
               </div>
             </aside></template
           >
           <script state type="application/json">
-            { "repo": null, "branches": [], "tags": [], "darkMode": true }
+            { "repo": null, "branches": [], "tags": [], "errorMessage": "", "darkMode": true }
           </script>
           <script setup>
-            import { ref, onInit } from "@li3/web";
+            import { ref, onInit } from '@li3/web';
             export default function () {
               const repo = ref(null);
               const branches = ref([]);
               const tags = ref([]);
-              const darkMode = ref(localStorage.getItem("theme") !== "light");
+              const branchName = ref('');
+              const tagName = ref('');
+              const errorMessage = ref('');
+              const darkMode = ref(localStorage.getItem('theme') !== 'light');
+              const tokenHeaders = () => {
+                const token = localStorage.getItem('access_token');
+                return token ? { Authorization: `Bearer ${token}` } : {};
+              };
               const refHref = (name) => {
                 const current = new URL(window.location.href);
-                current.searchParams.set("ref", name);
+                current.searchParams.set('ref', name);
                 return `${current.pathname}${current.search}${current.hash}`;
               };
               onInit(async () => {
                 const query = new URL(window.location.href).searchParams;
-                const owner = query.get("owner");
-                const name = query.get("repo");
-                if (owner && name) {
-                  repo.value = { owner, repo: name };
-                  const base = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
+                const name = query.get('repo');
+                if (name) {
+                  repo.value = { repo: name };
+                  const base = `/repos/${encodeURIComponent(name)}`;
                   const results = await Promise.all([
-                    fetch(`${base}/branches`).then((r) => r.json()),
-                    fetch(`${base}/tags`).then((r) => r.json()),
+                    fetch(`${base}/branches`, { headers: tokenHeaders() }),
+                    fetch(`${base}/tags`, { headers: tokenHeaders() }),
                   ]);
-                  branches.value = results[0];
-                  tags.value = results[1];
+                  branches.value = results[0].ok ? await results[0].json() : [];
+                  tags.value = results[1].ok ? await results[1].json() : [];
                 }
-                window.addEventListener("git-api-theme", (event) => {
+                window.addEventListener('git-api-theme', (event) => {
                   darkMode.value = event.detail;
                 });
               });
-              return { repo, branches, tags, darkMode, refHref };
+              const setBranchName = (value) => {
+                branchName.value = value;
+              };
+              const setTagName = (value) => {
+                tagName.value = value;
+              };
+              const createBranch = async () => {
+                const name = branchName.value.trim();
+                if (!name) return;
+                errorMessage.value = '';
+                try {
+                  const response = await fetch(`/repos/${encodeURIComponent(repo.value.repo)}/branches`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...tokenHeaders() },
+                    body: JSON.stringify({ name }),
+                  });
+                  if (response.ok) window.location.reload();
+                  else errorMessage.value = 'Failed to create branch.';
+                } catch {
+                  errorMessage.value = 'Failed to create branch.';
+                }
+              };
+              const createTag = async () => {
+                const name = tagName.value.trim();
+                if (!name) return;
+                errorMessage.value = '';
+                try {
+                  const response = await fetch(`/repos/${encodeURIComponent(repo.value.repo)}/tags`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...tokenHeaders() },
+                    body: JSON.stringify({ name }),
+                  });
+                  if (response.ok) window.location.reload();
+                  else errorMessage.value = 'Failed to create tag.';
+                } catch {
+                  errorMessage.value = 'Failed to create tag.';
+                }
+              };
+              return {
+                repo,
+                branches,
+                tags,
+                branchName,
+                tagName,
+                errorMessage,
+                darkMode,
+                refHref,
+                setBranchName,
+                setTagName,
+                createBranch,
+                createTag,
+              };
             }
           </script>
         </template>
