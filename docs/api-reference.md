@@ -2,19 +2,36 @@
 
 All URLs are relative to the server base URL (`http://localhost:3000` by default).
 
-## Common path parameters
+## Path parameters
 
-- `{owner}` – string, the owner name (e.g. `myorg`).
 - `{repo}` – string, the repository name (e.g. `myproject`).
 - `{name}` – string, the tag or branch name.
+
+## Authentication and authorization
+
+API clients send an active OIDC bearer token. The server validates it through the
+configured issuer's introspection endpoint and derives ownership only from its `sub`
+claim. Tokens need scopes as follows:
+
+- Reads (`GET /repos` and repository `GET` operations): `repo:read` or `repo:write`.
+- Repository creation and all mutations (`POST`, `DELETE`): `repo:write`.
+- `repo:write` includes read access. `repo:read` never grants write access.
+- A valid token without the required scope returns **403 Forbidden**. Missing or
+  invalid authentication returns **401 Unauthorized**.
+
+The browser UI may use a same-origin cookie session. Before accepting it, the server
+forwards the cookie to `/profile` on the configured OIDC issuer and requires a non-empty
+`sub`; requests with a cross-origin `Origin` are rejected. Profile nicknames and display
+names never determine repository ownership. Other applications can use bearer tokens
+with the documented scopes; they are not restricted to the browser session.
+
+Public endpoints (`/health`, `/api`, `/config`, `/session`) do not require authentication.
 
 ## Endpoints
 
 ### GET /health
 
 Return the service health status.
-
-*No authentication required.*
 
 ```http
 GET /health
@@ -28,9 +45,7 @@ GET /health
 
 ### GET /api
 
-Return the full [OpenAPI 3.0.0][] specification describing every other endpoint.
-
-*No authentication required.*
+Return the full [OpenAPI 3.0.3][] specification describing every other endpoint.
 
 ```http
 GET /api
@@ -38,108 +53,146 @@ GET /api
 
 **Response (200)** – JSON body is the spec.
 
-### POST /repos/{owner}/{repo}
-
-Create a new repository directory and initialise a Git repo if one does not exist yet.
-
-```http
-POST /repos/{owner}/{repo}
-```
-
-**Request Body:** none (empty JSON payload acceptable).
-
-**Response (201)**
-
-```json
-{ "message": "Repository {owner}/{repo} is ready", "path": "/data/{owner}/{repo}" }
-```
-
-**Response (500)** – if the directory cannot be created.
-
-### GET /repos/{owner}/{repo}/log
-
-Stream the full commit log as JSON.
-
-```http
-GET /repos/{owner}/{repo}/log
-```
-
-**Response (200)** – JSON array of commit objects (may be empty).
-
-**Response (404)** – repository directory or `.git` folder not found.
-
-### GET /repos/{owner}/{repo}/tree
-
-List the immediate files and directories in the repository or in the optional `path` query directory.
-
-**Response (200)**
-
-```json
-[{ "name": "README.md", "path": "README.md", "type": "file" }]
-```
-
-### GET /repos/{owner}/{repo}/file?path=README.md
-
-Read a text file for the browser preview. Paths are restricted to the repository root.
-
-**Response (200)** – `text/plain` file contents.
-
-**Response (400)** – path traversal or invalid path.
-
-### GET /repos/{owner}/{repo}/history?path=README.md
-
-Return commits affecting a file. A file with no history returns an empty array.
-
-### GET /repos/{owner}/{repo}/branches
-
-Return local branch names as a JSON array.
-
-### GET /repos/{owner}/{repo}/tags
-
-Return tag names as a JSON array.
-
 ### GET /config
 
 Return public browser configuration, including the profile URL derived from
-`OIDC_USSUER` (or `OIDC_ISSUER`).
+`OIDC_ISSUER` when configured.
+
+```http
+GET /config
+```
+
+**Response (200)** – JSON body includes `oidcUserUrl`.
 
 ### GET /session
 
 Return `{ "authenticated": true, "profile": { ... } }` when the current OIDC session
 cookie is valid, otherwise `{ "authenticated": false, "profile": null }`.
 
-### POST /repos/{owner}/{repo}/files
-
-Upload one file without staging it. This endpoint requires OIDC authentication.
-
-```json
-{ "path": "notes.txt", "content": "base64-encoded-bytes" }
+```http
+GET /session
 ```
 
-The response contains `staged: false`. Uncommitted files appear with an asterisk in the UI;
-the commit form calls `POST /repos/{owner}/{repo}/commit` after a message is entered.
+### GET /repos
 
-### POST /repos/{owner}/{repo}/stage
+List only repositories belonging to the authenticated subject. The response contains
+repository names and does not expose an owner or nickname. If no repositories exist,
+returns an empty array `[ ]`.
+
+```http
+GET /repos
+```
+
+**Response (200)** – JSON array of objects containing only the repository name, for
+example `[{ "repo": "my-repo" }]`. Returns `[]` when the authenticated subject has
+no repositories. Guest identity returns `401`.
+
+### POST /repos/{repo}
+
+Create or initialize a repository for the authenticated subject. The endpoint returns
+`201 Created` whether the Git directory was newly initialized or was already present.
+Repository names contain only letters, numbers, dots, underscores, and hyphens. The
+request cannot select an owner: storage ownership is derived from the authenticated
+OIDC `sub` claim and hashed directories under `DATA_PATH`.
+
+If the repository name is invalid, returns `400 Bad Request`. A token requires
+`repo:write`; an unauthenticated guest receives `401`, and a read-only token receives
+`403`.
+
+```http
+POST /repos/{repo}
+```
+
+**Response (201)** – Repository is ready.
+**Response (400)** – Invalid repository name format or empty name.
+
+```json
+{ "message": "Repository {repo} is ready", "repo": "{repo}" }
+```
+
+### GET /repos/{repo}/log
+
+Fetch the repository log.
+
+```http
+GET /repos/{repo}/log
+```
+
+**Response (200)** – JSON array of commit objects (may be empty).
+
+**Response (404)** – repository not found.
+
+### GET /repos/{repo}/tree
+
+List repository files/tree.
+
+```http
+GET /repos/{repo}/tree
+```
+
+**Response (200)** – JSON array of file/directory entries.
+
+**Response (404)** – repository not found.
+
+**Query parameters**
+
+- `path` – optional relative path within the repository to list entries from.
+
+### GET /repos/{repo}/file
+
+Read a repository file.
+
+```http
+GET /repos/{repo}/file
+```
+
+**Query parameters**
+
+- `path` – relative path to the file within the repository.
+
+**Response (200)** – `text/plain` file contents.
+
+**Response (400)** – invalid path or path traversal detected.
+
+**Response (404)** – file not found.
+
+### POST /repos/{repo}/files
+
+Upload one file without staging it. The browser uses the JSON API and encodes the file
+bytes as base64. Send an empty string as `content` to create an empty file.
+
+```http
+POST /repos/{repo}/files
+Content-Type: application/json
+
+{"path":"README.md","content":"IyBIZWxsbyBXb3JsZAo="}
+```
+
+**Response (201)** – file written.
+
+**Response (400)** – invalid file path.
+
+**Response (401)** – no or invalid OIDC token.
+
+**Response (403)** – token lacks `repo:write`.
+
+**Response (404)** – repository not found.
+
+### POST /repos/{repo}/stage
 
 Stage one or more files.
 
-#### Authentication required (OIDC)
-
 ```http
-POST /repos/{owner}/{repo}/stage
+POST /repos/{repo}/stage
 ```
 
-**Request Body**
+**Request Body:**
 
 ```json
 { "files": ["path/to/file1", "path/to/file2"] }
 ```
 
-**Response (200)**
-
-```json
-{ "message": "Files staged successfully" }
-```
+**Response (200)** – `{ "message": "Files staged successfully" }`.
 
 **Response (401)** – no or invalid OIDC token.
 
@@ -147,51 +200,61 @@ POST /repos/{owner}/{repo}/stage
 
 **Response (500)** – Git error.
 
-### POST /repos/{owner}/{repo}/unstage
+### POST /repos/{repo}/unstage
 
 Unstage (reset) one or more files.
 
-#### Authentication required (OIDC)
+```http
+POST /repos/{repo}/unstage
+```
 
-Same shape as `/stage`.
+**Request Body:**
+
+```json
+{ "files": ["path/to/file1", "path/to/file2"] }
+```
 
 **Response (200)** – `{ "message": "Files unstaged successfully" }`.
 
-### POST /repos/{owner}/{repo}/commit
+**Response (401)** – no or invalid OIDC token.
+
+**Response (404)** – repository not found.
+
+**Response (500)** – Git error.
+
+### POST /repos/{repo}/commit
 
 Commit staged changes with an optional message (default `"autocommit"`).
 
-#### Authentication required (OIDC)
-
 ```http
-POST /repos/{owner}/{repo}/commit
+POST /repos/{repo}/commit
 ```
 
-**Request Body (optional)**
+**Request Body (optional):**
 
 ```json
 { "message": "my custom commit message" }
 ```
 
-**Response (200)**
-
-```json
-{ "message": "Changes committed successfully", "commit": "my custom commit message" }
-```
+**Response (200)** – `{ "message": "Changes committed successfully", "commit": "my custom commit message" }`.
 
 **Response (200)** – if no staged changes, `{ "message": "No changes to commit" }`.
 
-### POST /repos/{owner}/{repo}/tags
+**Response (401)** – no or invalid OIDC token.
 
-Add an annotated tag to the current HEAD.
+**Response (500)** – Git error.
 
-#### Authentication required (OIDC)
+### POST /repos/{repo}/tags
+
+Add a lightweight Git tag referencing the current HEAD at commit `HEAD`. Tag endpoints
+are the existing release/version marker model; the API does not define a separate release
+resource. Git returns an error if no commit exists yet.
 
 ```http
-POST /repos/{owner}/{repo}/tags
+POST /repos/{repo}/tags
 ```
 
-**Request Body**
+**Request Body:**
 
 ```json
 { "name": "v1.0.0" }
@@ -199,48 +262,61 @@ POST /repos/{owner}/{repo}/tags
 
 **Response (200)** – `{ "message": "Tag v1.0.0 added" }`.
 
-### DELETE /repos/{owner}/{repo}/tags/{name}
+**Response (401)** – no or invalid OIDC token.
+
+**Response (404)** – repository not found.
+
+### DELETE /repos/{repo}/tags/{name}
 
 Delete a tag.
 
-#### Authentication required (OIDC)
-
 ```http
-DELETE /repos/{owner}/{repo}/tags/{name}
+DELETE /repos/{repo}/tags/{name}
 ```
 
 **Response (200)** – `{ "message": "Tag {name} removed" }`.
 
-### POST /repos/{owner}/{repo}/branches
+**Response (401)** – no or invalid OIDC token.
+
+**Response (404)** – repository not found.
+
+### POST /repos/{repo}/branches
 
 Create a new branch.
 
-#### Authentication required (OIDC)
-
 ```http
-POST /repos/{owner}/{repo}/branches
+POST /repos/{repo}/branches
 ```
 
-**Request Body**
+**Request Body:**
 
 ```json
-{ "name": "new-feature", "startPoint": "main" }   // startPoint optional
+{ "name": "new-feature", "startPoint": "main" } // startPoint optional
 ```
 
 **Response (200)** – `{ "message": "Branch new-feature created" }`.
 
 **Response (400)** – if `name` is missing.
 
-### DELETE /repos/{owner}/{repo}/branches/{name}
+**Response (401)** – no or invalid OIDC token.
 
-Delete a branch.
+**Response (404)** – repository not found.
 
-#### Authentication required (OIDC)
+### DELETE /repos/{repo}/branches/{name}
+
+Delete a branch. Git returns an error when the branch does not exist or cannot be deleted.
+Branch/tag empty states in the UI show create actions that open HTML popover forms.
 
 ```http
-DELETE /repos/{owner}/{repo}/branches/{name}
+DELETE /repos/{repo}/branches/{name}
 ```
 
 **Response (200)** – `{ "message": "Branch {name} removed" }`.
 
-[OpenAPI 3.0.0]: https://swagger.io/specification/v3.0.0/
+**Response (401)** – no or invalid OIDC token.
+
+**Response (404)** – repository not found.
+
+---
+
+[OpenAPI 3.0.3]: https://swagger.io/specification/v3.0.3/

@@ -1,175 +1,371 @@
-const http = require('http');
 const assert = require('assert');
-const { spawn } = require('child_process');
 const fs = require('fs');
+const http = require('http');
+const os = require('os');
 const path = require('path');
 
-const DATA_PATH = process.env.DATA_PATH || './data';
+const dataPath = fs.mkdtempSync(path.join(os.tmpdir(), 'git-store-test-'));
+process.env.DATA_PATH = dataPath;
+process.env.OIDC_ISSUER = '';
+process.env.OIDC_CLIENT_ID = '';
+process.env.OIDC_CLIENT_SECRET = '';
 
-const owner = 'testuser';
-const repo = 'testrepo';
+const app = require('../index');
+const { encodeSubjectDir } = require('../storage');
+const readWriteScopes = ['repo:read', 'repo:write'];
+const tokenSubjects = new Map([
+  ['token-a', { active: true, sub: 'oidc-subject-a', preferred_username: 'same-nickname', scope: 'repo:write' }],
+  [
+    'token-b',
+    { active: true, sub: 'oidc-subject-b', preferred_username: 'same-nickname', scope: readWriteScopes.join(' ') },
+  ],
+  ['read-only', { active: true, sub: 'read-only-subject', scope: 'repo:read' }],
+  ['unscoped', { active: true, sub: 'unscoped-subject' }],
+]);
 
-function request(method, apiPath, data, extraHeaders = {}) {
+// This injects verification inside this test process only. No fake token is
+// accepted by production HTTP requests unless a test explicitly installs it.
+app.locals.verifyToken = async (token) => tokenSubjects.get(token) || null;
+
+function request(port, method, requestPath, body, token, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
-    const options = {
-      hostname: 'localhost',
-      port: 3000,
-      path: apiPath,
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        ...extraHeaders,
-      },
-    };
-    const req = http.request(options, (res) => {
-      let body = '';
-      res.on('data', (chunk) => (body += chunk));
-      res.on('end', () => resolve({ status: res.statusCode, body }));
+    const payload = body === undefined ? undefined : JSON.stringify(body);
+    const headers = { ...extraHeaders };
+    if (payload !== undefined) {
+      headers['Content-Type'] = 'application/json';
+      headers['Content-Length'] = Buffer.byteLength(payload);
+    }
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    const req = http.request({ hostname: '127.0.0.1', port, method, path: requestPath, headers }, (res) => {
+      let responseBody = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => {
+        responseBody += chunk;
+      });
+      res.on('end', () => resolve({ status: res.statusCode, body: responseBody }));
     });
     req.on('error', reject);
-    if (data !== undefined) {
-      req.write(JSON.stringify(data));
+    if (payload !== undefined) {
+      req.write(payload);
     }
     req.end();
   });
 }
 
-(async () => {
-  const server = spawn(process.execPath, ['index.js'], { env: { ...process.env, DATA_PATH } });
-  server.stdout.on('data', (data) => console.log('SERVER:', String(data)));
-  server.stderr.on('data', (data) => console.error('SERVER ERR:', String(data)));
+async function run() {
+  const server = app.listen(0);
+  await new Promise((resolve) => server.once('listening', resolve));
+  const port = server.address().port;
 
-  await new Promise(r => setTimeout(r, 1500));
+  try {
+    const createA = await request(port, 'POST', '/repos/shared-repo', undefined, 'token-a');
+    const createB = await request(port, 'POST', '/repos/shared-repo', undefined, 'token-b');
+    assert.strictEqual(createA.status, 201);
+    assert.strictEqual(createB.status, 201);
 
-  const base = `/repos/${owner}/${repo}`;
+    const repoA = path.join(dataPath, encodeSubjectDir('oidc-subject-a'), 'shared-repo');
+    const repoB = path.join(dataPath, encodeSubjectDir('oidc-subject-b'), 'shared-repo');
+    assert.ok(fs.existsSync(path.join(repoA, '.git')));
+    assert.ok(fs.existsSync(path.join(repoB, '.git')));
+    assert.notStrictEqual(repoA, repoB);
+    assert.ok(!repoA.includes('same-nickname'), 'nickname must not appear in ownership path');
 
-  // 1. Create repo
-  const resCreate = await request('POST', base);
-  assert.strictEqual(resCreate.status, 201, 'create repo should return 201');
-  console.log('✅ POST', base, '=> 201');
+    const listA = await request(port, 'GET', '/repos', undefined, 'token-a');
+    const listB = await request(port, 'GET', '/repos', undefined, 'token-b');
+    assert.deepStrictEqual(JSON.parse(listA.body), [{ repo: 'shared-repo' }]);
+    assert.deepStrictEqual(JSON.parse(listB.body), [{ repo: 'shared-repo' }]);
 
-  // 2. Get log
-  const resLog = await request('GET', `${base}/log`);
-  assert.ok([200].includes(resLog.status), `log should return 200, got ${resLog.status}`);
-  console.log('✅ GET', base, '/log =>', resLog.status);
-
-  const repoDirectory = path.join(DATA_PATH, owner, repo);
-  fs.writeFileSync(path.join(repoDirectory, 'README.md'), '# Integration test\n');
-  const resTree = await request('GET', `${base}/tree`);
-  assert.strictEqual(resTree.status, 200, 'tree should return 200');
-  assert.ok(JSON.parse(resTree.body).some((entry) => entry.path === 'README.md'));
-  const resFile = await request('GET', `${base}/file?path=README.md`);
-  assert.strictEqual(resFile.status, 200, 'file should return 200');
-  assert.strictEqual(resFile.body, '# Integration test\n');
-  const resTraversal = await request('GET', `${base}/file?path=../package.json`);
-  assert.strictEqual(resTraversal.status, 400, 'file traversal should return 400');
-  const resBranches = await request('GET', `${base}/branches`);
-  assert.strictEqual(resBranches.status, 200, 'branches should return 200');
-  const resTags = await request('GET', `${base}/tags`);
-  assert.strictEqual(resTags.status, 200, 'tags should return 200');
-  const resHistory = await request('GET', `${base}/history?path=README.md`);
-  assert.strictEqual(resHistory.status, 200, 'history should return 200');
-  console.log('✅ tree, file, branches, and tags endpoints');
-
-  // 3. GET /api – OpenAPI spec
-  const resApi = await request('GET', '/api');
-  assert.strictEqual(resApi.status, 200, '/api should return 200');
-  const spec = JSON.parse(resApi.body);
-  assert.ok(spec.openapi, 'spec must have openapi version');
-  assert.ok(spec.paths, 'spec must have paths');
-  assert.deepStrictEqual(spec.servers, [{ url: '/', description: 'This git store server' }]);
-  const expectedPaths = ['/health', '/api', '/config', '/session', '/repos', '/repos/{owner}/{repo}', '/repos/{owner}/{repo}/log',
-    '/repos/{owner}/{repo}/stage', '/repos/{owner}/{repo}/unstage',
-    '/repos/{owner}/{repo}/commit', '/repos/{owner}/{repo}/tags',
-    '/repos/{owner}/{repo}/tags/{name}', '/repos/{owner}/{repo}/branches',
-    '/repos/{owner}/{repo}/branches/{name}', '/repos/{owner}/{repo}/tree',
-    '/repos/{owner}/{repo}/file', '/repos/{owner}/{repo}/history', '/repos/{owner}/{repo}/files'];
-  for (const p of expectedPaths) {
-    assert.ok(spec.paths[p], `spec must contain path ${p}`);
-  }
-  const expectedOperations = {
-    '/health': ['get'],
-    '/api': ['get'],
-    '/config': ['get'],
-    '/session': ['get'],
-    '/repos': ['get'],
-    '/repos/{owner}/{repo}': ['post'],
-    '/repos/{owner}/{repo}/log': ['get'],
-    '/repos/{owner}/{repo}/stage': ['post'],
-    '/repos/{owner}/{repo}/unstage': ['post'],
-    '/repos/{owner}/{repo}/commit': ['post'],
-    '/repos/{owner}/{repo}/tags': ['post'],
-    '/repos/{owner}/{repo}/tags/{name}': ['delete'],
-    '/repos/{owner}/{repo}/branches': ['post'],
-    '/repos/{owner}/{repo}/branches/{name}': ['delete'],
-    '/repos/{owner}/{repo}/tree': ['get'],
-    '/repos/{owner}/{repo}/file': ['get'],
-    '/repos/{owner}/{repo}/history': ['get'],
-    '/repos/{owner}/{repo}/files': ['post'],
-  };
-  for (const [pathName, methods] of Object.entries(expectedOperations)) {
-    for (const method of methods) {
-      assert.ok(spec.paths[pathName][method], `spec must contain ${method.toUpperCase()} ${pathName}`);
+    const readOnlyList = await request(port, 'GET', '/repos', undefined, 'read-only');
+    assert.strictEqual(readOnlyList.status, 200, 'repo:read permits repository listing');
+    const readOnlyRepo = path.join(dataPath, encodeSubjectDir('read-only-subject'), 'read-only-repo');
+    fs.mkdirSync(readOnlyRepo, { recursive: true });
+    await require('simple-git').simpleGit(readOnlyRepo).init();
+    fs.writeFileSync(path.join(readOnlyRepo, 'readme.txt'), 'read only');
+    const readOnlyTree = await request(port, 'GET', '/repos/read-only-repo/tree', undefined, 'read-only');
+    assert.strictEqual(readOnlyTree.status, 200, 'repo:read permits repository file listing');
+    assert.deepStrictEqual(
+      JSON.parse(readOnlyTree.body).map((entry) => entry.path),
+      ['readme.txt'],
+    );
+    assert.strictEqual((await request(port, 'GET', '/repos/read-only-repo/log', undefined, 'read-only')).status, 200);
+    assert.deepStrictEqual(
+      JSON.parse((await request(port, 'GET', '/repos/read-only-repo/branches', undefined, 'read-only')).body),
+      [],
+      'empty repositories have an empty branch list',
+    );
+    assert.deepStrictEqual(
+      JSON.parse((await request(port, 'GET', '/repos/read-only-repo/tags', undefined, 'read-only')).body),
+      [],
+    );
+    assert.strictEqual(
+      (await request(port, 'GET', '/repos/read-only-repo/file?path=readme.txt', undefined, 'read-only')).status,
+      200,
+    );
+    assert.deepStrictEqual(
+      JSON.parse(
+        (await request(port, 'GET', '/repos/read-only-repo/history?path=readme.txt', undefined, 'read-only')).body,
+      ),
+      [],
+    );
+    const crossSubjectTree = await request(port, 'GET', '/repos/shared-repo/tree', undefined, 'read-only');
+    assert.strictEqual(crossSubjectTree.status, 404, 'repo:read identity cannot access another subject repository');
+    const readOnlyCreate = await request(port, 'POST', '/repos/not-allowed', undefined, 'read-only');
+    assert.strictEqual(readOnlyCreate.status, 403, 'repo:read cannot create repositories');
+    const readOnlyUpload = await request(
+      port,
+      'POST',
+      '/repos/shared-repo/files',
+      { path: 'forbidden.txt', content: 'eA==' },
+      'read-only',
+    );
+    assert.strictEqual(readOnlyUpload.status, 403, 'repo:read cannot write repository files');
+    const unscopedList = await request(port, 'GET', '/repos', undefined, 'unscoped');
+    assert.strictEqual(unscopedList.status, 403, 'authenticated API token without repo scope is forbidden');
+    const unscopedCreate = await request(port, 'POST', '/repos/not-allowed', undefined, 'unscoped');
+    assert.strictEqual(unscopedCreate.status, 403, 'unscoped API token cannot create repositories');
+    const readOnlyMutations = [
+      ['POST', '/repos/shared-repo/stage', { files: ['private.txt'] }],
+      ['POST', '/repos/shared-repo/unstage', { files: ['private.txt'] }],
+      ['POST', '/repos/shared-repo/commit', { message: 'forbidden' }],
+      ['POST', '/repos/shared-repo/tags', { name: 'forbidden' }],
+      ['DELETE', '/repos/shared-repo/tags/v1'],
+      ['POST', '/repos/shared-repo/branches', { name: 'forbidden' }],
+      ['DELETE', '/repos/shared-repo/branches/feature'],
+    ];
+    for (const [method, requestPath, body] of readOnlyMutations) {
+      const response = await request(port, method, requestPath, body, 'read-only');
+      assert.strictEqual(response.status, 403, `${method} ${requestPath} requires repo:write`);
     }
+
+    const originalFetch = global.fetch;
+    process.env.OIDC_ISSUER = 'https://auth.example.test';
+    global.fetch = async (url, options) => {
+      assert.strictEqual(String(url), 'https://auth.example.test/profile');
+      assert.strictEqual(options.headers.cookie, 'oidc-session=valid');
+      return { ok: true, json: async () => ({ sub: 'cookie-subject' }) };
+    };
+    try {
+      const sessionHeaders = { Cookie: 'oidc-session=valid', Origin: `http://127.0.0.1:${port}` };
+      const sessionCreate = await request(port, 'POST', '/repos/cookie-repo', undefined, undefined, sessionHeaders);
+      assert.strictEqual(sessionCreate.status, 201, 'provider-confirmed same-origin sessions support the UI');
+      const sessionRepo = path.join(dataPath, encodeSubjectDir('cookie-subject'), 'cookie-repo');
+      assert.ok(fs.existsSync(path.join(sessionRepo, '.git')));
+      const crossOrigin = await request(port, 'POST', '/repos/cross-origin-repo', undefined, undefined, {
+        Cookie: 'oidc-session=valid',
+        Origin: 'https://attacker.example',
+      });
+      assert.strictEqual(crossOrigin.status, 401, 'cross-origin cookie requests are rejected');
+    } finally {
+      global.fetch = originalFetch;
+      process.env.OIDC_ISSUER = '';
+    }
+
+    const upload = await request(
+      port,
+      'POST',
+      '/repos/shared-repo/files',
+      { path: 'private.txt', content: Buffer.from('subject A').toString('base64') },
+      'token-a',
+    );
+    assert.strictEqual(upload.status, 201);
+    const fileA = await request(port, 'GET', '/repos/shared-repo/file?path=private.txt', undefined, 'token-a');
+    const fileB = await request(port, 'GET', '/repos/shared-repo/file?path=private.txt', undefined, 'token-b');
+    assert.strictEqual(fileA.status, 200);
+    assert.strictEqual(fileA.body, 'subject A');
+    assert.strictEqual(fileB.status, 404, 'another subject must not read repository files');
+
+    const largerPayload = Buffer.alloc(128 * 1024, 'x');
+    const largeUpload = await request(
+      port,
+      'POST',
+      '/repos/shared-repo/files',
+      { path: 'large.bin', content: largerPayload.toString('base64') },
+      'token-a',
+    );
+    assert.strictEqual(largeUpload.status, 201, 'uploads larger than Express default JSON limit must work');
+    assert.strictEqual(
+      fs.readFileSync(path.join(repoA, 'large.bin')).length,
+      largerPayload.length,
+      'uploaded binary content should be decoded without loss',
+    );
+
+    const emptyLog = await request(port, 'GET', '/repos/shared-repo/log', undefined, 'token-a');
+    assert.strictEqual(emptyLog.status, 200);
+    assert.deepStrictEqual(JSON.parse(emptyLog.body), []);
+    const emptyFile = await request(
+      port,
+      'POST',
+      '/repos/shared-repo/files',
+      { path: 'nested/empty.txt', content: '' },
+      'token-a',
+    );
+    assert.strictEqual(emptyFile.status, 201, 'full-path empty files can be created');
+    assert.strictEqual(fs.readFileSync(path.join(repoA, 'nested/empty.txt')).length, 0);
+    const stage = await request(
+      port,
+      'POST',
+      '/repos/shared-repo/stage',
+      { files: ['private.txt', 'nested/empty.txt'] },
+      'token-a',
+    );
+    assert.strictEqual(stage.status, 200);
+    const commit = await request(port, 'POST', '/repos/shared-repo/commit', { message: 'identity test' }, 'token-a');
+    assert.strictEqual(commit.status, 200);
+    const log = await request(port, 'GET', '/repos/shared-repo/log', undefined, 'token-a');
+    assert.strictEqual(JSON.parse(log.body).length, 1);
+    const history = await request(port, 'GET', '/repos/shared-repo/history?path=private.txt', undefined, 'token-a');
+    assert.strictEqual(JSON.parse(history.body).length, 1);
+
+    const addTag = await request(port, 'POST', '/repos/shared-repo/tags', { name: 'v1' }, 'token-a');
+    assert.strictEqual(addTag.status, 200);
+    const tags = await request(port, 'GET', '/repos/shared-repo/tags', undefined, 'token-a');
+    assert.ok(JSON.parse(tags.body).includes('v1'));
+    assert.strictEqual((await request(port, 'DELETE', '/repos/shared-repo/tags/v1', undefined, 'token-a')).status, 200);
+
+    const addBranch = await request(port, 'POST', '/repos/shared-repo/branches', { name: 'feature' }, 'token-a');
+    assert.strictEqual(addBranch.status, 200, addBranch.body);
+    const branches = await request(port, 'GET', '/repos/shared-repo/branches', undefined, 'token-a');
+    assert.ok(JSON.parse(branches.body).includes('feature'));
+    assert.strictEqual(
+      (await request(port, 'DELETE', '/repos/shared-repo/branches/feature', undefined, 'token-a')).status,
+      200,
+    );
+
+    const unstageUpload = await request(
+      port,
+      'POST',
+      '/repos/shared-repo/files',
+      { path: 'unstaged.txt', content: Buffer.from('unstaged').toString('base64') },
+      'token-a',
+    );
+    assert.strictEqual(unstageUpload.status, 201);
+    assert.strictEqual(
+      (await request(port, 'POST', '/repos/shared-repo/stage', { files: ['unstaged.txt'] }, 'token-a')).status,
+      200,
+    );
+    assert.strictEqual(
+      (await request(port, 'POST', '/repos/shared-repo/unstage', { files: ['unstaged.txt'] }, 'token-a')).status,
+      200,
+    );
+
+    const traversal = await request(port, 'GET', '/repos/shared-repo/file?path=..%2Foutside', undefined, 'token-a');
+    assert.strictEqual(traversal.status, 400, 'path traversal must be rejected');
+    fs.writeFileSync(path.join(dataPath, 'outside-secret.txt'), 'outside');
+    fs.symlinkSync(dataPath, path.join(repoA, 'escape'), 'dir');
+    const symlinkTraversal = await request(
+      port,
+      'GET',
+      '/repos/shared-repo/file?path=escape%2Foutside-secret.txt',
+      undefined,
+      'token-a',
+    );
+    assert.strictEqual(symlinkTraversal.status, 400, 'symlink traversal must be rejected');
+    assert.strictEqual((await request(port, 'POST', '/repos/%2E%2E', undefined, 'token-a')).status, 400);
+    const oldOwnerRoute = await request(port, 'GET', '/repos/same-nickname/shared-repo/log', undefined, 'token-a');
+    assert.strictEqual(oldOwnerRoute.status, 404, 'old owner-selected route must not be supported');
+
+    const protectedRequests = [
+      ['GET', '/repos'],
+      ['POST', '/repos/new-repo'],
+      ['GET', '/repos/shared-repo/log'],
+      ['GET', '/repos/shared-repo/tree'],
+      ['GET', '/repos/shared-repo/file?path=private.txt'],
+      ['GET', '/repos/shared-repo/history?path=private.txt'],
+      ['GET', '/repos/shared-repo/branches'],
+      ['GET', '/repos/shared-repo/tags'],
+      ['POST', '/repos/shared-repo/files', { path: 'no.txt', content: 'eA==' }],
+      ['POST', '/repos/shared-repo/stage', { files: ['private.txt'] }],
+      ['POST', '/repos/shared-repo/unstage', { files: ['private.txt'] }],
+      ['POST', '/repos/shared-repo/commit', { message: 'test' }],
+      ['POST', '/repos/shared-repo/tags', { name: 'v1' }],
+      ['DELETE', '/repos/shared-repo/tags/v1'],
+      ['POST', '/repos/shared-repo/branches', { name: 'feature' }],
+      ['DELETE', '/repos/shared-repo/branches/feature'],
+    ];
+    for (const [method, requestPath, body] of protectedRequests) {
+      const response = await request(port, method, requestPath, body);
+      assert.strictEqual(response.status, 401, `${method} ${requestPath} should require authentication`);
+    }
+
+    const specResponse = await request(port, 'GET', '/api');
+    assert.strictEqual(specResponse.status, 200);
+    const spec = JSON.parse(specResponse.body);
+    const expectedMethods = {
+      '/health': ['get'],
+      '/api': ['get'],
+      '/config': ['get'],
+      '/session': ['get'],
+      '/repos': ['get'],
+      '/repos/{repo}': ['post'],
+      '/repos/{repo}/log': ['get'],
+      '/repos/{repo}/tree': ['get'],
+      '/repos/{repo}/file': ['get'],
+      '/repos/{repo}/history': ['get'],
+      '/repos/{repo}/branches': ['get', 'post'],
+      '/repos/{repo}/tags': ['get', 'post'],
+      '/repos/{repo}/files': ['post'],
+      '/repos/{repo}/stage': ['post'],
+      '/repos/{repo}/unstage': ['post'],
+      '/repos/{repo}/commit': ['post'],
+      '/repos/{repo}/tags/{name}': ['delete'],
+      '/repos/{repo}/branches/{name}': ['delete'],
+    };
+    assert.deepStrictEqual(Object.keys(spec.paths).sort(), Object.keys(expectedMethods).sort());
+    for (const [specPath, methods] of Object.entries(expectedMethods)) {
+      assert.deepStrictEqual(Object.keys(spec.paths[specPath]).sort(), methods.sort(), `methods for ${specPath}`);
+      if (specPath.startsWith('/repos')) {
+        for (const method of methods) {
+          assert.ok(spec.paths[specPath][method].security, `${method} ${specPath} must be authenticated`);
+        }
+      }
+    }
+    assert.strictEqual(spec.paths['/repos']['get']['x-required-scope'], 'repo:read or repo:write');
+    assert.strictEqual(spec.paths['/repos/{repo}'].post['x-required-scope'], 'repo:write');
+    assert.strictEqual(spec.paths['/repos/{repo}/tags'].post['x-required-scope'], 'repo:write');
+
+    const uiResponse = await request(port, 'GET', '/');
+    assert.strictEqual(uiResponse.status, 200);
+    assert.ok(uiResponse.body.includes('{{ repo.repo }}'));
+    assert.ok(uiResponse.body.includes('repo=${encodeURIComponent(repo.repo)}'));
+    assert.ok(!uiResponse.body.includes('{{ repo.owner }}'));
+    assert.ok(uiResponse.body.includes('fixed inset-0 z-30 bg-black/40 md:hidden'));
+    assert.ok(uiResponse.body.includes('on-click="closeMenu()"'));
+    assert.ok(uiResponse.body.includes('popover="auto"'));
+    assert.ok(uiResponse.body.includes('popovertargetaction="hide"'));
+    assert.ok(uiResponse.body.includes('type="file"'));
+    assert.ok(uiResponse.body.includes('No branches.'));
+    assert.ok(uiResponse.body.includes('No tags.'));
+    const mainStart = uiResponse.body.indexOf('<main ');
+    const viewerSetupStart = uiResponse.body.indexOf('<script setup>', mainStart);
+    const viewerSetupEnd = uiResponse.body.indexOf('</script>', viewerSetupStart);
+    const viewerSetup = uiResponse.body.slice(viewerSetupStart, viewerSetupEnd);
+    assert.ok(viewerSetup.includes('const setAddFilePath'), 'add-file input handler must be in the viewer app island');
+    assert.ok(viewerSetup.includes('setAddFilePath,'), 'viewer app island must expose the add-file input handler');
+    const sidebarComponent = fs.readFileSync(path.join(__dirname, '../public/components/repo-sidebar.html'), 'utf8');
+    const repoPanelComponent = fs.readFileSync(path.join(__dirname, '../public/components/repo-panel.html'), 'utf8');
+    const repoViewerComponent = fs.readFileSync(path.join(__dirname, '../public/components/repo-viewer.html'), 'utf8');
+    assert.ok(!sidebarComponent.includes('item.owner'));
+    assert.ok(sidebarComponent.includes('popover="auto"'));
+    assert.ok(!sidebarComponent.includes('dialogOpen'));
+    assert.ok(!repoPanelComponent.includes('owner='));
+    assert.ok(repoPanelComponent.includes('No branches.'));
+    assert.ok(repoPanelComponent.includes('No tags.'));
+    assert.ok(!repoViewerComponent.includes('No commits yet'));
+    assert.ok(repoViewerComponent.includes('id="repo-file-input"'));
+
+    const health = await request(port, 'GET', '/health');
+    assert.strictEqual(health.status, 200);
+    console.log('All integration tests passed.');
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+    fs.rmSync(dataPath, { recursive: true, force: true });
   }
-  console.log('✅ GET /api => spec with', expectedPaths.length, 'paths');
+}
 
-  const resUi = await request('GET', '/');
-  assert.strictEqual(resUi.status, 200, 'SPA entry point should return 200');
-  assert.strictEqual((resUi.body.match(/<template app>/g) || []).length, 4, 'UI should contain four independent Li³ app islands');
-  assert.strictEqual((resUi.body.match(/<script state type="application\/json">/g) || []).length, 4, 'each island should declare its own JSON state');
-  assert.ok(resUi.body.includes('git-api-theme'), 'islands should synchronize theme through an event');
-  console.log('✅ GET / => four independent Li³ app islands');
-
-  // 4. Protected endpoints should return 401 without auth
-  const protectedEndpoints = [
-    { method: 'POST', path: `${base}/stage`, body: { files: [] } },
-    { method: 'POST', path: `${base}/unstage`, body: { files: [] } },
-    { method: 'POST', path: `${base}/commit`, body: { message: 'test' } },
-    { method: 'POST', path: `${base}/tags`, body: { name: 'v1' } },
-    { method: 'DELETE', path: `${base}/tags/v1` },
-    { method: 'POST', path: `${base}/branches`, body: { name: 'main' } },
-    { method: 'DELETE', path: `${base}/branches/main` },
-    { method: 'POST', path: `${base}/files`, body: { path: 'upload.txt', content: 'aGk=' } },
-  ];
-
-  for (const ep of protectedEndpoints) {
-    const extra = {};
-    if (ep.body) extra['Content-Type'] = 'application/json';
-    const res = await request(ep.method, ep.path, ep.body, extra);
-    assert.strictEqual(res.status, 401, `${ep.method} ${ep.path} should return 401 without auth, got ${res.status}`);
-    console.log(`✅ ${ep.method} ${ep.path} => 401`);
-  }
-
-  // 5. Health endpoint unauthenticated should work
-  const resHealth = await request('GET', '/health');
-  assert.strictEqual(resHealth.status, 200, '/health should return 200 without auth');
-  console.log('✅ GET /health => 200', JSON.parse(resHealth.body));
-  const resSession = await request('GET', '/session');
-  assert.strictEqual(resSession.status, 200, '/session should return 200 without a session');
-  console.log('✅ GET /session => 200');
-
-  const missingLog = await request('GET', '/repos/missing/missing/log');
-  assert.strictEqual(missingLog.status, 404, 'missing repositories should return 404');
-  console.log('✅ GET missing log => 404');
-
-  if (process.env.TEST_OIDC_TOKEN) {
-    const auth = { Authorization: `Bearer ${process.env.TEST_OIDC_TOKEN}` };
-    const filePath = `${DATA_PATH}/${owner}/${repo}/README.md`;
-    require('fs').writeFileSync(filePath, 'integration test\n');
-    const stage = await request('POST', `${base}/stage`, { files: ['README.md'] }, auth);
-    assert.strictEqual(stage.status, 200, 'authenticated stage should return 200');
-    const commit = await request('POST', `${base}/commit`, { message: 'integration test' }, auth);
-    assert.strictEqual(commit.status, 200, 'authenticated commit should return 200');
-    const tag = await request('POST', `${base}/tags`, { name: 'v1' }, auth);
-    assert.strictEqual(tag.status, 200, 'authenticated tag creation should return 200');
-    const branch = await request('POST', `${base}/branches`, { name: 'integration' }, auth);
-    assert.strictEqual(branch.status, 200, 'authenticated branch creation should return 200');
-    assert.strictEqual((await request('DELETE', `${base}/tags/v1`, undefined, auth)).status, 200);
-    assert.strictEqual((await request('DELETE', `${base}/branches/integration`, undefined, auth)).status, 200);
-    console.log('✅ authenticated mutation flow');
-  }
-
-  console.log('\n🎉 All tests passed!');
-  server.kill();
-})();
+run().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
