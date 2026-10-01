@@ -24,6 +24,9 @@
 
 - [ ] Run authenticated end-to-end mutation tests with provisioned OIDC credentials.
 - [x] Build and smoke-test the Docker image locally, including `/health` and `/api`.
-- [ ] Verify CI workflow status and build logs after the next pushed commit.
+- [x] Verify CI Docker build status and inspect the failed NPM publish logs.
 - [x] Add static UI checks for repo-only navigation and outside-click backdrop wiring.
-- [ ] Verify mobile sidebar interaction in a real browser.
+- [x] Verify mobile sidebar outside-click behavior in Playwright.
+- [x] Verify native upload input and drag/drop feedback in Playwright.
+- [ ] Run authenticated end-to-end mutation checks with provisioned OIDC credentials.
+- [ ] Fix CI NPM publishing provenance once the runner provides a supported provenance identity; latest failure is `EUSAGE: Automatic provenance generation not supported for provider: null`.
