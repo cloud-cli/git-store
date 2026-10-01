@@ -19,14 +19,17 @@
 - [x] Verify read-only and unscoped API tokens cannot create or mutate repositories.
 - [x] Add native anchored popovers, empty branch/tag states, empty-repository onboarding, file input, and existing-repo drag/drop.
 - [x] Keep repository ownership and display keyed by stable OIDC subject / repo name rather than nickname.
+- [x] Start browser login through OIDC authorization code + PKCE, validate state/nonce, and keep access tokens server-side.
+- [x] Remove dotenv and `.env` file loading; configure the service through process environment variables.
+- [x] Test mocked browser login, callback, scoped session use, logout, and sign-in redirect.
+- [x] Verify the deployed guest sign-in link redirects to the configured OIDC `/authorize` endpoint.
 
 ## Next iteration
 
-- [ ] Run authenticated end-to-end mutation tests with provisioned OIDC credentials.
 - [x] Build and smoke-test the Docker image locally, including `/health` and `/api`.
 - [x] Verify CI Docker build status and inspect the failed NPM publish logs.
 - [x] Add static UI checks for repo-only navigation and outside-click backdrop wiring.
 - [x] Verify mobile sidebar outside-click behavior in Playwright.
 - [x] Verify native upload input and drag/drop feedback in Playwright.
-- [ ] Run authenticated end-to-end mutation checks with provisioned OIDC credentials.
+- [ ] Run authenticated end-to-end provider mutation checks with provisioned production OIDC credentials.
 - [ ] Fix CI NPM publishing provenance once the runner provides a supported provenance identity; latest failure is `EUSAGE: Automatic provenance generation not supported for provider: null`.

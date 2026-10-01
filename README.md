@@ -90,6 +90,10 @@ with `*`. Branch and tag empty states provide matching create popovers.
 The topbar reads the current session profile from `/session`, displaying the authenticated
 OIDC name, email, and picture when available, or a signed-out state otherwise.
 
+The service reads configuration only from process environment variables; it does not load
+`.env` files. Browser sign-in uses `/auth/login` and requires the OIDC client callback URI
+to be registered as `/auth/callback`.
+
 ## Configuration
 
 | Variable             | Default              | Purpose                                       |
