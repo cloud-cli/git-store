@@ -27,14 +27,14 @@ async function initializeOidc() {
   }
   try {
     const { Issuer } = require("openid-client");
-    const issuer = await Issuer.discover(process.env.OIDC_ISSUER);
+    let issuer = await Issuer.discover(process.env.OIDC_ISSUER);
     if (process.env.OIDC_JWKS_URI) {
       const issuerOrigin = new URL(process.env.OIDC_ISSUER).origin;
       const jwksUrl = new URL(process.env.OIDC_JWKS_URI);
       if (jwksUrl.origin !== issuerOrigin) {
         throw new Error("OIDC JWKS endpoint must share the issuer origin");
       }
-      issuer.metadata.jwks_uri = jwksUrl.toString();
+      issuer = new Issuer({ ...issuer.metadata, jwks_uri: jwksUrl.toString() });
     }
     oidcClient = new issuer.Client({
       client_id: process.env.OIDC_CLIENT_ID,
@@ -773,6 +773,7 @@ app.get("/auth/callback", async (req, res) => {
   } catch (error) {
     const oauthError = typeof error.error === "string" && /^[a-z0-9_]+$/i.test(error.error) ? error.error : "none";
     const statusCode = Number.isInteger(error.statusCode) ? error.statusCode : "none";
+    const endpoint = typeof error.response?.req?.path === "string" ? error.response.req.path : "none";
     const description =
       typeof error.error_description === "string"
         ? error.error_description.replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]").slice(0, 160)
@@ -786,7 +787,7 @@ app.get("/auth/callback", async (req, res) => {
         .slice(0, 160);
     }
     console.error(
-      `OIDC callback failed during ${callbackStage}: ${error.name || "Error"}, oauth=${oauthError}, status=${statusCode}, detail=${description}, message=${message}`,
+      `OIDC callback failed during ${callbackStage}: ${error.name || "Error"}, oauth=${oauthError}, status=${statusCode}, endpoint=${endpoint}, detail=${description}, message=${message}`,
     );
     return res.status(401).send("OIDC sign-in failed. Please try again.");
   }
