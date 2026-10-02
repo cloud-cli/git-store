@@ -102,7 +102,7 @@ Forbidden**; unauthenticated requests return **401 Unauthorized**. A guest or re
 token cannot create a repository.
 
 The topbar's **Sign in** action starts an OIDC authorization-code flow with PKCE. The
-callback validates state, nonce, and the ID token, confirms the access token is active,
+callback validates state, PKCE, and the ID token, confirms the access token is active,
 then establishes an HttpOnly, SameSite=Lax application session. The access token is kept
 server-side. Register the exact callback URL (preferably configured with
 `OIDC_REDIRECT_URI`) with the OIDC client. If that variable is unset, the service derives

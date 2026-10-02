@@ -686,13 +686,11 @@ app.get("/auth/login", (req, res) => {
   try {
     const { generators } = require("openid-client");
     const state = generators.state();
-    const nonce = generators.nonce();
     const codeVerifier = generators.codeVerifier();
     const codeChallenge = generators.codeChallenge(codeVerifier);
     const redirectUri = getOidcRedirectUri(req);
     const options = cookieOptions(redirectUri, 10 * 60 * 1000);
     res.cookie("git_oidc_state", state, options);
-    res.cookie("git_oidc_nonce", nonce, options);
     res.cookie("git_oidc_verifier", codeVerifier, options);
     res.cookie("git_oidc_return", safeReturnPath(req.query.returnTo), options);
     const authorizationUrl = client.authorizationUrl({
@@ -700,7 +698,6 @@ app.get("/auth/login", (req, res) => {
       redirect_uri: redirectUri,
       scope: "openid profile email repo:read repo:write",
       state,
-      nonce,
       code_challenge: codeChallenge,
       code_challenge_method: "S256",
     });
@@ -727,11 +724,10 @@ app.get("/auth/callback", async (req, res) => {
 
   const cookies = parseCookies(req.headers.cookie);
   const state = cookies.git_oidc_state;
-  const nonce = cookies.git_oidc_nonce;
   const codeVerifier = cookies.git_oidc_verifier;
   const returnTo = safeReturnPath(cookies.git_oidc_return);
   clearLoginCookies(res, options);
-  if (!state || !nonce || !codeVerifier || req.query.state !== state || typeof req.query.code !== "string") {
+  if (!state || !codeVerifier || req.query.state !== state || typeof req.query.code !== "string") {
     return res.status(400).send("OIDC sign-in response was invalid. Please try again.");
   }
 
@@ -740,7 +736,7 @@ app.get("/auth/callback", async (req, res) => {
     const tokenSet = await client.callback(
       redirectUri,
       { code: req.query.code, state: req.query.state },
-      { state, nonce, code_verifier: codeVerifier },
+      { state, code_verifier: codeVerifier },
     );
     const accessToken = tokenSet.access_token;
     const idClaims = tokenSet.claims();

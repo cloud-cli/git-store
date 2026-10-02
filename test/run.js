@@ -344,7 +344,7 @@ async function run() {
         assert.strictEqual(callbackParams.code, "mock-code");
         assert.strictEqual(callbackParams.state, checks.state);
         assert.ok(checks.code_verifier);
-        assert.ok(checks.nonce);
+        assert.strictEqual(checks.nonce, undefined, "the issuer's supported PKCE flow does not issue a nonce claim");
         assert.ok(redirectUri.endsWith("/auth/callback"));
         return {
           access_token: "browser-session-token",

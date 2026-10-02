@@ -77,13 +77,13 @@ The endpoint can also identify an active bearer token passed in the `Authorizati
 
 ### GET /auth/login
 
-Start the OIDC authorization-code flow with PKCE. The service saves short-lived state,
-nonce, and verifier cookies and redirects to the configured issuer. An optional same-origin
+Start the OIDC authorization-code flow with PKCE. The service saves short-lived state
+and verifier cookies and redirects to the configured issuer. An optional same-origin
 `returnTo` path is restored after sign-in.
 
 ### GET /auth/callback
 
-Configured OIDC redirect URI. Validates the response, exchanges the authorization code,
+Configured OIDC redirect URI. Validates state and the PKCE exchange, exchanges the authorization code,
 confirms the access token and subject, then establishes the local HttpOnly browser session.
 
 ### POST /auth/logout
