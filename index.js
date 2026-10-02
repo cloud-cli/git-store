@@ -771,7 +771,11 @@ app.get("/auth/callback", async (req, res) => {
     res.set("Cache-Control", "no-store");
     return res.redirect(303, returnTo);
   } catch (error) {
-    console.error(`OIDC callback failed during ${callbackStage}: ${error.name || "Error"}`);
+    const oauthError = typeof error.error === "string" && /^[a-z0-9_]+$/i.test(error.error) ? error.error : "none";
+    const statusCode = Number.isInteger(error.statusCode) ? error.statusCode : "none";
+    console.error(
+      `OIDC callback failed during ${callbackStage}: ${error.name || "Error"}, oauth=${oauthError}, status=${statusCode}`,
+    );
     return res.status(401).send("OIDC sign-in failed. Please try again.");
   }
 });
