@@ -96,15 +96,16 @@ to be registered as `/auth/callback`.
 
 ## Configuration
 
-| Variable             | Default              | Purpose                                       |
-| -------------------- | -------------------- | --------------------------------------------- |
-| `DATA_PATH`          | `/data` in the image | Repository storage root                       |
-| `PORT`               | `3000`               | HTTP listen port                              |
-| `OIDC_ISSUER`        | unset                | OIDC discovery issuer                         |
-| `OIDC_CLIENT_ID`     | unset                | OIDC client identifier                        |
-| `OIDC_CLIENT_SECRET` | unset                | OIDC introspection credential                 |
-| `OIDC_REDIRECT_URI`  | derived              | Registered `/auth/callback` URL (recommended) |
-| `PUBLIC_URL`         | derived              | Public origin used to derive the callback URL |
+| Variable             | Default              | Purpose                                                    |
+| -------------------- | -------------------- | ---------------------------------------------------------- |
+| `DATA_PATH`          | `/data` in the image | Repository storage root                                    |
+| `PORT`               | `3000`               | HTTP listen port                                           |
+| `OIDC_ISSUER`        | unset                | OIDC discovery issuer                                      |
+| `OIDC_CLIENT_ID`     | unset                | OIDC client identifier                                     |
+| `OIDC_CLIENT_SECRET` | unset                | OIDC introspection credential                              |
+| `OIDC_REDIRECT_URI`  | derived              | Registered `/auth/callback` URL (recommended)              |
+| `PUBLIC_URL`         | derived              | Public origin used to derive the callback URL              |
+| `OIDC_JWKS_URI`      | issuer metadata      | Same-issuer JWKS override for incorrect discovery metadata |
 
 When OIDC variables are absent, repository requests fail closed with `401`.
 

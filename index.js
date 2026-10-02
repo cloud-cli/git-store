@@ -28,6 +28,14 @@ async function initializeOidc() {
   try {
     const { Issuer } = require("openid-client");
     const issuer = await Issuer.discover(process.env.OIDC_ISSUER);
+    if (process.env.OIDC_JWKS_URI) {
+      const issuerOrigin = new URL(process.env.OIDC_ISSUER).origin;
+      const jwksUrl = new URL(process.env.OIDC_JWKS_URI);
+      if (jwksUrl.origin !== issuerOrigin) {
+        throw new Error("OIDC JWKS endpoint must share the issuer origin");
+      }
+      issuer.metadata.jwks_uri = jwksUrl.toString();
+    }
     oidcClient = new issuer.Client({
       client_id: process.env.OIDC_CLIENT_ID,
       client_secret: process.env.OIDC_CLIENT_SECRET,
