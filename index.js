@@ -777,8 +777,16 @@ app.get("/auth/callback", async (req, res) => {
       typeof error.error_description === "string"
         ? error.error_description.replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]").slice(0, 160)
         : "none";
+    let message = "none";
+    if (typeof error.message === "string") {
+      message = error.message
+        .replaceAll(process.env.OIDC_CLIENT_SECRET || "\0", "[redacted]")
+        .replace(/(code|token|secret|verifier)=\S+/gi, "$1=[redacted]")
+        .replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]")
+        .slice(0, 160);
+    }
     console.error(
-      `OIDC callback failed during ${callbackStage}: ${error.name || "Error"}, oauth=${oauthError}, status=${statusCode}, detail=${description}`,
+      `OIDC callback failed during ${callbackStage}: ${error.name || "Error"}, oauth=${oauthError}, status=${statusCode}, detail=${description}, message=${message}`,
     );
     return res.status(401).send("OIDC sign-in failed. Please try again.");
   }
