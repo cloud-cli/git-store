@@ -38,16 +38,17 @@ npm start
 
 ## Environment variables
 
-| Variable             | Required?                  | Default         | Description                                                                             |
-| -------------------- | -------------------------- | --------------- | --------------------------------------------------------------------------------------- |
-| `DATA_PATH`          | yes                        | none            | Absolute path where all repositories are created.                                       |
-| `PORT`               | no                         | `3000`          | TCP port on which the HTTP server listens.                                              |
-| `OIDC_ISSUER`        | yes (when OIDC is enabled) | unset           | OpenID Connect issuer URL (used for discovery).                                         |
-| `OIDC_CLIENT_ID`     | yes (when OIDC is enabled) | –               | Client identifier registered with the OIDC provider.                                    |
-| `OIDC_CLIENT_SECRET` | yes (when OIDC is enabled) | –               | secret for the client.                                                                  |
-| `OIDC_REDIRECT_URI`  | recommended                | derived         | Exact registered callback URL ending in `/auth/callback`.                               |
-| `PUBLIC_URL`         | no                         | derived         | Public service origin used to build the callback URL when `OIDC_REDIRECT_URI` is unset. |
-| `OIDC_JWKS_URI`      | no                         | issuer metadata | Same-issuer JWKS override when discovery advertises an incorrect endpoint.              |
+| Variable              | Required?                  | Default         | Description                                                                             |
+| --------------------- | -------------------------- | --------------- | --------------------------------------------------------------------------------------- |
+| `DATA_PATH`           | yes                        | none            | Absolute path where all repositories are created.                                       |
+| `PORT`                | no                         | `3000`          | TCP port on which the HTTP server listens.                                              |
+| `OIDC_ISSUER`         | yes (when OIDC is enabled) | unset           | OpenID Connect issuer URL (used for discovery).                                         |
+| `OIDC_CLIENT_ID`      | yes (when OIDC is enabled) | –               | Client identifier registered with the OIDC provider.                                    |
+| `OIDC_CLIENT_SECRET`  | yes (when OIDC is enabled) | –               | secret for the client.                                                                  |
+| `OIDC_REDIRECT_URI`   | recommended                | derived         | Exact registered callback URL ending in `/auth/callback`.                               |
+| `PUBLIC_URL`          | no                         | derived         | Public service origin used to build the callback URL when `OIDC_REDIRECT_URI` is unset. |
+| `OIDC_JWKS_URI`       | no                         | issuer metadata | Same-issuer JWKS override when discovery advertises an incorrect endpoint.              |
+| `OIDC_BROWSER_SCOPES` | recommended                | none            | Scopes granted to browser sessions, e.g. `repo:read repo:write`.                        |
 
 ## Basic API calls (using `curl`)
 

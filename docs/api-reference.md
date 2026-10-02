@@ -20,10 +20,11 @@ claim. Tokens need scopes as follows:
   invalid authentication returns **401 Unauthorized**.
 
 The browser UI signs in through `/auth/login` using authorization code + PKCE. The callback
-validates state, nonce, ID-token claims, and active-token introspection before issuing a
-signed HttpOnly same-origin cookie. Access tokens stay server-side. Cookie-authenticated
-repository writes require same-origin requests. Profile nicknames and display names never
-determine repository ownership. Other applications can use scoped bearer tokens.
+validates state, ID-token claims, and the token's userinfo subject before issuing a signed
+HttpOnly same-origin cookie. Access tokens stay server-side. Browser-session scopes come
+from `OIDC_BROWSER_SCOPES`; cookie-authenticated repository writes require same-origin
+requests. Profile nicknames and display names never determine repository ownership. Other
+applications can use scoped opaque bearer tokens validated through OIDC introspection.
 
 Public endpoints (`/health`, `/api`, `/config`, `/session`) do not require authentication.
 

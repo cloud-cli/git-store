@@ -353,6 +353,15 @@ async function run() {
         };
       },
     };
+    process.env.OIDC_ISSUER = "https://issuer.example.test";
+    process.env.OIDC_CLIENT_ID = "mock-git-store-client";
+    process.env.OIDC_BROWSER_SCOPES = "repo:read repo:write";
+    const nativeFetch = global.fetch;
+    global.fetch = async (url, options) => {
+      assert.strictEqual(String(url), "https://issuer.example.test/userinfo");
+      assert.strictEqual(options.headers.Authorization, "Bearer browser-session-token");
+      return { ok: true, json: async () => ({ id: "browser-subject", name: "Signed In" }) };
+    };
     const login = await request(port, "GET", "/auth/login?returnTo=%2F%3Frepo%3Dresume");
     assert.strictEqual(login.status, 302);
     assert.ok(authorizationOptions.scope.includes("repo:read repo:write"));
@@ -380,17 +389,13 @@ async function run() {
       Origin: `http://127.0.0.1:${port}`,
     });
     assert.strictEqual(sessionCreatedRepo.status, 201, "OIDC browser sessions with repo:write can create repositories");
-    const nativeFetch = global.fetch;
-    process.env.OIDC_ISSUER = "https://issuer.example.test";
-    global.fetch = async (url, options) => {
-      assert.strictEqual(String(url), "https://issuer.example.test/userinfo");
-      assert.strictEqual(options.headers.Authorization, "Bearer browser-session-token");
-      return { ok: true, json: async () => ({ sub: "browser-subject", name: "Signed In" }) };
-    };
-    const browserProfile = await request(port, "GET", "/session", undefined, undefined, { Cookie: sessionCookie });
+    const browserProfile = await request(port, "GET", "/session", undefined, undefined, {
+      Cookie: sessionCookie,
+      Origin: `http://127.0.0.1:${port}`,
+    });
     assert.deepStrictEqual(JSON.parse(browserProfile.body), {
       authenticated: true,
-      profile: { sub: "browser-subject", name: "Signed In" },
+      profile: { id: "browser-subject", sub: "browser-subject", name: "Signed In" },
     });
     const tokenVerifier = app.locals.verifyToken;
     process.env.OIDC_CLIENT_ID = "mock-git-store-client";
@@ -432,6 +437,8 @@ async function run() {
     assert.strictEqual(loggedOutList.status, 401, "logout invalidates the browser session");
     global.fetch = nativeFetch;
     process.env.OIDC_ISSUER = "";
+    process.env.OIDC_CLIENT_ID = "";
+    process.env.OIDC_BROWSER_SCOPES = "";
     app.locals.oidcClientOverride = null;
 
     const uiResponse = await request(port, "GET", "/");

@@ -197,19 +197,12 @@ async function requireAuthentication(req, res, next) {
   }
 
   // Browser sessions are represented by an opaque, signed local cookie. Tokens stay
-  // server-side and are introspected on each request; cookie auth is same-origin only.
+  // server-side and the validated OIDC subject/scopes are held for the short token lifetime.
   const session = getBrowserSession(req);
   if (session && isSameOriginRequest(req)) {
-    try {
-      const claims = await introspectAccessToken(session.accessToken);
-      if (claims?.active && typeof claims.sub === "string" && claims.sub === session.sub) {
-        req.user = claims;
-        req.authType = "session";
-        return next();
-      }
-    } catch {
-      browserSessions.delete(session.id);
-    }
+    req.user = { sub: session.sub, scope: session.scope, active: true };
+    req.authType = "session";
+    return next();
   }
 
   return res.status(401).json({ error: "Unauthorized" });
@@ -648,9 +641,12 @@ app.get("/session", async (req, res) => {
     return res.json({ authenticated: false, profile: null });
   }
   try {
+    const browserSession = getBrowserSession(req);
+    if (browserSession && isSameOriginRequest(req)) {
+      return res.json({ authenticated: true, profile: browserSession.profile });
+    }
     const authorization = req.headers.authorization || "";
-    const session = getBrowserSession(req);
-    const token = /^Bearer\s+/i.test(authorization) ? authorization.slice(7).trim() : session?.accessToken;
+    const token = /^Bearer\s+/i.test(authorization) ? authorization.slice(7).trim() : null;
     if (!token) {
       return res.json({ authenticated: false, profile: null });
     }
@@ -665,8 +661,9 @@ app.get("/session", async (req, res) => {
       });
       if (response.ok) {
         const userInfo = await response.json();
-        if (userInfo.sub === claims.sub) {
-          profile = userInfo;
+        const profileSub = userInfo.sub || userInfo.id;
+        if (profileSub === claims.sub) {
+          profile = { ...userInfo, sub: claims.sub };
         }
       }
     } catch {
@@ -740,24 +737,33 @@ app.get("/auth/callback", async (req, res) => {
     );
     const accessToken = tokenSet.access_token;
     const idClaims = tokenSet.claims();
-    callbackStage = "access-token introspection";
-    const introspection = accessToken ? await introspectAccessToken(accessToken) : null;
-    if (
-      !accessToken ||
-      !introspection?.active ||
-      typeof introspection.sub !== "string" ||
-      introspection.sub !== idClaims.sub
-    ) {
-      return res.status(401).send("OIDC sign-in did not return an active repository identity.");
+    if (!accessToken || typeof idClaims.sub !== "string" || !idClaims.sub.trim()) {
+      return res.status(401).send("OIDC sign-in did not return a valid repository identity.");
     }
 
+    callbackStage = "userinfo validation";
+    const userInfoResponse = await fetch(new URL("/userinfo", process.env.OIDC_ISSUER), {
+      headers: { Authorization: `Bearer ${accessToken}`, "X-Auth-Audience": process.env.OIDC_CLIENT_ID },
+    });
+    if (!userInfoResponse.ok) {
+      return res.status(401).send("OIDC sign-in could not verify the access-token profile.");
+    }
+    const profile = await userInfoResponse.json();
+    if ((profile.sub || profile.id) !== idClaims.sub) {
+      return res.status(401).send("OIDC sign-in subject did not match the access-token profile.");
+    }
+    profile.sub = idClaims.sub;
+
     const id = crypto.randomBytes(32).toString("base64url");
-    const expiresIn =
-      Number(introspection.exp ? introspection.exp * 1000 - Date.now() : tokenSet.expires_in * 1000) || 3600_000;
+    const expiresIn = Number(tokenSet.expires_in * 1000 || idClaims.exp * 1000 - Date.now()) || 3600_000;
     const maxAge = Math.max(60_000, Math.min(expiresIn, 24 * 60 * 60 * 1000));
+    const browserScopes = (process.env.OIDC_BROWSER_SCOPES || "")
+      .split(/[\s,]+/)
+      .filter((scope) => scope === "repo:read" || scope === "repo:write");
     browserSessions.set(id, {
-      accessToken,
-      sub: introspection.sub,
+      sub: idClaims.sub,
+      profile,
+      scope: browserScopes.join(" "),
       expiresAt: Date.now() + maxAge,
     });
     callbackStage = "browser-session cookie creation";
