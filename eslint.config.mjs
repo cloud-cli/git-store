@@ -16,6 +16,7 @@ export default {
       Buffer: true,
       fetch: true,
       URL: true,
+      URLSearchParams: true,
     },
   },
   rules: {

@@ -392,6 +392,37 @@ async function run() {
       authenticated: true,
       profile: { sub: "browser-subject", name: "Signed In" },
     });
+    const tokenVerifier = app.locals.verifyToken;
+    process.env.OIDC_CLIENT_ID = "mock-git-store-client";
+    app.locals.verifyToken = null;
+    global.fetch = async (url, options) => {
+      assert.strictEqual(String(url), "https://issuer.example.test/oauth/introspect");
+      assert.strictEqual(
+        options.headers.Authorization,
+        `Basic ${Buffer.from("mock-git-store-client:test-client-secret").toString("base64")}`,
+      );
+      assert.ok(String(options.body).includes("token=opaque-api-token"));
+      return {
+        ok: true,
+        json: async () => ({ active: true, sub: "introspected-subject", scope: "repo:read repo:write" }),
+      };
+    };
+    const introspectedList = await request(port, "GET", "/repos", undefined, "opaque-api-token");
+    assert.strictEqual(introspectedList.status, 200, "opaque repo:read/write API token should introspect successfully");
+    const introspectedWrite = await request(
+      port,
+      "POST",
+      "/repos/not-created/tags",
+      { name: "v1" },
+      "opaque-api-token",
+    );
+    assert.strictEqual(
+      introspectedWrite.status,
+      404,
+      "repo:write scope passes authorization before missing repo lookup",
+    );
+    app.locals.verifyToken = tokenVerifier;
+    process.env.OIDC_CLIENT_ID = "";
     const logout = await request(port, "POST", "/auth/logout", undefined, undefined, {
       Cookie: sessionCookie,
       Origin: `http://127.0.0.1:${port}`,

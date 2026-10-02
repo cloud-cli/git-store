@@ -31,6 +31,7 @@ async function initializeOidc() {
     oidcClient = new issuer.Client({
       client_id: process.env.OIDC_CLIENT_ID,
       client_secret: process.env.OIDC_CLIENT_SECRET,
+      token_endpoint_auth_method: "client_secret_post",
     });
     oidcReady = true;
   } catch {
@@ -91,11 +92,22 @@ async function introspectAccessToken(token) {
   if (app.locals.verifyToken) {
     return app.locals.verifyToken(token);
   }
-  const client = getOidcClient();
-  if (!client) {
+  if (!process.env.OIDC_ISSUER || !process.env.OIDC_CLIENT_ID || !process.env.OIDC_CLIENT_SECRET) {
     return null;
   }
-  return client.introspect(token);
+  const credentials = Buffer.from(`${process.env.OIDC_CLIENT_ID}:${process.env.OIDC_CLIENT_SECRET}`).toString("base64");
+  const response = await fetch(new URL("/oauth/introspect", process.env.OIDC_ISSUER), {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${credentials}`,
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({ token, token_type_hint: "access_token" }),
+  });
+  if (!response.ok) {
+    throw new Error(`OIDC token introspection failed: ${response.status}`);
+  }
+  return response.json();
 }
 
 function isSameOriginRequest(req) {

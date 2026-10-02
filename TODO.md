@@ -31,5 +31,8 @@
 - [x] Add static UI checks for repo-only navigation and outside-click backdrop wiring.
 - [x] Verify mobile sidebar outside-click behavior in Playwright.
 - [x] Verify native upload input and drag/drop feedback in Playwright.
+- [x] Create a disposable Auth Lab OIDC client and configure Git Store to use its issuer/client.
+- [x] Mint and revoke Auth Lab `repo:read`/`repo:write` API tokens and verify scope enforcement against an isolated local Git Store process.
 - [ ] Run authenticated end-to-end provider mutation checks with provisioned production OIDC credentials.
+- [ ] Enable JWT signing in Auth Lab (`/.well-known/jwks.json` currently returns 503) before completing the browser OIDC callback.
 - [ ] Fix CI NPM publishing provenance once the runner provides a supported provenance identity; latest failure is `EUSAGE: Automatic provenance generation not supported for provider: null`.
