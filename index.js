@@ -735,6 +735,7 @@ app.get("/auth/callback", async (req, res) => {
     return res.status(400).send("OIDC sign-in response was invalid. Please try again.");
   }
 
+  let callbackStage = "authorization-code exchange and ID-token validation";
   try {
     const tokenSet = await client.callback(
       redirectUri,
@@ -743,6 +744,7 @@ app.get("/auth/callback", async (req, res) => {
     );
     const accessToken = tokenSet.access_token;
     const idClaims = tokenSet.claims();
+    callbackStage = "access-token introspection";
     const introspection = accessToken ? await introspectAccessToken(accessToken) : null;
     if (
       !accessToken ||
@@ -762,12 +764,14 @@ app.get("/auth/callback", async (req, res) => {
       sub: introspection.sub,
       expiresAt: Date.now() + maxAge,
     });
+    callbackStage = "browser-session cookie creation";
     res.cookie(sessionCookieName, `${id}.${signSessionId(id)}`, {
       ...cookieOptions(redirectUri, maxAge),
     });
     res.set("Cache-Control", "no-store");
     return res.redirect(303, returnTo);
-  } catch {
+  } catch (error) {
+    console.error(`OIDC callback failed during ${callbackStage}: ${error.name || "Error"}`);
     return res.status(401).send("OIDC sign-in failed. Please try again.");
   }
 });
