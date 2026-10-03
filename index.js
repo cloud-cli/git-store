@@ -366,19 +366,22 @@ async function createRepo(req, res) {
     return res.status(400).json({ error: "Invalid repository name" });
   }
 
-  const repoPath = ensureRepoDir(getHashedSubjectDir(req), repo);
-  const git = getGit(repoPath);
+  try {
+    const repoPath = ensureRepoDir(getHashedSubjectDir(req), repo);
+    const git = getGit(repoPath);
 
-  if (!fs.existsSync(path.join(repoPath, ".git"))) {
-    await git.init();
-    await git.addConfig("user.name", "git-store");
-    await git.addConfig("user.email", "git-store@local");
+    if (!fs.existsSync(path.join(repoPath, ".git"))) {
+      await git.init();
+      await git.addConfig("user.name", "git-store");
+      await git.addConfig("user.email", "git-store@local");
+    }
+
+    return res.status(201).json({ message: `Repository ${repo} is ready`, repo });
+  } catch (error) {
+    const code = typeof error.code === "string" ? error.code : "REPO_INITIALIZATION_FAILED";
+    process.stderr.write(`[repo-create] ${code}\n`);
+    return res.status(500).json({ error: "Repository creation failed", code });
   }
-
-  return res.status(201).json({
-    message: `Repository ${repo} is ready`,
-    repo,
-  });
 }
 
 /**

@@ -279,11 +279,13 @@
                   headers: tokenHeaders(),
                 });
                 if (response.ok) window.location.assign(repoHref({ repo: name }));
-                else
+                else {
+                  const result = await response.json().catch(() => ({}));
                   errorMessage.value =
                     response.status === 401 || response.status === 403
                       ? "Sign in with repository write access."
-                      : "Repository creation failed.";
+                      : `${result.error || "Repository creation failed"} (${result.code || response.status})`;
+                }
               } catch {
                 errorMessage.value = "Repository creation failed.";
               }
@@ -656,7 +658,13 @@
                     headers: tokenHeaders(),
                   });
                   if (response.ok) window.location.assign(`/?repo=${encodeURIComponent(name)}`);
-                  else errorMessage.value = "Repository creation failed.";
+                  else {
+                    const result = await response.json().catch(() => ({}));
+                    errorMessage.value =
+                      response.status === 401 || response.status === 403
+                        ? "Sign in with repository write access."
+                        : `${result.error || "Repository creation failed"} (${result.code || response.status})`;
+                  }
                 } catch {
                   errorMessage.value = "Repository creation failed.";
                 }
