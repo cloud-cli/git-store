@@ -12,8 +12,10 @@
     </script>
     <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
-    <style>
+    <style type="text/tailwindcss">
       @custom-variant dark (&:where(.dark, .dark *));
+    </style>
+    <style>
       html,
       body {
         width: 100%;
@@ -66,21 +68,32 @@
           >
             <i class="fa-solid fa-circle-half-stroke"></i>
           </button>
-          <a
-            attr-href="userUrl"
-            class="flex items-center gap-3 border-l border-gray-200 pl-4 dark:border-gray-700"
-            attr-title="userLinkTitle"
-          >
-            <span class="hidden text-right leading-tight sm:block"
-              ><span class="block font-medium">{{ userName }}</span
-              ><span class="block text-xs text-gray-500 dark:text-gray-400">{{ userEmail }}</span></span
+          <template if="profile"
+            ><a
+              attr-href="profileUrl"
+              class="flex items-center gap-3 border-l border-gray-200 pl-4 dark:border-gray-700"
+              title="Open profile"
             >
-            <img
-              attr-src="userAvatar"
-              attr-alt="userName"
-              class="h-8 w-8 rounded-full border border-gray-200 object-cover dark:border-gray-700"
-            />
-          </a>
+              <span class="hidden text-right leading-tight sm:block"
+                ><span class="block font-medium">{{ userName }}</span
+                ><span class="block text-xs text-gray-500 dark:text-gray-400">{{ userEmail }}</span></span
+              >
+              <img
+                attr-src="userAvatar"
+                attr-alt="userName"
+                class="h-8 w-8 rounded-full border border-gray-200 object-cover dark:border-gray-700"
+              /> </a
+          ></template>
+          <template if="!profile"
+            ><a
+              attr-href="userUrl"
+              title="Sign in with OIDC"
+              class="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 font-medium text-white transition-colors hover:bg-indigo-500"
+            >
+              <i class="fa-solid fa-arrow-right-to-bracket"></i>
+              <span>Sign in</span>
+            </a></template
+          >
         </div>
       </header>
       <script state type="application/json">
@@ -95,12 +108,9 @@
           const profileUrl = ref("#");
           const darkMode = ref(localStorage.getItem("theme") !== "light");
           const userName = computed(
-            () => profile.value?.name || profile.value?.preferred_username || profile.value?.email || "Sign in",
+            () => profile.value?.name || profile.value?.preferred_username || profile.value?.email || "Signed in",
           );
-          const userEmail = computed(
-            () => profile.value?.email || (profile.value ? "Signed in" : "Connect your OIDC account"),
-          );
-          const userLinkTitle = computed(() => (profile.value ? "Open profile" : "Sign in with OIDC"));
+          const userEmail = computed(() => profile.value?.email || "Signed in");
           const userAvatar = computed(
             () =>
               profile.value?.picture ||
@@ -141,7 +151,7 @@
           return {
             profile,
             userUrl,
-            userLinkTitle,
+            profileUrl,
             darkMode,
             userName,
             userEmail,
@@ -279,6 +289,15 @@
               }
             };
             onInit(async () => {
+              window.addEventListener("git-api-theme", (event) => {
+                darkMode.value = event.detail;
+              });
+              window.addEventListener("git-api-sidebar-toggle", () => {
+                menuOpen.value = !menuOpen.value;
+              });
+              window.addEventListener("keydown", (event) => {
+                if (event.key === "Escape" && menuOpen.value) closeMenu();
+              });
               const session = await fetch("/session", { headers: tokenHeaders() })
                 .then((response) => response.json())
                 .catch(() => ({ authenticated: false }));
@@ -293,15 +312,6 @@
               } else {
                 repositories.value = [];
               }
-              window.addEventListener("git-api-theme", (event) => {
-                darkMode.value = event.detail;
-              });
-              window.addEventListener("git-api-sidebar-toggle", () => {
-                menuOpen.value = !menuOpen.value;
-              });
-              window.addEventListener("keydown", (event) => {
-                if (event.key === "Escape" && menuOpen.value) closeMenu();
-              });
             });
             return {
               repositories,

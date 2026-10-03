@@ -84,6 +84,8 @@ computed values, lifecycle hooks, and event bindings. Framework reference:
 https://li3.static.apphor.de/docs.html.
 The signed-out user card starts OIDC authorization-code + PKCE sign-in; signed-in users
 can open `${OIDC_ISSUER}/me`. Access tokens stay server-side in an opaque signed session.
+The topbar presents an explicit Sign in button for guests; the light/dark control synchronizes
+reactive theme state across all four page islands using Tailwind v4's class-based variant.
 The repository plus button opens an anchored HTML popover. Empty repositories offer a file upload that creates the initial commit;
 files dropped into or selected for an existing repository remain unstaged and are marked
 with `*`. Branch and tag empty states provide matching create popovers.

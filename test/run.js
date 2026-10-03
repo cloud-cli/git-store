@@ -453,6 +453,10 @@ async function run() {
     assert.ok(uiResponse.body.includes('type="file"'));
     assert.ok(uiResponse.body.includes('on-change="handleFileSelect($event.target.files)"'));
     assert.ok(uiResponse.body.includes('on-drop.prevent="upload($event)"'));
+    assert.ok(uiResponse.body.includes('<style type="text/tailwindcss">'));
+    assert.ok(uiResponse.body.includes("@custom-variant dark (&:where(.dark, .dark *));"));
+    assert.ok(uiResponse.body.includes("<span>Sign in</span>"));
+    assert.strictEqual((uiResponse.body.match(/window\.addEventListener\("git-api-theme"/g) || []).length, 4);
     assert.ok(
       uiResponse.body.includes('<template if="dragging"'),
       "drag/drop helper should only appear while dragging",
