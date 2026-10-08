@@ -110,9 +110,17 @@
           const userUrl = ref("#");
           const loginUrl = ref("#");
           const profileUrl = ref("#");
-          const darkMode = ref(localStorage.getItem("theme") !== "light");
+          const savedTheme = localStorage.getItem("theme");
+          const darkMode = ref(
+            savedTheme ? savedTheme === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches,
+          );
           const userName = computed(
-            () => profile.value?.name || profile.value?.preferred_username || profile.value?.email || "Signed in",
+            () =>
+              profile.value?.alias ||
+              profile.value?.name ||
+              profile.value?.preferred_username ||
+              profile.value?.email ||
+              "Signed in",
           );
           const userEmail = computed(() => profile.value?.email || "Signed in");
           const userAvatar = computed(
@@ -277,7 +285,10 @@
             const menuOpen = ref(false);
             const repoName = ref("");
             const errorMessage = ref("");
-            const darkMode = ref(localStorage.getItem("theme") !== "light");
+            const savedTheme = localStorage.getItem("theme");
+            const darkMode = ref(
+              savedTheme ? savedTheme === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches,
+            );
             const route = () => new URL(window.location.href).searchParams;
             const repoHref = (repo) => `/?repo=${encodeURIComponent(repo.repo)}`;
             const isSelected = (repo) => route().get("repo") === repo.repo;
@@ -608,7 +619,10 @@
               const commitMessage = ref("");
               const dragging = ref(false);
               const errorMessage = ref("");
-              const darkMode = ref(localStorage.getItem("theme") !== "light");
+              const savedTheme = localStorage.getItem("theme");
+              const darkMode = ref(
+                savedTheme ? savedTheme === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches,
+              );
               const hasUncommitted = computed(() => entries.value.some((entry) => entry.uncommitted));
               const url = () => new URL(window.location.href);
               const base = () => `/api/v1/repos/${encodeURIComponent(repo.value.repo)}`;
@@ -1036,7 +1050,10 @@
               const branchName = ref("");
               const tagName = ref("");
               const errorMessage = ref("");
-              const darkMode = ref(localStorage.getItem("theme") !== "light");
+              const savedTheme = localStorage.getItem("theme");
+              const darkMode = ref(
+                savedTheme ? savedTheme === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches,
+              );
               const tokenHeaders = () => {
                 const token = localStorage.getItem("access_token");
                 return token ? { Authorization: `Bearer ${token}` } : {};

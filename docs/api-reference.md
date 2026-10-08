@@ -19,6 +19,37 @@ claim. Tokens need scopes as follows:
 - A valid token without the required scope returns **403 Forbidden**. Missing or
   invalid authentication returns **401 Unauthorized**.
 
+## Immutable user aliases
+
+`GET /api/v1/profile/alias` returns `{ "alias": string|null }`. Set the alias once
+with `PUT /api/v1/profile/alias` and either a JSON string or `{ "alias": "..." }`.
+When omitted, a valid `preferred_username` (or `username`) claim is snapshotted;
+otherwise an explicit alias is required. Aliases are URL-safe, globally unique
+case-insensitively, and immutable (repeating the same value is idempotent). The
+registry stores only SHA-256 subject hashes, never raw OIDC subjects.
+The OIDC username is only a starting value: later changes to `preferred_username`
+or the display name do not alter the saved alias.
+
+```http
+PUT /api/v1/profile/alias
+Content-Type: application/json
+
+{"alias":"my-integrator-name"}
+```
+
+Omit `alias` (send `{}`) to snapshot the validated `preferred_username` or
+`username` claim. The first assignment returns **200**; invalid names return **400**,
+and an alias already owned by another subject or a later rename attempt returns **409**.
+The same alias may be submitted again idempotently.
+
+Alias-qualified repository routes use `/api/v1/repos/{alias}/{repo}/...` and
+`/git/{alias}/{repo}.git/...`. They require normal repo scopes and verify that the
+resolved alias belongs to the authenticated subject; foreign aliases return 404.
+The original `/api/v1/repos/{repo}/...` and `/git/{repo}.git/...` paths remain valid.
+For example, use `POST /api/v1/repos/{alias}/{repo}` to create a repository or
+`GET /api/v1/repos/{alias}/{repo}/log` to read its history. All other repository API
+operations are available under the same alias-qualified prefix.
+
 The browser UI signs in through `/ui/auth/login` using authorization code + PKCE. The callback
 validates state, ID-token claims, and the token's userinfo subject before issuing a signed
 HttpOnly same-origin cookie. Access tokens stay server-side. Browser-session scopes come

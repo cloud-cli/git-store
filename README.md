@@ -19,6 +19,12 @@ short repo names only — no owner segment in the URL.
   falls back to browser sessions. Use HTTPS in deployment; plain HTTP is suitable
   only for local testing. PATs are not issued by this version; use an OIDC access
   token until PAT management is added.
+- Users may set one permanent URL-safe alias with `PUT /api/v1/profile/alias`.
+  Aliases are globally unique ignoring case, stored against a SHA-256 subject hash,
+  and initially snapshot a valid OIDC `preferred_username` when available. Later
+  OIDC username changes update the live profile but never rename the alias or break
+  alias URLs. Alias-qualified API and Git paths still require the authenticated
+  subject to own the alias.
 - Repository names are short paths-only identifiers; the authenticated subject's
   stable hashed `sub` claim derives the filesystem directory.
 - `npm test` runs a Node-built-in integration suite covering subject isolation,
@@ -54,34 +60,43 @@ DATA_PATH="$PWD/data" npm start
 
 ## Endpoints
 
-| Method | Path                                                | Auth        |
-| ------ | --------------------------------------------------- | ----------- |
-| GET    | `/api/v1/health`                                    | public      |
-| GET    | `/api/v1/openapi.json`                              | public      |
-| GET    | `/ui/config`                                        | public      |
-| GET    | `/ui/session`                                       | public      |
-| GET    | `/ui/auth/login`                                    | public      |
-| GET    | `/ui/auth/callback`                                 | OIDC        |
-| POST   | `/ui/auth/logout`                                   | OIDC        |
-| GET    | `/api/v1/repos`                                     | OIDC        |
-| POST   | `/api/v1/repos/:repo`                               | OIDC        |
-| GET    | `/api/v1/repos/:repo/log`                           | OIDC        |
-| GET    | `/api/v1/repos/:repo/tree`                          | OIDC        |
-| GET    | `/api/v1/repos/:repo/file`                          | OIDC        |
-| GET    | `/api/v1/repos/:repo/branches`                      | OIDC        |
-| GET    | `/api/v1/repos/:repo/tags`                          | OIDC        |
-| GET    | `/git/:repo.git/info/refs?service=git-upload-pack`  | Basic token |
-| POST   | `/git/:repo.git/git-upload-pack`                    | Basic token |
-| GET    | `/git/:repo.git/info/refs?service=git-receive-pack` | Basic token |
-| POST   | `/git/:repo.git/git-receive-pack`                   | Basic token |
-| GET    | `/api/v1/repos/:repo/history`                       | OIDC        |
-| POST   | `/api/v1/repos/:repo/stage`                         | OIDC        |
-| POST   | `/api/v1/repos/:repo/unstage`                       | OIDC        |
-| POST   | `/api/v1/repos/:repo/commit`                        | OIDC        |
-| POST   | `/api/v1/repos/:repo/tags`                          | OIDC        |
-| DELETE | `/api/v1/repos/:repo/tags/:name`                    | OIDC        |
-| POST   | `/api/v1/repos/:repo/branches`                      | OIDC        |
-| DELETE | `/api/v1/repos/:repo/branches/:name`                | OIDC        |
+| Method | Path                                                       | Auth        |
+| ------ | ---------------------------------------------------------- | ----------- |
+| GET    | `/api/v1/health`                                           | public      |
+| GET    | `/api/v1/openapi.json`                                     | public      |
+| GET    | `/ui/config`                                               | public      |
+| GET    | `/ui/session`                                              | public      |
+| GET    | `/ui/auth/login`                                           | public      |
+| GET    | `/ui/auth/callback`                                        | OIDC        |
+| POST   | `/ui/auth/logout`                                          | OIDC        |
+| GET    | `/api/v1/repos`                                            | OIDC        |
+| GET    | `/api/v1/profile/alias`                                    | OIDC        |
+| PUT    | `/api/v1/profile/alias`                                    | OIDC        |
+| GET    | `/api/v1/repos/:alias`                                     | OIDC        |
+| POST   | `/api/v1/repos/:alias/:repo`                               | OIDC        |
+| GET    | `/api/v1/repos/:alias/:repo/log`                           | OIDC        |
+| POST   | `/api/v1/repos/:repo`                                      | OIDC        |
+| GET    | `/api/v1/repos/:repo/log`                                  | OIDC        |
+| GET    | `/api/v1/repos/:repo/tree`                                 | OIDC        |
+| GET    | `/api/v1/repos/:repo/file`                                 | OIDC        |
+| GET    | `/api/v1/repos/:repo/branches`                             | OIDC        |
+| GET    | `/api/v1/repos/:repo/tags`                                 | OIDC        |
+| GET    | `/git/:repo.git/info/refs?service=git-upload-pack`         | Basic token |
+| POST   | `/git/:repo.git/git-upload-pack`                           | Basic token |
+| GET    | `/git/:repo.git/info/refs?service=git-receive-pack`        | Basic token |
+| POST   | `/git/:repo.git/git-receive-pack`                          | Basic token |
+| GET    | `/git/:alias/:repo.git/info/refs?service=git-upload-pack`  | Basic token |
+| POST   | `/git/:alias/:repo.git/git-upload-pack`                    | Basic token |
+| GET    | `/git/:alias/:repo.git/info/refs?service=git-receive-pack` | Basic token |
+| POST   | `/git/:alias/:repo.git/git-receive-pack`                   | Basic token |
+| GET    | `/api/v1/repos/:repo/history`                              | OIDC        |
+| POST   | `/api/v1/repos/:repo/stage`                                | OIDC        |
+| POST   | `/api/v1/repos/:repo/unstage`                              | OIDC        |
+| POST   | `/api/v1/repos/:repo/commit`                               | OIDC        |
+| POST   | `/api/v1/repos/:repo/tags`                                 | OIDC        |
+| DELETE | `/api/v1/repos/:repo/tags/:name`                           | OIDC        |
+| POST   | `/api/v1/repos/:repo/branches`                             | OIDC        |
+| DELETE | `/api/v1/repos/:repo/branches/:name`                       | OIDC        |
 
 The canonical request and response documentation is in [`docs/api-reference.md`](docs/api-reference.md).
 
@@ -92,6 +107,8 @@ not UI-only endpoints. Repository and file-preview state is stored in the
 URL query string (`repo`, `ref`, and `path`), so navigation survives refreshes.
 The UI is a Li³ application split into independent `<template app>` islands for the
 session topbar, repository navigation, selected repository viewer, and refs panel.
+Its initial theme follows the operating system's color-scheme preference; a manual
+toggle is remembered in local storage.
 Each island hydrates JSON state and independently fetches its own API data; URL query
 parameters synchronize repository/file navigation across reloads. The UI uses refs,
 computed values, lifecycle hooks, and event bindings. Framework reference:

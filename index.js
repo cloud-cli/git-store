@@ -5,13 +5,17 @@ const path = require("path");
 const crypto = require("crypto");
 const { spawn } = require("child_process");
 const { getRepoPath, ensureRepoDir, validateRepoName, getHashedSubjectDir } = require("./storage");
+const aliases = require("./aliases");
 
 const getGit = (repoPath) => simpleGit.simpleGit(repoPath);
 
 const app = express();
 app.use(express.json({ limit: "20mb" }));
 app.use("/ui", express.static(path.join(__dirname, "public")));
-app.get("/", (req, res) => res.redirect(302, "/ui/"));
+app.get("/", (req, res) => {
+  const query = req.url.slice(1);
+  return res.redirect(302, `/ui/${query}`);
+});
 const PORT = process.env.PORT || 3000;
 
 // OpenID Discovery and Authentication Setup
@@ -184,6 +188,9 @@ function clearLoginCookies(res, options) {
  * @param {function} next - Express next middleware function
  */
 async function requireAuthentication(req, res, next) {
+  if (req.aliasRouteAuthenticated && req.user) {
+    return next();
+  }
   // Check for Bearer token in Authorization header
   const header = req.headers.authorization || "";
   if (/^Bearer\s+/i.test(header)) {
@@ -208,7 +215,13 @@ async function requireAuthentication(req, res, next) {
   // server-side and the validated OIDC subject/scopes are held for the short token lifetime.
   const session = getBrowserSession(req);
   if (session && isSameOriginRequest(req)) {
-    req.user = { sub: session.sub, scope: session.scope, active: true };
+    req.user = {
+      sub: session.sub,
+      scope: session.scope,
+      active: true,
+      preferred_username: session.profile.preferred_username,
+      username: session.profile.username,
+    };
     req.authType = "session";
     return next();
   }
@@ -274,14 +287,26 @@ function requireGitBasicAuth(req, res, next) {
 }
 
 function gitSmartHttp(req, res) {
-  const match = /^\/git\/([A-Za-z0-9][A-Za-z0-9._-]{0,99})\.git\/(info\/refs|git-upload-pack|git-receive-pack)$/.exec(
-    req.path,
-  );
-  if (!match || !validateRepoName(match[1]) || Object.keys(req.query).some((key) => key !== "service")) {
+  const match =
+    /^\/git\/(?:([A-Za-z0-9][A-Za-z0-9_-]{0,62})\/)?([A-Za-z0-9][A-Za-z0-9._-]{0,99})\.git\/(info\/refs|git-upload-pack|git-receive-pack)$/.exec(
+      req.path,
+    );
+  if (
+    !match ||
+    (match[1] && !aliases.validAlias(match[1])) ||
+    !validateRepoName(match[2]) ||
+    Object.keys(req.query).some((key) => key !== "service")
+  ) {
     return res.status(400).send("Malformed Git request");
   }
-  const repo = match[1];
-  const operation = match[2];
+  const alias = match[1];
+  const repo = match[2];
+  const operation = match[3];
+  const owner = alias ? aliases.owner(alias) : null;
+  const subjectHash = getHashedSubjectDir(req);
+  if (alias && (!owner || owner !== subjectHash)) {
+    return res.status(404).send("Repository not found");
+  }
   const service = req.query.service;
   let write;
   if (operation === "info/refs" && (service === "git-upload-pack" || service === "git-receive-pack")) {
@@ -307,7 +332,7 @@ function gitSmartHttp(req, res) {
   const queryService = operation === "info/refs" ? service : undefined;
   const env = {
     ...process.env,
-    GIT_PROJECT_ROOT: path.resolve(process.env.DATA_PATH, getHashedSubjectDir(req)),
+    GIT_PROJECT_ROOT: path.resolve(process.env.DATA_PATH, alias ? owner : subjectHash),
     GIT_HTTP_EXPORT_ALL: "1",
     GIT_PROTOCOL: req.get("git-protocol") || "",
     PATH_INFO: `/${repo}/.git/${operation}`,
@@ -400,6 +425,7 @@ function gitSmartHttp(req, res) {
 }
 
 app.all("/git/:repo.git/*path", requireGitBasicAuth, gitSmartHttp);
+app.all("/git/:alias/:repo.git/*path", requireGitBasicAuth, gitSmartHttp);
 
 /**
  * Safely get the repo path using the authenticated subject's hashed directory.
@@ -819,7 +845,10 @@ app.get("/ui/session", async (req, res) => {
   try {
     const browserSession = getBrowserSession(req);
     if (browserSession && isSameOriginRequest(req)) {
-      return res.json({ authenticated: true, profile: browserSession.profile });
+      return res.json({
+        authenticated: true,
+        profile: { ...browserSession.profile, alias: aliases.get(browserSession.sub) },
+      });
     }
     const authorization = req.headers.authorization || "";
     const token = /^Bearer\s+/i.test(authorization) ? authorization.slice(7).trim() : null;
@@ -852,7 +881,7 @@ app.get("/ui/session", async (req, res) => {
     } catch {
       // Validated introspection claims still identify the authenticated session.
     }
-    return res.json({ authenticated: true, profile });
+    return res.json({ authenticated: true, profile: { ...profile, alias: aliases.get(claims.sub) } });
   } catch {
     return res.json({ authenticated: false, profile: null });
   }
@@ -939,6 +968,10 @@ const handleOidcCallback = async (req, res) => {
       return res.status(401).send("OIDC sign-in subject did not match the access-token profile.");
     }
     profile.sub = idClaims.sub;
+    const profileAlias = profile.preferred_username || profile.username;
+    if (!aliases.get(idClaims.sub) && aliases.validAlias(profileAlias)) {
+      aliases.assign(idClaims.sub, profileAlias);
+    }
 
     const id = crypto.randomBytes(32).toString("base64url");
     const expiresIn = Number(tokenSet.expires_in * 1000 || idClaims.exp * 1000 - Date.now()) || 3600_000;
@@ -1164,6 +1197,41 @@ app.delete(
   },
 );
 
+app.get("/api/v1/profile/alias", requireAuthentication, (req, res) => res.json({ alias: aliases.get(req.user.sub) }));
+app.put("/api/v1/profile/alias", requireAuthentication, (req, res) => {
+  const supplied = typeof req.body === "string" ? req.body : req.body?.alias;
+  const alias = supplied === undefined ? req.user.preferred_username || req.user.username : supplied;
+  if (!aliases.validAlias(alias)) {
+    return res.status(400).json({ error: "A valid alias is required" });
+  }
+  const result = aliases.assign(req.user.sub, alias);
+  if (result === false) {
+    return res.status(409).json({ error: "Alias is already assigned" });
+  }
+  if (result === null) {
+    return res.status(409).json({ error: "Alias cannot be changed" });
+  }
+  return res.json({ alias: result.alias });
+});
+
+// Registered after direct routes: alias paths are normalized once and then
+// handled by the same scoped handlers, with no recursive alias dispatch.
+app.use("/api/v1/repos/:alias", (req, res, next) => {
+  if (req.aliasDispatch) {
+    return next();
+  }
+  return requireAuthentication(req, res, () => {
+    const owner = aliases.owner(req.params.alias);
+    if (!owner || owner !== getHashedSubjectDir(req)) {
+      return res.status(404).json({ error: "Repository not found" });
+    }
+    req.aliasRouteAuthenticated = true;
+    req.aliasDispatch = true;
+    req.url = `/api/v1/repos${req.url}`;
+    return app.handle(req, res);
+  });
+});
+
 /**
  * Generate the OpenAPI specification with updated routes (no owner parameter).
  * Rebuilds the apiSpec dynamically to reflect the new route structure.
@@ -1183,7 +1251,7 @@ function makeApiSpec() {
   const notFound = { description: "Repository not found" };
   const operation = (summary, responses, body, parameters = pathParametersRepo) => {
     const protectedOperation =
-      parameters.some(({ name }) => name === "repo") || summary.includes("authenticated subject");
+      parameters.some(({ name }) => name === "repo" || name === "alias") || summary.includes("authenticated subject");
     const readOperation = /^(Fetch|Get file|List|Read)/.test(summary);
     const result = {
       summary,
@@ -1220,6 +1288,67 @@ function makeApiSpec() {
           { 200: { description: "Repository list" }, 401: unauthorized },
           null,
           [],
+        ),
+      },
+      "/api/v1/profile/alias": {
+        get: {
+          ...operation(
+            "Get the authenticated user's immutable alias",
+            { 200: { description: "Alias or null" }, 401: unauthorized },
+            null,
+            [],
+          ),
+          security: [{ bearerAuth: [] }],
+        },
+        put: {
+          ...operation(
+            "Set the authenticated user's immutable alias",
+            {
+              200: { description: "Alias assigned" },
+              400: { description: "Invalid or missing alias" },
+              409: { description: "Alias is assigned or unavailable" },
+              401: unauthorized,
+            },
+            jsonBody({ alias: { type: "string" } }, []),
+            [],
+          ),
+          security: [{ bearerAuth: [] }],
+        },
+      },
+      "/api/v1/repos/{alias}": {
+        get: operation(
+          "List repositories for the authenticated alias owner",
+          { 200: { description: "Repository list" }, 404: notFound },
+          null,
+          [
+            {
+              name: "alias",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+        ),
+      },
+      "/api/v1/repos/{alias}/{repo}/log": {
+        get: operation(
+          "Fetch an alias-qualified repository log",
+          { 200: { description: "Commit array" }, 404: notFound },
+          null,
+          [
+            {
+              name: "alias",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+            {
+              name: "repo",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
         ),
       },
       "/git/{repo}.git/info/refs": {
@@ -1501,6 +1630,45 @@ function makeApiSpec() {
       },
     },
   };
+
+  const aliasParameter = {
+    name: "alias",
+    in: "path",
+    required: true,
+    schema: { type: "string" },
+  };
+  for (const [route, methods] of Object.entries(apiSpec.paths)) {
+    const repoRoutePrefix = "/api/v1/repos/{repo}";
+    if (route === repoRoutePrefix || route.startsWith(`${repoRoutePrefix}/`)) {
+      const aliasRoute = route.replace(repoRoutePrefix, "/api/v1/repos/{alias}/{repo}");
+      apiSpec.paths[aliasRoute] = Object.fromEntries(
+        Object.entries(methods).map(([method, definition]) => [
+          method,
+          {
+            ...definition,
+            parameters: [aliasParameter, ...(definition.parameters || [])],
+            responses: {
+              404: notFound,
+              ...definition.responses,
+            },
+          },
+        ]),
+      );
+    }
+    const gitRoutePrefix = "/git/{repo}.git";
+    if (route.startsWith(`${gitRoutePrefix}/`)) {
+      const aliasRoute = route.replace(gitRoutePrefix, "/git/{alias}/{repo}.git");
+      apiSpec.paths[aliasRoute] = Object.fromEntries(
+        Object.entries(methods).map(([method, definition]) => [
+          method,
+          {
+            ...definition,
+            parameters: [aliasParameter, ...(definition.parameters || [])],
+          },
+        ]),
+      );
+    }
+  }
 
   return apiSpec;
 }

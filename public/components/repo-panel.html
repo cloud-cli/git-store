@@ -4,12 +4,14 @@
       class="hidden w-64 flex-shrink-0 overflow-y-auto border-l border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-900 md:block"
     >
       <div class="mb-6">
-        <h3 class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
+        <h3
+          class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
+        >
           <i class="fa-solid fa-code-branch"></i> Branches
           <button
             popovertarget="branch-popover"
             style="anchor-name: --branch-popover-anchor"
-            class="text-xs text-indigo-600 hover:underline"
+            class="text-xs text-indigo-600 hover:underline dark:text-indigo-400"
             aria-label="Create branch"
           >
             +
@@ -27,7 +29,10 @@
             left: anchor(left);
           "
         >
-          <form on-submit.prevent="createBranch()" class="space-y-4">
+          <form
+            on-submit.prevent="createBranch()"
+            class="space-y-4 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          >
             <h3 class="text-sm font-semibold">Create branch</h3>
             <label class="block text-xs text-gray-600 dark:text-gray-300"
               >Branch name<input
@@ -40,7 +45,7 @@
             <div class="flex justify-end gap-2">
               <button
                 type="button"
-                class="rounded-md px-2 py-1 text-gray-500"
+                class="rounded-md px-2 py-1 text-gray-500 dark:text-gray-300"
                 popovertarget="branch-popover"
                 popovertargetaction="hide"
               >
@@ -67,11 +72,11 @@
             </li></template
           >
           <template if="!branches.length"
-            ><p class="px-2 py-1 text-xs text-gray-500">
+            ><p class="px-2 py-1 text-xs text-gray-500 dark:text-gray-300">
               No branches.
               <button
                 type="button"
-                class="underline text-indigo-600 hover:text-indigo-800"
+                class="underline text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300"
                 popovertarget="branch-popover"
               >
                 Create one
@@ -81,12 +86,14 @@
         </ul>
       </div>
       <div>
-        <h3 class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
+        <h3
+          class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
+        >
           <i class="fa-solid fa-tags"></i> Tags
           <button
             popovertarget="tag-popover"
             style="anchor-name: --tag-popover-anchor"
-            class="text-xs text-indigo-600 hover:underline"
+            class="text-xs text-indigo-600 hover:underline dark:text-indigo-400"
             aria-label="Create tag"
           >
             +
@@ -104,7 +111,10 @@
             left: anchor(left);
           "
         >
-          <form on-submit.prevent="createTag()" class="space-y-4">
+          <form
+            on-submit.prevent="createTag()"
+            class="space-y-4 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          >
             <h3 class="text-sm font-semibold">Create tag</h3>
             <label class="block text-xs text-gray-600 dark:text-gray-300"
               >Tag name<input
@@ -117,7 +127,7 @@
             <div class="flex justify-end gap-2">
               <button
                 type="button"
-                class="rounded-md px-2 py-1 text-gray-500"
+                class="rounded-md px-2 py-1 text-gray-500 dark:text-gray-300"
                 popovertarget="tag-popover"
                 popovertargetaction="hide"
               >
@@ -144,9 +154,13 @@
             </li></template
           >
           <template if="!tags.length"
-            ><p class="px-2 py-1 text-xs text-gray-500">
+            ><p class="px-2 py-1 text-xs text-gray-500 dark:text-gray-300">
               No tags.
-              <button type="button" class="underline text-indigo-600 hover:text-indigo-800" popovertarget="tag-popover">
+              <button
+                type="button"
+                class="underline text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300"
+                popovertarget="tag-popover"
+              >
                 Create one
               </button>
             </p></template

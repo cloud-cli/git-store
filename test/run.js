@@ -428,9 +428,162 @@ async function run() {
       assert.strictEqual(response.status, 401, `${method} ${requestPath} should require authentication`);
     }
 
-    const rootRedirect = await request(port, "GET", "/");
+    const rootRedirect = await request(port, "GET", "/?repo=shared-repo&file=private.txt");
     assert.strictEqual(rootRedirect.status, 302);
-    assert.strictEqual(rootRedirect.headers.location, "/ui/");
+    assert.strictEqual(rootRedirect.headers.location, "/ui/?repo=shared-repo&file=private.txt");
+    const aliasDefault = await request(port, "PUT", "/api/v1/profile/alias", {}, "token-a");
+    assert.strictEqual(aliasDefault.status, 200);
+    assert.deepStrictEqual(JSON.parse(aliasDefault.body), {
+      alias: "same-nickname",
+    });
+    assert.deepStrictEqual(
+      JSON.parse((await request(port, "GET", "/api/v1/profile/alias", undefined, "token-a")).body),
+      { alias: "same-nickname" },
+    );
+    assert.strictEqual(
+      (await request(port, "PUT", "/api/v1/profile/alias", { alias: "SAME-NICKNAME" }, "token-a")).status,
+      200,
+    );
+    assert.strictEqual(
+      (await request(port, "PUT", "/api/v1/profile/alias", { alias: "renamed" }, "token-a")).status,
+      409,
+    );
+    const originalTokenClaims = tokenSubjects.get("token-a");
+    tokenSubjects.set("token-a", {
+      ...originalTokenClaims,
+      preferred_username: "renamed-at-provider",
+    });
+    assert.deepStrictEqual(
+      JSON.parse((await request(port, "GET", "/api/v1/profile/alias", undefined, "token-a")).body),
+      { alias: "same-nickname" },
+      "later OIDC username changes do not rename the immutable alias",
+    );
+    tokenSubjects.set("token-a", originalTokenClaims);
+    assert.strictEqual(
+      (await request(port, "PUT", "/api/v1/profile/alias", { alias: "same-nickname" }, "token-b")).status,
+      409,
+    );
+    assert.strictEqual((await request(port, "PUT", "/api/v1/profile/alias", {}, "unscoped")).status, 400);
+    assert.strictEqual(
+      (await request(port, "PUT", "/api/v1/profile/alias", { alias: "../bad" }, "token-b")).status,
+      400,
+    );
+    const aliasesModulePath = require.resolve("../aliases");
+    delete require.cache[aliasesModulePath];
+    assert.strictEqual(
+      require("../aliases").get("oidc-subject-a"),
+      "same-nickname",
+      "alias persists across module reload",
+    );
+    assert.ok(!fs.readFileSync(path.join(dataPath, "aliases.json"), "utf8").includes("oidc-subject-a"));
+    assert.strictEqual((await request(port, "GET", "/api/v1/repos/same-nickname", undefined, "token-a")).status, 200);
+    assert.strictEqual(
+      (await request(port, "POST", "/api/v1/repos/same-nickname/alias-created", undefined, "token-a")).status,
+      201,
+      "alias-qualified API routes can create repositories for their owner",
+    );
+    assert.strictEqual(
+      (await request(port, "POST", "/api/v1/repos/same-nickname/shared-repo/tags", { name: "alias-v1" }, "token-a"))
+        .status,
+      200,
+      "alias-qualified API routes preserve JSON mutation bodies",
+    );
+    assert.strictEqual(
+      (await request(port, "DELETE", "/api/v1/repos/same-nickname/shared-repo/tags/alias-v1", undefined, "token-a"))
+        .status,
+      200,
+    );
+    assert.strictEqual(
+      (await request(port, "POST", "/api/v1/repos/same-nickname", undefined, "token-a")).status,
+      201,
+      "an alias may also be a repository name",
+    );
+    assert.strictEqual(
+      (await request(port, "GET", "/api/v1/repos/same-nickname/log", undefined, "token-a")).status,
+      200,
+      "direct short routes take precedence when a repository shares the alias",
+    );
+    assert.strictEqual(
+      (await request(port, "GET", "/api/v1/repos/same-nickname/shared-repo/log", undefined, "token-a")).status,
+      200,
+    );
+    assert.strictEqual(
+      (await request(port, "GET", "/api/v1/repos/same-nickname/shared-repo/log", undefined, "token-b")).status,
+      404,
+    );
+    assert.strictEqual(
+      (await request(port, "GET", "/api/v1/repos/shared-repo/log", undefined, "token-a")).status,
+      200,
+      "direct short route must remain available",
+    );
+    const aliasGit = await request(
+      port,
+      "GET",
+      "/git/same-nickname/git-http.git/info/refs?service=git-upload-pack",
+      undefined,
+      undefined,
+      {
+        Authorization: `Basic ${Buffer.from("user:token-a").toString("base64")}`,
+      },
+    );
+    assert.strictEqual(aliasGit.status, 200);
+    const aliasClonePath = path.join(dataPath, "alias-clone");
+    await git([
+      "-c",
+      `http.extraheader=${authHeader}`,
+      "clone",
+      `http://127.0.0.1:${port}/git/SAME-NICKNAME/git-http.git`,
+      aliasClonePath,
+    ]);
+    assert.strictEqual(
+      fs.readFileSync(path.join(aliasClonePath, "initial.txt"), "utf8"),
+      "initial\n",
+      "alias-qualified Smart HTTP routes support a real Git clone",
+    );
+    fs.writeFileSync(path.join(aliasClonePath, "alias-push.txt"), "alias push works\n");
+    await git(["-C", aliasClonePath, "add", "alias-push.txt"]);
+    await git([
+      "-C",
+      aliasClonePath,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.test",
+      "commit",
+      "-m",
+      "alias push",
+    ]);
+    await git([
+      "-c",
+      `http.extraheader=${authHeader}`,
+      "-C",
+      aliasClonePath,
+      "push",
+      "origin",
+      "HEAD:refs/heads/alias-push",
+    ]);
+    const pushedAliasFile = await git([
+      "--git-dir",
+      path.join(dataPath, encodeSubjectDir("oidc-subject-a"), "git-http", ".git"),
+      "show",
+      "refs/heads/alias-push:alias-push.txt",
+    ]);
+    assert.strictEqual(
+      pushedAliasFile.stdout,
+      "alias push works\n",
+      "alias-qualified Smart HTTP routes support an authenticated push",
+    );
+    const foreignAliasGit = await request(
+      port,
+      "GET",
+      "/git/same-nickname/git-http.git/info/refs?service=git-upload-pack",
+      undefined,
+      undefined,
+      {
+        Authorization: `Basic ${Buffer.from("user:token-b").toString("base64")}`,
+      },
+    );
+    assert.strictEqual(foreignAliasGit.status, 404);
     for (const oldPath of ["/api", "/health", "/repos", "/config", "/session", "/auth/login"]) {
       const oldRoute = await request(port, "GET", oldPath);
       assert.strictEqual(oldRoute.status, 404, `${oldPath} must not remain as an alias`);
@@ -443,6 +596,9 @@ async function run() {
       "/api/v1/health": ["get"],
       "/api/v1/openapi.json": ["get"],
       "/api/v1/repos": ["get"],
+      "/api/v1/profile/alias": ["get", "put"],
+      "/api/v1/repos/{alias}": ["get"],
+      "/api/v1/repos/{alias}/{repo}/log": ["get"],
       "/git/{repo}.git/info/refs": ["get"],
       "/git/{repo}.git/git-upload-pack": ["post"],
       "/git/{repo}.git/git-receive-pack": ["post"],
@@ -460,6 +616,13 @@ async function run() {
       "/api/v1/repos/{repo}/tags/{name}": ["delete"],
       "/api/v1/repos/{repo}/branches/{name}": ["delete"],
     };
+    for (const [route, methods] of Object.entries(expectedMethods)) {
+      if (route.startsWith("/api/v1/repos/{repo}")) {
+        expectedMethods[route.replace("/api/v1/repos/{repo}", "/api/v1/repos/{alias}/{repo}")] = [...methods];
+      } else if (route.startsWith("/git/{repo}.git/")) {
+        expectedMethods[route.replace("/git/{repo}.git", "/git/{alias}/{repo}.git")] = [...methods];
+      }
+    }
     assert.deepStrictEqual(Object.keys(spec.paths).sort(), Object.keys(expectedMethods).sort());
     assert.ok(
       Object.keys(spec.paths).every((specPath) => specPath.startsWith("/api/v1/") || specPath.startsWith("/git/")),
@@ -524,7 +687,11 @@ async function run() {
       assert.strictEqual(options.headers.Authorization, "Bearer browser-session-token");
       return {
         ok: true,
-        json: async () => ({ id: "browser-subject", name: "Signed In" }),
+        json: async () => ({
+          id: "browser-subject",
+          name: "Signed In",
+          preferred_username: "browser-user",
+        }),
       };
     };
     const login = await request(port, "GET", "/ui/auth/login?returnTo=%2F%3Frepo%3Dresume");
@@ -581,6 +748,8 @@ async function run() {
         id: "browser-subject",
         sub: "browser-subject",
         name: "Signed In",
+        preferred_username: "browser-user",
+        alias: "browser-user",
       },
     });
     const tokenVerifier = app.locals.verifyToken;
@@ -659,6 +828,15 @@ async function run() {
     );
     assert.ok(uiResponse.body.includes("No branches."));
     assert.ok(uiResponse.body.includes("No tags."));
+    assert.strictEqual(
+      (uiResponse.body.match(/window\.matchMedia\("\(prefers-color-scheme: dark\)"\)/g) || []).length,
+      4,
+      "each UI island should default to the system theme when no preference is saved",
+    );
+    assert.ok(
+      uiResponse.body.includes("profile.value?.alias"),
+      "the immutable account alias should be preferred in the signed-in UI",
+    );
     const mainStart = uiResponse.body.indexOf("<main ");
     const viewerSetupStart = uiResponse.body.indexOf("<script setup>", mainStart);
     const viewerSetupEnd = uiResponse.body.indexOf("</script>", viewerSetupStart);

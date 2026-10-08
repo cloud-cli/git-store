@@ -10,15 +10,17 @@
 - [x] Add Node-only integration checks for subject isolation and unauthorized behavior.
 - [x] Add Diátaxis tutorial, how-to/getting-started, and reference documentation.
 - [x] Migrate repository storage to hashed subject directories (`sub` hashed).
-- [x] Remove `owner` from API routes (now `:repo` only).
+- [x] Keep subject-scoped short repository routes and add immutable alias-qualified API/Git paths.
 - [x] Add repository name validation.
 - [x] Implement identity isolation across two injected subjects.
-- [x] Spoofed old owner route rejected.
+- [x] Prevent spoofed alias-qualified routes from crossing OIDC subject ownership.
 - [x] Path traversal rejected.
 - [x] Require `repo:read` for reads and `repo:write` for repository creation and mutations; write scope includes read access.
 - [x] Verify read-only and unscoped API tokens cannot create or mutate repositories.
 - [x] Add native anchored popovers, empty branch/tag states, empty-repository onboarding, file input, and existing-repo drag/drop.
-- [x] Keep repository ownership and display keyed by stable OIDC subject / repo name rather than nickname.
+- [x] Keep repository authority keyed by OIDC subject; expose a one-time immutable URL alias for integrators.
+- [x] Default the UI theme to the system preference and improve dark-mode text contrast.
+- [x] Preserve repo query state when redirecting `/` to `/ui/`.
 - [x] Start browser login through OIDC authorization code + PKCE, validate state and ID-token claims, and keep access tokens server-side.
 - [x] Remove dotenv and `.env` file loading; configure the service through process environment variables.
 - [x] Test mocked browser login, callback, scoped session use, logout, and sign-in redirect.
