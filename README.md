@@ -108,7 +108,8 @@ OIDC name, email, and picture when available, or a signed-out state otherwise.
 
 The service reads configuration only from process environment variables; it does not load
 `.env` files. Browser sign-in uses `/ui/auth/login` and requires the OIDC client callback URI
-to be registered as `/ui/auth/callback`.
+to be registered as `/ui/auth/callback`. The former `/auth/callback` path remains as a
+compatibility endpoint for deployments whose OIDC client still has that URI registered.
 
 ## Configuration
 

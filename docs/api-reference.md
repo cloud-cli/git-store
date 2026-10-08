@@ -94,6 +94,8 @@ and verifier cookies and redirects to the configured issuer. An optional same-or
 
 Configured OIDC redirect URI. Validates state and the PKCE exchange, exchanges the authorization code,
 confirms the access token and subject, then establishes the local HttpOnly browser session.
+The legacy `/auth/callback` path remains available for OIDC clients that have not yet
+migrated their registered callback URI to `/ui/auth/callback`.
 
 ### POST /ui/auth/logout
 

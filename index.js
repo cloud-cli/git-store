@@ -888,7 +888,7 @@ app.get("/ui/auth/login", (req, res) => {
   }
 });
 
-app.get("/ui/auth/callback", async (req, res) => {
+const handleOidcCallback = async (req, res) => {
   const client = getOidcClient();
   if (!client) {
     return res.status(503).send("OIDC sign-in is not configured.");
@@ -979,7 +979,11 @@ app.get("/ui/auth/callback", async (req, res) => {
     );
     return res.status(401).send("OIDC sign-in failed. Please try again.");
   }
-});
+};
+app.get("/ui/auth/callback", handleOidcCallback);
+// Preserve callbacks already registered with the identity provider until the
+// registered redirect URI can be migrated to /ui/auth/callback.
+app.get("/auth/callback", handleOidcCallback);
 
 app.post("/ui/auth/logout", (req, res) => {
   const session = getBrowserSession(req);

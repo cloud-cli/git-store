@@ -492,6 +492,7 @@ async function run() {
     assert.strictEqual(unavailableLogin.status, 503, "login must fail clearly when OIDC is not configured");
 
     let authorizationOptions;
+    let expectedCallbackPath = "/ui/auth/callback";
     app.locals.oidcClientOverride = {
       authorizationUrl(options) {
         authorizationOptions = options;
@@ -506,7 +507,7 @@ async function run() {
         assert.strictEqual(callbackParams.state, checks.state);
         assert.ok(checks.code_verifier);
         assert.strictEqual(checks.nonce, undefined, "the issuer's supported PKCE flow does not issue a nonce claim");
-        assert.ok(redirectUri.endsWith("/ui/auth/callback"));
+        assert.ok(redirectUri.endsWith(expectedCallbackPath));
         return {
           access_token: "browser-session-token",
           expires_in: 3600,
@@ -548,6 +549,23 @@ async function run() {
       !sessionCookie.includes("browser-session-token"),
       "the access token must not be stored in the browser cookie",
     );
+    process.env.OIDC_REDIRECT_URI = `http://127.0.0.1:${port}/auth/callback`;
+    expectedCallbackPath = "/auth/callback";
+    const legacyLogin = await request(port, "GET", "/ui/auth/login");
+    assert.strictEqual(legacyLogin.status, 302);
+    const legacyAuthorization = new URL(legacyLogin.headers.location);
+    const legacyCookies = legacyLogin.headers["set-cookie"].map((cookie) => cookie.split(";")[0]).join("; ");
+    const legacyCallback = await request(
+      port,
+      "GET",
+      `/auth/callback?code=mock-code&state=${encodeURIComponent(legacyAuthorization.searchParams.get("state"))}`,
+      undefined,
+      undefined,
+      { Cookie: legacyCookies },
+    );
+    assert.strictEqual(legacyCallback.status, 303, "registered legacy OIDC callbacks remain functional");
+    process.env.OIDC_REDIRECT_URI = "";
+    expectedCallbackPath = "/ui/auth/callback";
     const sessionCreatedRepo = await request(port, "POST", "/api/v1/repos/session-repo", undefined, undefined, {
       Cookie: sessionCookie,
       Origin: `http://127.0.0.1:${port}`,
