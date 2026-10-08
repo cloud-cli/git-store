@@ -240,6 +240,39 @@ function getTokenScopes(claims) {
   return new Set();
 }
 
+function getOidcUsername(claims) {
+  for (const claim of [claims?.preferred_username, claims?.username]) {
+    if (typeof claim === "string" && claim.length > 0) {
+      return claim;
+    }
+  }
+  return null;
+}
+
+function getOidcProfileUrl() {
+  try {
+    return new URL("/me", process.env.OIDC_ISSUER).href;
+  } catch {
+    return null;
+  }
+}
+
+function usernameRequiredResponse(res, message) {
+  const profileUrl = getOidcProfileUrl();
+  const safeProfileUrl = (profileUrl || "#")
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+  res.set("Cache-Control", "no-store");
+  return res
+    .status(403)
+    .type("html")
+    .send(
+      `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="refresh" content="5;url=${safeProfileUrl}"><title>OIDC username required</title></head><body><main><h1>OIDC username required</h1><p>${message}</p><p>Opening your OIDC profile to set or restore your username. <a href="${safeProfileUrl}">Continue to your OIDC profile</a>.</p></main></body></html>`,
+    );
+}
+
 function requireScope(scope) {
   return (req, res, next) => {
     const scopes = getTokenScopes(req.user);
@@ -863,6 +896,7 @@ app.get("/ui/session", async (req, res) => {
       sub: claims.sub,
       name: claims.name,
       preferred_username: claims.preferred_username,
+      username: claims.username,
     };
     try {
       const response = await fetch(new URL("/userinfo", issuer), {
@@ -875,7 +909,7 @@ app.get("/ui/session", async (req, res) => {
         const userInfo = await response.json();
         const profileSub = userInfo.sub || userInfo.id;
         if (profileSub === claims.sub) {
-          profile = { ...userInfo, sub: claims.sub };
+          profile = { ...profile, ...userInfo, sub: claims.sub };
         }
       }
     } catch {
@@ -968,10 +1002,36 @@ const handleOidcCallback = async (req, res) => {
       return res.status(401).send("OIDC sign-in subject did not match the access-token profile.");
     }
     profile.sub = idClaims.sub;
-    const profileAlias = profile.preferred_username || profile.username;
-    if (!aliases.get(idClaims.sub) && aliases.validAlias(profileAlias)) {
-      aliases.assign(idClaims.sub, profileAlias);
+    const profileUsername = getOidcUsername(profile);
+    const tokenUsername = getOidcUsername(idClaims);
+    const username = profileUsername || tokenUsername;
+    if (
+      !username ||
+      !aliases.validAlias(username) ||
+      (profileUsername && tokenUsername && tokenUsername !== profileUsername)
+    ) {
+      return usernameRequiredResponse(
+        res,
+        "A valid OIDC username must be present in the sign-in response. The ID token and UserInfo response must agree when both include it.",
+      );
     }
+    const existingAlias = aliases.get(idClaims.sub);
+    if (existingAlias && existingAlias !== username) {
+      return usernameRequiredResponse(
+        res,
+        "Your OIDC username does not match the immutable username already registered for this account. Restore the original username to continue.",
+      );
+    }
+    if (!existingAlias) {
+      const aliasAssignment = aliases.assign(idClaims.sub, username);
+      if (aliasAssignment === false) {
+        return usernameRequiredResponse(
+          res,
+          "Your OIDC username conflicts with an existing account URL. Set a unique username in your OIDC profile before signing in.",
+        );
+      }
+    }
+    profile.preferred_username = username;
 
     const id = crypto.randomBytes(32).toString("base64url");
     const expiresIn = Number(tokenSet.expires_in * 1000 || idClaims.exp * 1000 - Date.now()) || 3600_000;
@@ -1200,11 +1260,21 @@ app.delete(
 app.get("/api/v1/profile/alias", requireAuthentication, (req, res) => res.json({ alias: aliases.get(req.user.sub) }));
 app.put("/api/v1/profile/alias", requireAuthentication, (req, res) => {
   const supplied = typeof req.body === "string" ? req.body : req.body?.alias;
-  const alias = supplied === undefined ? req.user.preferred_username || req.user.username : supplied;
-  if (!aliases.validAlias(alias)) {
-    return res.status(400).json({ error: "A valid alias is required" });
+  const username = getOidcUsername(req.user);
+  if (!username || !aliases.validAlias(username)) {
+    return res.status(428).json({
+      error: "Set a valid username in your OIDC profile before registering a Git Store URL.",
+      profileUrl: getOidcProfileUrl(),
+    });
   }
-  const result = aliases.assign(req.user.sub, alias);
+  if (supplied !== undefined && supplied !== username) {
+    return res.status(400).json({ error: "The alias must exactly match your immutable OIDC username" });
+  }
+  const existingAlias = aliases.get(req.user.sub);
+  if (existingAlias && existingAlias !== username) {
+    return res.status(409).json({ error: "The OIDC username differs from the immutable registered username" });
+  }
+  const result = aliases.assign(req.user.sub, username);
   if (result === false) {
     return res.status(409).json({ error: "Alias is already assigned" });
   }
@@ -1305,8 +1375,9 @@ function makeApiSpec() {
             "Set the authenticated user's immutable alias",
             {
               200: { description: "Alias assigned" },
-              400: { description: "Invalid or missing alias" },
+              400: { description: "Submitted alias differs from the OIDC username" },
               409: { description: "Alias is assigned or unavailable" },
+              428: { description: "A valid OIDC username must be set first" },
               401: unauthorized,
             },
             jsonBody({ alias: { type: "string" } }, []),

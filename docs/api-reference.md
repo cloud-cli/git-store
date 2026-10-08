@@ -21,26 +21,33 @@ claim. Tokens need scopes as follows:
 
 ## Immutable user aliases
 
-`GET /api/v1/profile/alias` returns `{ "alias": string|null }`. Set the alias once
-with `PUT /api/v1/profile/alias` and either a JSON string or `{ "alias": "..." }`.
-When omitted, a valid `preferred_username` (or `username`) claim is snapshotted;
-otherwise an explicit alias is required. Aliases are URL-safe, globally unique
-case-insensitively, and immutable (repeating the same value is idempotent). The
-registry stores only SHA-256 subject hashes, never raw OIDC subjects.
-The OIDC username is only a starting value: later changes to `preferred_username`
-or the display name do not alter the saved alias.
+`GET /api/v1/profile/alias` returns `{ "alias": string|null }`. The first successful
+OIDC sign-in snapshots the validated `preferred_username` claim (or the provider's
+`username` claim when `preferred_username` is absent) as the account's permanent URL
+alias. The username must be present, URL-safe, and consistent between the ID token
+and UserInfo response when both include it. A later change or removal blocks sign-in
+and automatically directs the user to `${OIDC_ISSUER}/me` to restore the original
+username. Git Store never renames a saved alias. Aliases are globally unique
+case-insensitively and the registry stores only SHA-256 subject hashes, never raw
+OIDC subjects.
+
+`PUT /api/v1/profile/alias` captures the authenticated OIDC username for API clients.
+The optional body may repeat that exact username; a different local alias is rejected.
+If the token has no valid username, the endpoint returns **428** with the provider
+profile URL. Set the username at the OIDC provider before using Git Store.
 
 ```http
 PUT /api/v1/profile/alias
 Content-Type: application/json
 
-{"alias":"my-integrator-name"}
+{"alias":"my-oidc-username"}
 ```
 
 Omit `alias` (send `{}`) to snapshot the validated `preferred_username` or
-`username` claim. The first assignment returns **200**; invalid names return **400**,
-and an alias already owned by another subject or a later rename attempt returns **409**.
-The same alias may be submitted again idempotently.
+`username` claim. The first assignment returns **200**; a value different from the
+OIDC username returns **400**, and a username already owned by another subject or a
+saved alias that no longer matches the provider returns **409**. Repeating the same
+username is idempotent.
 
 Alias-qualified repository routes use `/api/v1/repos/{alias}/{repo}/...` and
 `/git/{alias}/{repo}.git/...`. They require normal repo scopes and verify that the

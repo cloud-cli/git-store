@@ -19,12 +19,13 @@ short repo names only — no owner segment in the URL.
   falls back to browser sessions. Use HTTPS in deployment; plain HTTP is suitable
   only for local testing. PATs are not issued by this version; use an OIDC access
   token until PAT management is added.
-- Users may set one permanent URL-safe alias with `PUT /api/v1/profile/alias`.
-  Aliases are globally unique ignoring case, stored against a SHA-256 subject hash,
-  and initially snapshot a valid OIDC `preferred_username` when available. Later
-  OIDC username changes update the live profile but never rename the alias or break
-  alias URLs. Alias-qualified API and Git paths still require the authenticated
-  subject to own the alias.
+- Browser sign-in requires a valid OIDC `preferred_username` (or `username`). The first
+  sign-in snapshots it as the account's permanent URL alias; later username changes
+  or removals block sign-in and direct the user to `${OIDC_ISSUER}/me` to restore it.
+  Aliases are globally unique ignoring case and stored against a SHA-256 subject
+  hash. Alias-qualified API and Git paths still require the authenticated subject to
+  own the alias. API clients can capture their OIDC username with
+  `PUT /api/v1/profile/alias`; custom local aliases are not accepted.
 - Repository names are short paths-only identifiers; the authenticated subject's
   stable hashed `sub` claim derives the filesystem directory.
 - `npm test` runs a Node-built-in integration suite covering subject isolation,

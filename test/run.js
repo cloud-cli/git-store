@@ -442,11 +442,12 @@ async function run() {
     );
     assert.strictEqual(
       (await request(port, "PUT", "/api/v1/profile/alias", { alias: "SAME-NICKNAME" }, "token-a")).status,
-      200,
+      400,
+      "username spelling must exactly match the immutable provider value",
     );
     assert.strictEqual(
       (await request(port, "PUT", "/api/v1/profile/alias", { alias: "renamed" }, "token-a")).status,
-      409,
+      400,
     );
     const originalTokenClaims = tokenSubjects.get("token-a");
     tokenSubjects.set("token-a", {
@@ -463,10 +464,20 @@ async function run() {
       (await request(port, "PUT", "/api/v1/profile/alias", { alias: "same-nickname" }, "token-b")).status,
       409,
     );
-    assert.strictEqual((await request(port, "PUT", "/api/v1/profile/alias", {}, "unscoped")).status, 400);
+    const missingUsernameAlias = await request(port, "PUT", "/api/v1/profile/alias", {}, "unscoped");
+    assert.strictEqual(missingUsernameAlias.status, 428);
+    assert.deepStrictEqual(JSON.parse(missingUsernameAlias.body), {
+      error: "Set a valid username in your OIDC profile before registering a Git Store URL.",
+      profileUrl: null,
+    });
     assert.strictEqual(
       (await request(port, "PUT", "/api/v1/profile/alias", { alias: "../bad" }, "token-b")).status,
       400,
+    );
+    assert.strictEqual(
+      (await request(port, "PUT", "/api/v1/profile/alias", { alias: "another-name" }, "token-b")).status,
+      400,
+      "users cannot create local aliases that differ from their immutable OIDC username",
     );
     const aliasesModulePath = require.resolve("../aliases");
     delete require.cache[aliasesModulePath];
@@ -656,6 +667,12 @@ async function run() {
 
     let authorizationOptions;
     let expectedCallbackPath = "/ui/auth/callback";
+    let oidcUserInfo = {
+      id: "browser-subject",
+      name: "Signed In",
+      preferred_username: "browser-user",
+    };
+    let oidcIdClaims = { sub: "browser-subject" };
     app.locals.oidcClientOverride = {
       authorizationUrl(options) {
         authorizationOptions = options;
@@ -674,7 +691,7 @@ async function run() {
         return {
           access_token: "browser-session-token",
           expires_in: 3600,
-          claims: () => ({ sub: "browser-subject" }),
+          claims: () => oidcIdClaims,
         };
       },
     };
@@ -687,11 +704,7 @@ async function run() {
       assert.strictEqual(options.headers.Authorization, "Bearer browser-session-token");
       return {
         ok: true,
-        json: async () => ({
-          id: "browser-subject",
-          name: "Signed In",
-          preferred_username: "browser-user",
-        }),
+        json: async () => oidcUserInfo,
       };
     };
     const login = await request(port, "GET", "/ui/auth/login?returnTo=%2F%3Frepo%3Dresume");
@@ -716,6 +729,86 @@ async function run() {
       !sessionCookie.includes("browser-session-token"),
       "the access token must not be stored in the browser cookie",
     );
+    oidcUserInfo = { id: "browser-subject", name: "Signed In" };
+    const missingUsernameLogin = await request(port, "GET", "/ui/auth/login");
+    const missingUsernameAuthorization = new URL(missingUsernameLogin.headers.location);
+    const missingUsernameCookies = missingUsernameLogin.headers["set-cookie"]
+      .map((cookie) => cookie.split(";")[0])
+      .join("; ");
+    const missingUsernameCallback = await request(
+      port,
+      "GET",
+      `/ui/auth/callback?code=mock-code&state=${encodeURIComponent(missingUsernameAuthorization.searchParams.get("state"))}`,
+      undefined,
+      undefined,
+      { Cookie: missingUsernameCookies },
+    );
+    assert.strictEqual(missingUsernameCallback.status, 403);
+    assert.ok(missingUsernameCallback.body.includes("OIDC username required"));
+    assert.ok(missingUsernameCallback.body.includes("url=https://issuer.example.test/me"));
+    assert.ok(missingUsernameCallback.body.includes("Continue to your OIDC profile"));
+    assert.ok(
+      !missingUsernameCallback.headers["set-cookie"]?.some((cookie) => cookie.startsWith("git_store_session=")),
+      "accounts without a provider username must not receive an application session",
+    );
+    oidcUserInfo = { id: "browser-subject", name: "Signed In", preferred_username: "browser-user" };
+    oidcIdClaims = { sub: "browser-subject", preferred_username: "different-username" };
+    const inconsistentUsernameLogin = await request(port, "GET", "/ui/auth/login");
+    const inconsistentUsernameAuthorization = new URL(inconsistentUsernameLogin.headers.location);
+    const inconsistentUsernameCookies = inconsistentUsernameLogin.headers["set-cookie"]
+      .map((cookie) => cookie.split(";")[0])
+      .join("; ");
+    const inconsistentUsernameCallback = await request(
+      port,
+      "GET",
+      `/ui/auth/callback?code=mock-code&state=${encodeURIComponent(inconsistentUsernameAuthorization.searchParams.get("state"))}`,
+      undefined,
+      undefined,
+      { Cookie: inconsistentUsernameCookies },
+    );
+    assert.strictEqual(inconsistentUsernameCallback.status, 403);
+    oidcUserInfo = { id: "browser-subject", name: "Signed In", preferred_username: "changed-provider-user" };
+    oidcIdClaims = { sub: "browser-subject", preferred_username: "changed-provider-user" };
+    const changedUsernameLogin = await request(port, "GET", "/ui/auth/login");
+    const changedUsernameAuthorization = new URL(changedUsernameLogin.headers.location);
+    const changedUsernameCookies = changedUsernameLogin.headers["set-cookie"]
+      .map((cookie) => cookie.split(";")[0])
+      .join("; ");
+    const changedUsernameCallback = await request(
+      port,
+      "GET",
+      `/ui/auth/callback?code=mock-code&state=${encodeURIComponent(changedUsernameAuthorization.searchParams.get("state"))}`,
+      undefined,
+      undefined,
+      { Cookie: changedUsernameCookies },
+    );
+    assert.strictEqual(changedUsernameCallback.status, 403);
+    assert.ok(changedUsernameCallback.body.includes("immutable username already registered"));
+
+    oidcUserInfo = { id: "id-only-subject", name: "Signed In" };
+    oidcIdClaims = { sub: "id-only-subject", preferred_username: "id-only-user" };
+    const idTokenUsernameLogin = await request(port, "GET", "/ui/auth/login");
+    const idTokenUsernameAuthorization = new URL(idTokenUsernameLogin.headers.location);
+    const idTokenUsernameCookies = idTokenUsernameLogin.headers["set-cookie"]
+      .map((cookie) => cookie.split(";")[0])
+      .join("; ");
+    const idTokenUsernameCallback = await request(
+      port,
+      "GET",
+      `/ui/auth/callback?code=mock-code&state=${encodeURIComponent(idTokenUsernameAuthorization.searchParams.get("state"))}`,
+      undefined,
+      undefined,
+      { Cookie: idTokenUsernameCookies },
+    );
+    assert.strictEqual(
+      idTokenUsernameCallback.status,
+      303,
+      "a verified ID-token username may fill a missing UserInfo claim",
+    );
+    assert.strictEqual(require("../aliases").get("id-only-subject"), "id-only-user");
+
+    oidcUserInfo = { id: "browser-subject", name: "Signed In", preferred_username: "browser-user" };
+    oidcIdClaims = { sub: "browser-subject" };
     process.env.OIDC_REDIRECT_URI = `http://127.0.0.1:${port}/auth/callback`;
     expectedCallbackPath = "/auth/callback";
     const legacyLogin = await request(port, "GET", "/ui/auth/login");
