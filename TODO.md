@@ -4,7 +4,7 @@
 
 - [x] Store repositories under a hashed stable OIDC `sub` directory and short repo name.
 - [x] Provide repository creation, log, stage, unstage, commit, tag, and branch routes.
-- [x] Serve an OpenAPI document from `GET /api` covering all routes.
+- [x] Serve an OpenAPI document from `GET /api/v1/openapi.json` covering all routes.
 - [x] Require authenticated OIDC identity for repository listing, creation, reads, and mutations.
 - [x] Use `/home/app` as the Docker application directory.
 - [x] Add Node-only integration checks for subject isolation and unauthorized behavior.
@@ -26,7 +26,7 @@
 
 ## Next iteration
 
-- [x] Build and smoke-test the Docker image locally, including `/health` and `/api`.
+- [x] Build and smoke-test the Docker image locally, including `/api/v1/health` and `/api/v1/openapi.json`.
 - [x] Verify CI Docker build status and inspect the failed NPM publish logs.
 - [x] Add static UI checks for repo-only navigation and outside-click backdrop wiring.
 - [x] Verify mobile sidebar outside-click behavior in Playwright.

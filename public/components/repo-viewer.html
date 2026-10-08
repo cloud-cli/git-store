@@ -2,10 +2,8 @@
   <section class="flex h-full min-w-0 flex-1 flex-col overflow-y-auto p-4 md:p-6">
     <template if="!repo">
       <div class="flex min-h-full flex-1 items-center justify-center text-center">
-        <div
-          class="mx-auto max-w-md rounded-2xl border border-amber-200 bg-amber-50/70 p-8 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/20"
-        >
-          <img src="/welcome.svg" alt="Welcome illustration" class="mx-auto mb-6 w-60 rounded-xl" />
+        <div class="mx-auto max-w-md p-8">
+          <img src="/ui/welcome.svg" alt="Welcome illustration" class="mx-auto mb-6 w-60 rounded-xl" />
           <h1 class="text-2xl font-semibold">Welcome to your Git API</h1>
           <p class="mt-2 text-gray-600 dark:text-gray-300">
             Create your first repository to start browsing files, commits, branches, and tags.
@@ -43,10 +41,8 @@
       </template>
       <template if="commits.length === 0">
         <div class="flex min-h-full flex-1 items-center justify-center text-center">
-          <div
-            class="mx-auto max-w-md rounded-2xl border border-amber-200 bg-amber-50/70 p-8 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/20"
-          >
-            <img src="/welcome.svg" alt="Welcome illustration" class="mx-auto mb-6 w-60 rounded-xl" />
+          <div class="mx-auto max-w-md p-8">
+            <img src="/ui/welcome.svg" alt="Welcome illustration" class="mx-auto mb-6 w-60 rounded-xl" />
             <h1 class="text-2xl font-semibold">Welcome to your Git API</h1>
             <p class="mt-2 text-gray-600 dark:text-gray-300">Start by uploading your first file.</p>
             <form class="mt-6 flex gap-2" on-submit.prevent="uploadFileFromInput()">
@@ -134,18 +130,18 @@
     </template>
   </section>
   <script setup>
-    import { defineProp, defineEvent, computed, ref } from '@li3/web';
+    import { defineProp, defineEvent, computed, ref } from "@li3/web";
     export default function () {
-      const repo = defineProp('repo', { default: null });
-      const repositories = defineProp('repositories', { default: () => [] });
-      const entries = defineProp('entries', { default: () => [] });
-      const commits = defineProp('commits', { default: () => [] });
-      const emitSelect = defineEvent('select-file');
-      const emitUpload = defineEvent('upload');
-      const emitCommit = defineEvent('commit');
-      const emitCreate = defineEvent('create-repository');
-      const repositoryName = ref('');
-      const commitMessage = ref('');
+      const repo = defineProp("repo", { default: null });
+      const repositories = defineProp("repositories", { default: () => [] });
+      const entries = defineProp("entries", { default: () => [] });
+      const commits = defineProp("commits", { default: () => [] });
+      const emitSelect = defineEvent("select-file");
+      const emitUpload = defineEvent("upload");
+      const emitCommit = defineEvent("commit");
+      const emitCreate = defineEvent("create-repository");
+      const repositoryName = ref("");
+      const commitMessage = ref("");
       const dragging = ref(false);
       const hasUncommitted = computed(() => entries.value.some((entry) => entry.uncommitted));
       const setRepositoryName = (value) => {
@@ -163,7 +159,7 @@
         if (repositoryName.value.trim()) emitCreate(repositoryName.value.trim());
       };
       const selectEntry = (entry) => {
-        if (entry.type === 'file') emitSelect(entry);
+        if (entry.type === "file") emitSelect(entry);
       };
       const openFilePicker = () => {
         repoFileInput.value?.click();
@@ -178,8 +174,8 @@
         if (files?.length) emitUpload(Array.from(files));
       };
       const commitChanges = () => {
-        emitCommit(commitMessage.value || 'autocommit');
-        commitMessage.value = '';
+        emitCommit(commitMessage.value || "autocommit");
+        commitMessage.value = "";
       };
       return {
         repo,

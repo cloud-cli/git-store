@@ -156,14 +156,14 @@
     </aside></template
   >
   <script setup>
-    import { defineProp, ref } from '@li3/web';
+    import { defineProp, ref } from "@li3/web";
     export default function () {
-      const repo = defineProp('repo', { default: null });
-      const branches = defineProp('branches', { default: () => [] });
-      const tags = defineProp('tags', { default: () => [] });
-      const branchName = ref('');
-      const tagName = ref('');
-      const errorMessage = ref('');
+      const repo = defineProp("repo", { default: null });
+      const branches = defineProp("branches", { default: () => [] });
+      const tags = defineProp("tags", { default: () => [] });
+      const branchName = ref("");
+      const tagName = ref("");
+      const errorMessage = ref("");
       const setBranchName = (value) => {
         branchName.value = value;
       };
@@ -171,25 +171,25 @@
         tagName.value = value;
       };
       const tokenHeaders = () => {
-        const token = localStorage.getItem('access_token');
+        const token = localStorage.getItem("access_token");
         return token ? { Authorization: `Bearer ${token}` } : {};
       };
       const selectRef = (ref) => {
         const query = new URLSearchParams({ repo: repo.value.repo, ref });
-        window.history.pushState({}, '', `${window.location.pathname}?${query}`);
-        window.dispatchEvent(new PopStateEvent('popstate'));
+        window.history.pushState({}, "", `${window.location.pathname}?${query}`);
+        window.dispatchEvent(new PopStateEvent("popstate"));
       };
       const selectBranch = (branch) => selectRef(branch);
       const selectTag = (tag) => selectRef(tag);
       const createBranch = async () => {
         const name = branchName.value.trim();
         if (!name) return;
-        errorMessage.value = '';
+        errorMessage.value = "";
         try {
-          const response = await fetch(`/repos/${encodeURIComponent(repo.value.repo)}/branches`, {
-            method: 'POST',
+          const response = await fetch(`/api/v1/repos/${encodeURIComponent(repo.value.repo)}/branches`, {
+            method: "POST",
             headers: {
-              'Content-Type': 'application/json',
+              "Content-Type": "application/json",
               ...tokenHeaders(),
             },
             body: JSON.stringify({ name }),
@@ -197,21 +197,21 @@
           if (response.ok) {
             window.location.reload();
           } else {
-            errorMessage.value = 'Failed to create branch.';
+            errorMessage.value = "Failed to create branch.";
           }
         } catch {
-          errorMessage.value = 'Failed to create branch.';
+          errorMessage.value = "Failed to create branch.";
         }
       };
       const createTag = async () => {
         const name = tagName.value.trim();
         if (!name) return;
-        errorMessage.value = '';
+        errorMessage.value = "";
         try {
-          const response = await fetch(`/repos/${encodeURIComponent(repo.value.repo)}/tags`, {
-            method: 'POST',
+          const response = await fetch(`/api/v1/repos/${encodeURIComponent(repo.value.repo)}/tags`, {
+            method: "POST",
             headers: {
-              'Content-Type': 'application/json',
+              "Content-Type": "application/json",
               ...tokenHeaders(),
             },
             body: JSON.stringify({ name }),
@@ -219,10 +219,10 @@
           if (response.ok) {
             window.location.reload();
           } else {
-            errorMessage.value = 'Failed to create tag.';
+            errorMessage.value = "Failed to create tag.";
           }
         } catch {
-          errorMessage.value = 'Failed to create tag.';
+          errorMessage.value = "Failed to create tag.";
         }
       };
       return {

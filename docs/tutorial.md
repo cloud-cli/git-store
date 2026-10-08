@@ -12,7 +12,7 @@ receive 403; unauthenticated requests receive 401.
 ## 1. Create a repository (empty onboarding)
 
 ```bash
-curl -X POST http://localhost:3000/repos/myproject \
+curl -X POST http://localhost:3000/api/v1/repos/myproject \
   -H "Authorization: Bearer <TOKEN>"
 ```
 
@@ -29,7 +29,7 @@ upload endpoint and then stage and commit it.
 ## 2. Verify the repo is empty
 
 ```bash
-curl -H "Authorization: Bearer <TOKEN>" http://localhost:3000/repos/myproject/log
+curl -H "Authorization: Bearer <TOKEN>" http://localhost:3000/api/v1/repos/myproject/log
 ```
 
 Response (empty array for new repository):
@@ -44,7 +44,7 @@ The API accepts base64-encoded bytes in a JSON body:
 
 ```bash
 # Encode a file and send the required JSON body
-curl -X POST http://localhost:3000/repos/myproject/files \
+curl -X POST http://localhost:3000/api/v1/repos/myproject/files \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d "{\"path\":\"README.md\",\"content\":\"$(base64 -w0 myfile.txt)\"}"
@@ -58,7 +58,7 @@ The endpoint writes the file unstaged and returns **201 Created**. Use an empty
 Stage the existing README.md (or any file you added earlier):
 
 ```bash
-curl -X POST http://localhost:3000/repos/myproject/stage \
+curl -X POST http://localhost:3000/api/v1/repos/myproject/stage \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"files":["README.md"]}'
@@ -82,7 +82,7 @@ upload button writes them unstaged. Use the commit form to stage and commit chan
 ## 4. Autocommit the staged changes
 
 ```bash
-curl -X POST http://localhost:3000/repos/myproject/commit \
+curl -X POST http://localhost:3000/api/v1/repos/myproject/commit \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"message":"initial commit"}'
@@ -97,7 +97,7 @@ Response:
 ## 5. Add a tag
 
 ```bash
-curl -X POST http://localhost:3000/repos/myproject/tags \
+curl -X POST http://localhost:3000/api/v1/repos/myproject/tags \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"name":"v1.0"}'
@@ -112,7 +112,7 @@ Response:
 ## 6. Create a branch (after an initial commit)
 
 ```bash
-curl -X POST http://localhost:3000/repos/myproject/branches \
+curl -X POST http://localhost:3000/api/v1/repos/myproject/branches \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"name":"dev"}'
@@ -130,7 +130,7 @@ An empty repository has no branches or tags until it has a commit. The UI still 
 ## 7. Delete the branch (cleanup)
 
 ```bash
-curl -X DELETE http://localhost:3000/repos/myproject/branches/dev \
+curl -X DELETE http://localhost:3000/api/v1/repos/myproject/branches/dev \
   -H "Authorization: Bearer <TOKEN>"
 ```
 
@@ -143,7 +143,7 @@ Response:
 ## 8. Remove the tag (optional)
 
 ```bash
-curl -X DELETE http://localhost:3000/repos/myproject/tags/v1.0 \
+curl -X DELETE http://localhost:3000/api/v1/repos/myproject/tags/v1.0 \
   -H "Authorization: Bearer <TOKEN>"
 ```
 
@@ -156,19 +156,19 @@ Response:
 ## 9. (Optional) View the full log after commits
 
 ```bash
-curl -H "Authorization: Bearer <TOKEN>" http://localhost:3000/repos/myproject/log
+curl -H "Authorization: Bearer <TOKEN>" http://localhost:3000/api/v1/repos/myproject/log
 ```
 
 You should now see at least one commit object containing `oid`, `message`, `author`, `date`, etc.
 
 ## Summary of flow
 
-1. `POST /repos/{repo}` – create a repository for the authenticated subject (empty by default)
+1. `POST /api/v1/repos/{repo}` – create a repository for the authenticated subject (empty by default)
 2. **(Optional) JSON upload** to add initial content, or use the browser's empty-repository file input
-3. `POST /repos/{repo}/stage` – tell Git to stage selected files
-4. `POST /repos/{repo}/commit` – create a commit with a message
-5. `POST /repos/{repo}/tags` / `DELETE /repos/{repo}/tags/{name}` – version marking (release/tag model)
-6. `POST /repos/{repo}/branches` / `DELETE /repos/{repo}/branches/{name}` – line‑of‑development isolation
+3. `POST /api/v1/repos/{repo}/stage` – tell Git to stage selected files
+4. `POST /api/v1/repos/{repo}/commit` – create a commit with a message
+5. `POST /api/v1/repos/{repo}/tags` / `DELETE /api/v1/repos/{repo}/tags/{name}` – version marking (release/tag model)
+6. `POST /api/v1/repos/{repo}/branches` / `DELETE /api/v1/repos/{repo}/branches/{name}` – line‑of‑development isolation
 
 **Form and UI behavior notes:**
 
@@ -177,4 +177,4 @@ You should now see at least one commit object containing `oid`, `message`, `auth
 - **Drag-drop/file-input upload**: sends base64-encoded file bytes as JSON; existing-repository uploads remain unstaged.
 - **Empty repo onboarding**: the first UI file upload is staged and committed automatically.
 
-All repository endpoints require authentication. `/health`, `/api`, `/config`, and `/session` are public. Tags/branches empty states use HTML popovers only—no additional routes required.
+All repository endpoints require authentication. `/api/v1/health`, `/api/v1/openapi.json`, `/ui/config`, and `/ui/session` are public. Tags/branches empty states use HTML popovers only—no additional routes required.

@@ -45,7 +45,7 @@ npm start
 | `OIDC_ISSUER`         | yes (when OIDC is enabled) | unset           | OpenID Connect issuer URL (used for discovery).                                         |
 | `OIDC_CLIENT_ID`      | yes (when OIDC is enabled) | –               | Client identifier registered with the OIDC provider.                                    |
 | `OIDC_CLIENT_SECRET`  | yes (when OIDC is enabled) | –               | secret for the client.                                                                  |
-| `OIDC_REDIRECT_URI`   | recommended                | derived         | Exact registered callback URL ending in `/auth/callback`.                               |
+| `OIDC_REDIRECT_URI`   | recommended                | derived         | Exact registered callback URL ending in `/ui/auth/callback`.                            |
 | `PUBLIC_URL`          | no                         | derived         | Public service origin used to build the callback URL when `OIDC_REDIRECT_URI` is unset. |
 | `OIDC_JWKS_URI`       | no                         | issuer metadata | Same-issuer JWKS override when discovery advertises an incorrect endpoint.              |
 | `OIDC_BROWSER_SCOPES` | recommended                | none            | Scopes granted to browser sessions, e.g. `repo:read repo:write`.                        |
@@ -54,41 +54,41 @@ npm start
 
 ```bash
 # Health check (no authentication required)
-curl http://localhost:3000/health
+curl http://localhost:3000/api/v1/health
 
 # List OpenAPI description
-curl http://localhost:3000/api
+curl http://localhost:3000/api/v1/openapi.json
 
 # List repositories (requires authentication)
-curl -H "Authorization: Bearer <access-token>" http://localhost:3000/repos
+curl -H "Authorization: Bearer <access-token>" http://localhost:3000/api/v1/repos
 
 # Create a new repository (requires authentication)
-curl -X POST http://localhost:3000/repos/myproject \
+curl -X POST http://localhost:3000/api/v1/repos/myproject \
   -H "Authorization: Bearer <access-token>"
 
 # View the commit log (requires authentication)
-curl -H "Authorization: Bearer <access-token>" http://localhost:3000/repos/myproject/log
+curl -H "Authorization: Bearer <access-token>" http://localhost:3000/api/v1/repos/myproject/log
 
 # Stage files (protected – requires a valid OIDC access token)
-curl -X POST http://localhost:3000/repos/myproject/stage \
+curl -X POST http://localhost:3000/api/v1/repos/myproject/stage \
   -H "Authorization: Bearer <access-token>" \
   -H "Content-Type: application/json" \
   -d '{"files":["README.md"]}'
 
 # Commit staged changes (protected)
-curl -X POST http://localhost:3000/repos/myproject/commit \
+curl -X POST http://localhost:3000/api/v1/repos/myproject/commit \
   -H "Authorization: Bearer <access-token>" \
   -H "Content-Type: application/json" \
   -d '{"message":"initial commit"}'
 
 # Add a tag (protected)
-curl -X POST http://localhost:3000/repos/myproject/tags \
+curl -X POST http://localhost:3000/api/v1/repos/myproject/tags \
   -H "Authorization: Bearer <access-token>" \
   -H "Content-Type: application/json" \
   -d '{"name":"v1.0"}'
 
 # Create a branch (protected)
-curl -X POST http://localhost:3000/repos/myproject/branches \
+curl -X POST http://localhost:3000/api/v1/repos/myproject/branches \
   -H "Authorization: Bearer <access-token>" \
   -H "Content-Type: application/json" \
   -d '{"name":"dev"}'
@@ -115,7 +115,7 @@ Browser-session and bearer requests are accepted only after:
 2. The configured OIDC issuer introspects the token as active and confirms a non-empty `sub`.
 3. Each repository route checks the token's `repo:read` or `repo:write` scope.
 
-Cross-origin cookie requests are rejected for security. The `/session` endpoint allows
+Cross-origin cookie requests are rejected for security. The `/ui/session` endpoint allows
 clients to verify the current authentication state.
 
 ### File upload methods
@@ -127,13 +127,13 @@ The API's file upload endpoint accepts JSON:
 ```
 
 The browser encodes drag-and-drop or selected-file bytes as base64 and submits JSON to
-`POST /repos/{repo}/files`. The endpoint returns **201 Created** on success, **400 Bad
+`POST /api/v1/repos/{repo}/files`. The endpoint returns **201 Created** on success, **400 Bad
 Request** for invalid paths (including traversal), **403** for insufficient scope, or
 **404** if the repository is not found. Empty content creates an empty file.
 
 ### Empty repository onboarding
 
-When creating a new repository for a subject via `POST /repos/{repo}`, the initial state
+When creating a new repository for a subject via `POST /api/v1/repos/{repo}`, the initial state
 is empty. Use either:
 
 - Select a file in the empty-repository welcome screen; the UI uploads, stages, and
@@ -169,7 +169,7 @@ When no repositories exist for a subject or tags/branches lists are empty:
 - **Existing repository**: Files can be uploaded through a file input or by dropping them on the file list; uploads remain unstaged.
 
 The UI is built with Li³ `@li3/web`: four independent `<template app>` islands own the
-topbar/session, repository navigation, selected-repository viewer, and branches/tags
+topbar/ui/session, repository navigation, selected-repository viewer, and branches/tags
 panel. Each island declares initial JSON using `<script state>` and hydrates its own
 state in setup with refs, computed values, lifecycle hooks, and `on-*` bindings. The
 URL query string shares navigation state across islands and preserves it on refresh.

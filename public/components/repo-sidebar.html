@@ -5,7 +5,7 @@
     class-open="open"
   >
     <div class="flex items-center justify-between border-b border-gray-200 p-3 dark:border-gray-800">
-      <h2 class="text-xs font-semibold uppercase tracking-wider text-gray-500">Repositories</h2>
+      <h2 class="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">Repositories</h2>
       <button
         popovertarget="create-repo-popover"
         style="anchor-name: --create-repository-anchor"
@@ -17,7 +17,9 @@
     </div>
     <div class="flex-1 space-y-1 overflow-y-auto p-2">
       <template if="!repositories.length"
-        ><p class="px-3 py-2 text-xs text-gray-500">No repositories yet. Create one to get started.</p></template
+        ><p class="px-3 py-2 text-xs text-gray-500 dark:text-gray-300">
+          No repositories yet. Create one to get started.
+        </p></template
       >
       <template for="item of repositories"
         ><a
@@ -48,7 +50,7 @@
       class="w-full max-w-md rounded-lg border border-gray-200 bg-white p-5 shadow-xl dark:border-gray-700 dark:bg-gray-900"
     >
       <h2 class="text-lg font-semibold">Create repository</h2>
-      <p class="mt-1 text-sm text-gray-500">Choose a name for your first repository.</p>
+      <p class="mt-1 text-sm text-gray-500 dark:text-gray-300">Choose a name for your first repository.</p>
       <input
         class="mt-4 w-full rounded-md border border-gray-300 bg-transparent px-3 py-2 outline-none focus:border-indigo-500 dark:border-gray-700"
         placeholder="repository-name"
@@ -58,7 +60,7 @@
       <div class="mt-4 flex justify-end gap-2">
         <button
           type="button"
-          class="rounded-md px-3 py-2 text-gray-500"
+          class="rounded-md px-3 py-2 text-gray-500 dark:text-gray-300"
           popovertarget="create-repo-popover"
           popovertargetaction="hide"
         >
@@ -71,13 +73,13 @@
     </form>
   </div>
   <script setup>
-    import { defineProp, defineEvent, ref } from '@li3/web';
+    import { defineProp, defineEvent, ref } from "@li3/web";
     export default function () {
-      const repositories = defineProp('repositories', { default: () => [] });
-      const selected = defineProp('selected', { default: null });
-      const open = defineProp('open', { default: false });
-      const emitCreate = defineEvent('create-repository');
-      const repoName = ref('');
+      const repositories = defineProp("repositories", { default: () => [] });
+      const selected = defineProp("selected", { default: null });
+      const open = defineProp("open", { default: false });
+      const emitCreate = defineEvent("create-repository");
+      const repoName = ref("");
       const setRepoName = (name) => {
         repoName.value = name;
       };
@@ -85,7 +87,7 @@
         if (repoName.value.trim()) {
           emitCreate(repoName.value);
           // Close the popover after successful emit
-          const popover = document.getElementById('create-repo-popover');
+          const popover = document.getElementById("create-repo-popover");
           if (popover) popover.hidePopover();
         }
       };

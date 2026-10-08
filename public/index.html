@@ -53,7 +53,11 @@
         class-dark="darkMode"
       >
         <div class="flex items-center gap-3">
-          <button class="p-2 text-gray-500 md:hidden" on-click="toggleSidebar()" aria-label="Toggle repositories">
+          <button
+            class="p-2 text-gray-500 dark:text-gray-300 md:hidden"
+            on-click="toggleSidebar()"
+            aria-label="Toggle repositories"
+          >
             <i class="fa-solid fa-bars text-lg"></i>
           </button>
           <a href="/" class="flex items-center gap-2 text-lg font-semibold tracking-tight"
@@ -127,11 +131,11 @@
           };
           const toggleSidebar = () => window.dispatchEvent(new CustomEvent("git-api-sidebar-toggle"));
           onInit(async () => {
-            const config = await fetch("/config")
+            const config = await fetch("/ui/config")
               .then((response) => response.json())
               .catch(() => ({}));
             const token = localStorage.getItem("access_token");
-            const sessionResponse = await fetch("/session", {
+            const sessionResponse = await fetch("/ui/session", {
               headers: token ? { Authorization: `Bearer ${token}` } : {},
             }).catch(() => null);
             const session = sessionResponse?.ok
@@ -177,7 +181,7 @@
             <button
               popovertarget="create-repo-popover"
               style="anchor-name: --create-repository-anchor"
-              class="p-2 text-gray-500"
+              class="p-2 text-gray-500 dark:text-gray-300"
               aria-label="Create repository"
             >
               <i class="fa-solid fa-plus"></i>
@@ -185,7 +189,9 @@
           </div>
           <div class="flex-1 space-y-1 overflow-y-auto p-2">
             <template if="!repositories.length"
-              ><p class="px-3 py-2 text-xs text-gray-500">No repositories yet. Create one to get started.</p></template
+              ><p class="px-3 py-2 text-xs text-gray-500 dark:text-gray-300">
+                No repositories yet. Create one to get started.
+              </p></template
             >
             <template for="repo of repositories"
               ><a
@@ -210,33 +216,52 @@
             "
             class="w-64 rounded-lg border border-gray-200 bg-white p-4 shadow-xl dark:border-gray-700 dark:bg-gray-900"
           >
-            <form on-submit.prevent="createRepository()" class="space-y-4">
-              <h2 class="text-lg font-semibold">Create repository</h2>
-              <label class="block text-sm text-gray-600 dark:text-gray-300"
-                >Repository name<input
-                  class="mt-1 w-full rounded-md border border-gray-300 bg-transparent px-3 py-2 outline-none focus:border-indigo-500 dark:border-gray-700"
-                  placeholder="my-project"
-                  required
-                  on-input="setRepoName($event.target.value)"
-              /></label>
-              <template if="errorMessage"><p class="text-xs text-red-600" role="alert">{{ errorMessage }}</p></template>
-              <div class="flex justify-end gap-2">
-                <button
-                  type="button"
-                  class="rounded-md px-3 py-2 text-gray-500"
-                  popovertarget="create-repo-popover"
-                  popovertargetaction="hide"
+            <!-- Show sign-in button when not authenticated -->
+            <template if="!localStorage.getItem('access_token')">
+              <div class="text-center py-8">
+                <a
+                  href="/ui/auth/login"
+                  class="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-500"
+                  aria-label="Sign in to create repository"
                 >
-                  Cancel
-                </button>
-                <button
-                  class="rounded-md bg-indigo-600 px-3 py-2 font-medium text-white hover:bg-indigo-500"
-                  type="submit"
-                >
-                  Create
-                </button>
+                  <i class="fa-solid fa-arrow-right-to-bracket"></i>
+                  <span>Sign in to create repository</span>
+                </a>
+                <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Create a repository after signing in</p>
               </div>
-            </form>
+              <!-- Show form when authenticated -->
+            </template>
+            <template if="localStorage.getItem('access_token')">
+              <form on-submit.prevent="createRepository()" class="space-y-4">
+                <h2 class="text-lg font-semibold">Create repository</h2>
+                <label class="block text-sm text-gray-600 dark:text-gray-300"
+                  >Repository name<input
+                    class="mt-1 w-full rounded-md border border-gray-300 bg-transparent px-3 py-2 outline-none focus:border-indigo-500 dark:border-gray-700"
+                    placeholder="my-project"
+                    required
+                    on-input="setRepoName($event.target.value)"
+                /></label>
+                <template if="errorMessage"
+                  ><p class="text-xs text-red-600" role="alert">{{ errorMessage }}</p></template
+                >
+                <div class="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    class="rounded-md px-3 py-2 text-gray-500 dark:text-gray-300"
+                    popovertarget="create-repo-popover"
+                    popovertargetaction="hide"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    class="rounded-md bg-indigo-600 px-3 py-2 font-medium text-white hover:bg-indigo-500"
+                    type="submit"
+                  >
+                    Create
+                  </button>
+                </div>
+              </form>
+            </template>
           </div>
         </aside>
         <template if="menuOpen"
@@ -274,7 +299,7 @@
                 return;
               }
               try {
-                const response = await fetch(`/repos/${encodeURIComponent(name)}`, {
+                const response = await fetch(`/api/v1/repos/${encodeURIComponent(name)}`, {
                   method: "POST",
                   headers: tokenHeaders(),
                 });
@@ -300,14 +325,14 @@
               window.addEventListener("keydown", (event) => {
                 if (event.key === "Escape" && menuOpen.value) closeMenu();
               });
-              const session = await fetch("/session", { headers: tokenHeaders() })
+              const session = await fetch("/ui/session", { headers: tokenHeaders() })
                 .then((response) => response.json())
                 .catch(() => ({ authenticated: false }));
               if (!session.authenticated) {
                 repositories.value = [];
                 return;
               }
-              const response = await fetch("/repos", { headers: tokenHeaders() }).catch(() => null);
+              const response = await fetch("/api/v1/repos", { headers: tokenHeaders() }).catch(() => null);
               if (response?.ok) {
                 const result = await response.json().catch(() => []);
                 repositories.value = Array.isArray(result) ? result : [];
@@ -342,11 +367,9 @@
           >
             <template if="!repo"
               ><div class="flex min-h-full flex-1 items-center justify-center text-center">
-                <div
-                  class="mx-auto max-w-md rounded-2xl border border-amber-200 bg-amber-50/70 p-8 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/20"
-                >
+                <div class="mx-auto max-w-md p-8">
                   <img
-                    src="/welcome.svg"
+                    src="/ui/welcome.svg"
                     alt="A friendly Git folder illustration"
                     class="mx-auto mb-6 w-60 rounded-xl"
                   />
@@ -371,7 +394,7 @@
               </div></template
             >
             <template if="repo"
-              ><div class="mb-4 flex items-center gap-2 text-xs text-gray-500">
+              ><div class="mb-4 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-300">
                 <h1 class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ repo.repo }}</h1>
                 <a attr-href="rootHref" class="hover:text-indigo-600">Repository root</a><span>/</span
                 ><span>{{ directory || 'Root' }}</span>
@@ -414,7 +437,7 @@
                   <div class="flex justify-end gap-2">
                     <button
                       type="button"
-                      class="rounded-md px-2 py-1 text-gray-500"
+                      class="rounded-md px-2 py-1 text-gray-500 dark:text-gray-300"
                       popovertarget="add-file-popover"
                       popovertargetaction="hide"
                     >
@@ -440,7 +463,7 @@
                   </div>
                   <div class="min-w-0 flex-1">
                     <div class="truncate font-medium">{{ commits[0].message }}</div>
-                    <div class="mt-0.5 text-xs text-gray-500">{{ commits[0].author_name }}</div>
+                    <div class="mt-0.5 text-xs text-gray-500 dark:text-gray-300">{{ commits[0].author_name }}</div>
                   </div>
                   <code class="rounded bg-gray-200 px-2 py-1 font-mono text-xs dark:bg-gray-800"
                     >{{ commits[0].hash.slice(0, 7) }}</code
@@ -490,14 +513,14 @@
                               >{{ entry.uncommitted ? '*' : '' }}</sup
                             ></span
                           ></a
-                        ><span class="ml-3 max-w-[45%] truncate text-xs text-gray-500"
+                        ><span class="ml-3 max-w-[45%] truncate text-xs text-gray-500 dark:text-gray-300"
                           >{{ entry.uncommitted ? 'Uncommitted' : entry.type }}</span
                         >
                       </li></template
                     >
                   </ul>
                   <div
-                    class="mt-auto border-t border-dashed border-gray-300 p-4 text-center text-xs text-gray-500 dark:border-gray-700"
+                    class="mt-auto border-t border-dashed border-gray-300 p-4 text-center text-xs text-gray-500 dark:text-gray-300 dark:border-gray-700"
                     class-dragging="dragging"
                   >
                     Drop files here to upload them unstaged
@@ -506,11 +529,9 @@
               </template>
               <template if="commits.length === 0">
                 <div class="flex min-h-full flex-1 items-center justify-center text-center">
-                  <div
-                    class="mx-auto max-w-md rounded-2xl border border-amber-200 bg-amber-50/70 p-8 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/20"
-                  >
+                  <div class="mx-auto max-w-md p-8">
                     <img
-                      src="/welcome.svg"
+                      src="/ui/welcome.svg"
                       alt="A friendly Git folder illustration"
                       class="mx-auto mb-6 w-60 rounded-xl"
                     />
@@ -547,7 +568,7 @@
                       <div class="font-medium">{{ previewPath }}</div>
                       <a
                         attr-href="rootHref"
-                        class="rounded px-2 py-1 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+                        class="rounded px-2 py-1 text-gray-500 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
                         aria-label="Close preview"
                         ><i class="fa-solid fa-xmark"></i
                       ></a>
@@ -590,7 +611,7 @@
               const darkMode = ref(localStorage.getItem("theme") !== "light");
               const hasUncommitted = computed(() => entries.value.some((entry) => entry.uncommitted));
               const url = () => new URL(window.location.href);
-              const base = () => `/repos/${encodeURIComponent(repo.value.repo)}`;
+              const base = () => `/api/v1/repos/${encodeURIComponent(repo.value.repo)}`;
               const rootHref = computed(() => `/?repo=${encodeURIComponent(repo.value?.repo || "")}`);
               const setRepoName = (value) => {
                 repoName.value = value;
@@ -630,7 +651,7 @@
                   return;
                 }
                 repo.value = { repo: name };
-                const apiBase = `/repos/${encodeURIComponent(name)}`;
+                const apiBase = `/api/v1/repos/${encodeURIComponent(name)}`;
                 const [treeResponse, logResponse] = await Promise.all([
                   fetch(`${apiBase}/tree${directory.value ? `?path=${encodeURIComponent(directory.value)}` : ""}`, {
                     headers: tokenHeaders(),
@@ -653,7 +674,7 @@
                   return;
                 }
                 try {
-                  const response = await fetch(`/repos/${encodeURIComponent(name)}`, {
+                  const response = await fetch(`/api/v1/repos/${encodeURIComponent(name)}`, {
                     method: "POST",
                     headers: tokenHeaders(),
                   });
@@ -840,7 +861,9 @@
               class-dark="darkMode"
             >
               <div class="mb-6">
-                <h3 class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
+                <h3
+                  class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
+                >
                   <i class="fa-solid fa-code-branch"></i> Branches
                   <button
                     popovertarget="branch-popover"
@@ -879,7 +902,7 @@
                     <div class="flex justify-end gap-2">
                       <button
                         type="button"
-                        class="rounded-md px-2 py-1 text-gray-500"
+                        class="rounded-md px-2 py-1 text-gray-500 dark:text-gray-300"
                         popovertarget="branch-popover"
                         popovertargetaction="hide"
                       >
@@ -905,7 +928,7 @@
                     </li></template
                   >
                   <template if="!branches.length"
-                    ><p class="text-xs text-gray-500">
+                    ><p class="text-xs text-gray-500 dark:text-gray-300">
                       No branches.
                       <button
                         type="button"
@@ -919,7 +942,9 @@
                 </ul>
               </div>
               <div>
-                <h3 class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
+                <h3
+                  class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
+                >
                   <i class="fa-solid fa-tags"></i> Tags
                   <button
                     popovertarget="tag-popover"
@@ -958,7 +983,7 @@
                     <div class="flex justify-end gap-2">
                       <button
                         type="button"
-                        class="rounded-md px-2 py-1 text-gray-500"
+                        class="rounded-md px-2 py-1 text-gray-500 dark:text-gray-300"
                         popovertarget="tag-popover"
                         popovertargetaction="hide"
                       >
@@ -984,7 +1009,7 @@
                     </li></template
                   >
                   <template if="!tags.length"
-                    ><p class="text-xs text-gray-500">
+                    ><p class="text-xs text-gray-500 dark:text-gray-300">
                       No tags.
                       <button
                         type="button"
@@ -1026,7 +1051,7 @@
                 const name = query.get("repo");
                 if (name) {
                   repo.value = { repo: name };
-                  const base = `/repos/${encodeURIComponent(name)}`;
+                  const base = `/api/v1/repos/${encodeURIComponent(name)}`;
                   const results = await Promise.all([
                     fetch(`${base}/branches`, { headers: tokenHeaders() }),
                     fetch(`${base}/tags`, { headers: tokenHeaders() }),
@@ -1049,7 +1074,7 @@
                 if (!name) return;
                 errorMessage.value = "";
                 try {
-                  const response = await fetch(`/repos/${encodeURIComponent(repo.value.repo)}/branches`, {
+                  const response = await fetch(`/api/v1/repos/${encodeURIComponent(repo.value.repo)}/branches`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json", ...tokenHeaders() },
                     body: JSON.stringify({ name }),
@@ -1065,7 +1090,7 @@
                 if (!name) return;
                 errorMessage.value = "";
                 try {
-                  const response = await fetch(`/repos/${encodeURIComponent(repo.value.repo)}/tags`, {
+                  const response = await fetch(`/api/v1/repos/${encodeURIComponent(repo.value.repo)}/tags`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json", ...tokenHeaders() },
                     body: JSON.stringify({ name }),

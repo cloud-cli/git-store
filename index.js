@@ -3,13 +3,15 @@ const simpleGit = require("simple-git");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { spawn } = require("child_process");
 const { getRepoPath, ensureRepoDir, validateRepoName, getHashedSubjectDir } = require("./storage");
 
 const getGit = (repoPath) => simpleGit.simpleGit(repoPath);
 
 const app = express();
 app.use(express.json({ limit: "20mb" }));
-app.use(express.static(path.join(__dirname, "public")));
+app.use("/ui", express.static(path.join(__dirname, "public")));
+app.get("/", (req, res) => res.redirect(302, "/ui/"));
 const PORT = process.env.PORT || 3000;
 
 // OpenID Discovery and Authentication Setup
@@ -136,18 +138,24 @@ function getOidcRedirectUri(req) {
   }
   const baseUrl = process.env.PUBLIC_URL;
   if (baseUrl) {
-    return new URL("/auth/callback", baseUrl).toString();
+    return new URL("/ui/auth/callback", baseUrl).toString();
   }
   const protocol = (req.get("x-forwarded-proto") || req.protocol || "http").split(",")[0].trim();
   const host = (req.get("x-forwarded-host") || req.get("host") || "").split(",")[0].trim();
   if (!host || !["http", "https"].includes(protocol)) {
     throw new Error("OIDC redirect URL is not configured");
   }
-  return new URL("/auth/callback", `${protocol}://${host}`).toString();
+  return new URL("/ui/auth/callback", `${protocol}://${host}`).toString();
 }
 
 function cookieOptions(redirectUri, maxAge) {
-  return { httpOnly: true, secure: new URL(redirectUri).protocol === "https:", sameSite: "lax", path: "/", maxAge };
+  return {
+    httpOnly: true,
+    secure: new URL(redirectUri).protocol === "https:",
+    sameSite: "lax",
+    path: "/",
+    maxAge,
+  };
 }
 
 function safeReturnPath(value) {
@@ -230,6 +238,168 @@ function requireScope(scope) {
     return next();
   };
 }
+
+function requireGitBasicAuth(req, res, next) {
+  const header = req.headers.authorization || "";
+  const match = /^Basic\s+([A-Za-z0-9+/]+=*)$/i.exec(header);
+  if (!match) {
+    res.set("WWW-Authenticate", 'Basic realm="Git Store", charset="UTF-8"');
+    return res.status(401).send("Git HTTP authentication required");
+  }
+  let decoded;
+  try {
+    decoded = Buffer.from(match[1], "base64").toString("utf8");
+  } catch {
+    decoded = "";
+  }
+  const separator = decoded.indexOf(":");
+  const token = separator < 0 ? "" : decoded.slice(separator + 1);
+  if (separator < 0 || !token) {
+    res.set("WWW-Authenticate", 'Basic realm="Git Store", charset="UTF-8"');
+    return res.status(401).send("Git HTTP authentication required");
+  }
+  Promise.resolve(introspectAccessToken(token))
+    .then((claims) => {
+      if (!claims?.active || typeof claims.sub !== "string" || !claims.sub.trim()) {
+        res.set("WWW-Authenticate", 'Basic realm="Git Store", charset="UTF-8"');
+        return res.status(401).send("Invalid Git credentials");
+      }
+      req.user = claims;
+      return next();
+    })
+    .catch(() => {
+      res.set("WWW-Authenticate", 'Basic realm="Git Store", charset="UTF-8"');
+      return res.status(401).send("Invalid Git credentials");
+    });
+}
+
+function gitSmartHttp(req, res) {
+  const match = /^\/git\/([A-Za-z0-9][A-Za-z0-9._-]{0,99})\.git\/(info\/refs|git-upload-pack|git-receive-pack)$/.exec(
+    req.path,
+  );
+  if (!match || !validateRepoName(match[1]) || Object.keys(req.query).some((key) => key !== "service")) {
+    return res.status(400).send("Malformed Git request");
+  }
+  const repo = match[1];
+  const operation = match[2];
+  const service = req.query.service;
+  let write;
+  if (operation === "info/refs" && (service === "git-upload-pack" || service === "git-receive-pack")) {
+    write = service === "git-receive-pack";
+  } else if (operation === "git-upload-pack" && req.method === "POST") {
+    write = false;
+  } else if (operation === "git-receive-pack" && req.method === "POST") {
+    write = true;
+  } else {
+    return res.status(400).send("Unsupported Git request");
+  }
+  if (req.method !== (operation === "info/refs" ? "GET" : "POST")) {
+    return res.status(405).send("Method not allowed");
+  }
+  const scopes = getTokenScopes(req.user);
+  if (write ? !scopes.has("repo:write") : !scopes.has("repo:read") && !scopes.has("repo:write")) {
+    return res.status(403).send("Insufficient scope");
+  }
+  const repoPath = getSafeRepoPath(repo, req);
+  if (!repoPath || !fs.existsSync(path.join(repoPath, ".git"))) {
+    return res.status(404).send("Repository not found");
+  }
+  const queryService = operation === "info/refs" ? service : undefined;
+  const env = {
+    ...process.env,
+    GIT_PROJECT_ROOT: path.resolve(process.env.DATA_PATH, getHashedSubjectDir(req)),
+    GIT_HTTP_EXPORT_ALL: "1",
+    GIT_PROTOCOL: req.get("git-protocol") || "",
+    PATH_INFO: `/${repo}/.git/${operation}`,
+    REQUEST_METHOD: req.method,
+    QUERY_STRING: queryService ? `service=${queryService}` : "",
+    CONTENT_TYPE: req.get("content-type") || "",
+    CONTENT_LENGTH: req.get("content-length") || "0",
+    REMOTE_USER: req.user.sub,
+  };
+  const child = spawn("git", ["http-backend"], {
+    env,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let headersParsed = false;
+  let output = Buffer.alloc(0);
+  let stderr = "";
+  child.stderr.on("data", (chunk) => {
+    if (stderr.length < 500) {
+      stderr += chunk.toString().slice(0, 500 - stderr.length);
+    }
+  });
+  const writeBackendOutput = (chunk) => {
+    if (!res.write(chunk)) {
+      child.stdout.pause();
+      res.once("drain", () => child.stdout.resume());
+    }
+  };
+  child.stdout.on("data", (chunk) => {
+    if (!headersParsed) {
+      output = Buffer.concat([output, chunk]);
+      const boundary = output.indexOf("\r\n\r\n");
+      const delimiterLength = 4;
+      const lfBoundary = boundary < 0 ? output.indexOf("\n\n") : -1;
+      const splitAt = boundary >= 0 ? boundary : lfBoundary;
+      const splitLength = boundary >= 0 ? delimiterLength : 2;
+      if (splitAt < 0) {
+        return;
+      }
+      const headerText = output.subarray(0, splitAt).toString("latin1");
+      const body = output.subarray(splitAt + splitLength);
+      for (const line of headerText.split(/\r?\n/)) {
+        const colon = line.indexOf(":");
+        if (colon > 0) {
+          const key = line.slice(0, colon).trim();
+          const value = line.slice(colon + 1).trim();
+          if (key.toLowerCase() === "status") {
+            res.status(Number.parseInt(value, 10) || 200);
+          } else if (!/^(connection|transfer-encoding)$/i.test(key)) {
+            res.set(key, value);
+          }
+        }
+      }
+      headersParsed = true;
+      if (body.length) {
+        writeBackendOutput(body);
+      }
+      output = Buffer.alloc(0);
+    } else {
+      writeBackendOutput(chunk);
+    }
+  });
+  req.pipe(child.stdin);
+  child.stdin.on("error", (error) => {
+    if (error.code !== "EPIPE") {
+      child.kill();
+    }
+  });
+  req.on("aborted", () => child.kill());
+  res.on("close", () => {
+    if (!res.writableEnded) {
+      child.kill();
+    }
+  });
+  child.on("error", () => {
+    if (!res.headersSent) {
+      res.status(500).end("Git backend unavailable");
+    } else {
+      res.end();
+    }
+  });
+  child.on("close", (code) => {
+    if (!headersParsed && !res.headersSent) {
+      res.status(code === 0 ? 200 : 500);
+    }
+    if (code !== 0) {
+      process.stderr.write(`[git-http-backend] ${code}: ${stderr.slice(0, 500)}\n`);
+    }
+    res.end();
+  });
+}
+
+app.all("/git/:repo.git/*path", requireGitBasicAuth, gitSmartHttp);
 
 /**
  * Safely get the repo path using the authenticated subject's hashed directory.
@@ -613,7 +783,10 @@ async function getRepoHistory(req, res) {
   }
 
   try {
-    const history = await getGit(repoPath).log({ file: req.query.path, strictDate: false });
+    const history = await getGit(repoPath).log({
+      file: req.query.path,
+      strictDate: false,
+    });
     return res.json(history.all);
   } catch (error) {
     if (error.message.includes("does not have any commits yet")) {
@@ -626,19 +799,19 @@ async function getRepoHistory(req, res) {
 // Define API routes with :repo only (no owner parameter)
 // Old owner-based routes are intentionally omitted to reject spoofed paths
 
-app.get("/health", (req, res) => res.json({ status: "ok" }));
-app.get("/api", (req, res) => res.json(makeApiSpec()));
-app.get("/config", (req, res) => {
+app.get("/api/v1/health", (req, res) => res.json({ status: "ok" }));
+app.get("/api/v1/openapi.json", (req, res) => res.json(makeApiSpec()));
+app.get("/ui/config", (req, res) => {
   const issuer = process.env.OIDC_ISSUER;
   const oidcConfigured = Boolean(
     app.locals.oidcClientOverride || (issuer && process.env.OIDC_CLIENT_ID && process.env.OIDC_CLIENT_SECRET),
   );
   return res.json({
     oidcUserUrl: issuer ? `${issuer.replace(/\/$/, "")}/me` : null,
-    oidcLoginUrl: oidcConfigured ? "/auth/login" : null,
+    oidcLoginUrl: oidcConfigured ? "/ui/auth/login" : null,
   });
 });
-app.get("/session", async (req, res) => {
+app.get("/ui/session", async (req, res) => {
   const issuer = process.env.OIDC_ISSUER;
   if (!issuer) {
     return res.json({ authenticated: false, profile: null });
@@ -657,10 +830,17 @@ app.get("/session", async (req, res) => {
     if (!claims?.active || typeof claims.sub !== "string" || !claims.sub.trim()) {
       return res.json({ authenticated: false, profile: null });
     }
-    let profile = { sub: claims.sub, name: claims.name, preferred_username: claims.preferred_username };
+    let profile = {
+      sub: claims.sub,
+      name: claims.name,
+      preferred_username: claims.preferred_username,
+    };
     try {
       const response = await fetch(new URL("/userinfo", issuer), {
-        headers: { Authorization: `Bearer ${token}`, "X-Auth-Audience": process.env.OIDC_CLIENT_ID },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-Auth-Audience": process.env.OIDC_CLIENT_ID,
+        },
       });
       if (response.ok) {
         const userInfo = await response.json();
@@ -678,7 +858,7 @@ app.get("/session", async (req, res) => {
   }
 });
 
-app.get("/auth/login", (req, res) => {
+app.get("/ui/auth/login", (req, res) => {
   const client = getOidcClient();
   if (!client) {
     return res.status(503).send("OIDC sign-in is not configured.");
@@ -708,7 +888,7 @@ app.get("/auth/login", (req, res) => {
   }
 });
 
-app.get("/auth/callback", async (req, res) => {
+app.get("/ui/auth/callback", async (req, res) => {
   const client = getOidcClient();
   if (!client) {
     return res.status(503).send("OIDC sign-in is not configured.");
@@ -746,7 +926,10 @@ app.get("/auth/callback", async (req, res) => {
 
     callbackStage = "userinfo validation";
     const userInfoResponse = await fetch(new URL("/userinfo", process.env.OIDC_ISSUER), {
-      headers: { Authorization: `Bearer ${accessToken}`, "X-Auth-Audience": process.env.OIDC_CLIENT_ID },
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "X-Auth-Audience": process.env.OIDC_CLIENT_ID,
+      },
     });
     if (!userInfoResponse.ok) {
       return res.status(401).send("OIDC sign-in could not verify the access-token profile.");
@@ -798,7 +981,7 @@ app.get("/auth/callback", async (req, res) => {
   }
 });
 
-app.post("/auth/logout", (req, res) => {
+app.post("/ui/auth/logout", (req, res) => {
   const session = getBrowserSession(req);
   if (session) {
     browserSessions.delete(session.id);
@@ -815,30 +998,30 @@ app.post("/auth/logout", (req, res) => {
 });
 
 // List/create repositories - scoped to authenticated subject
-app.get("/repos", requireAuthentication, requireScope("repo:read"), listOwnRepos);
-app.post("/repos/:repo", requireAuthentication, requireScope("repo:write"), createRepo);
+app.get("/api/v1/repos", requireAuthentication, requireScope("repo:read"), listOwnRepos);
+app.post("/api/v1/repos/:repo", requireAuthentication, requireScope("repo:write"), createRepo);
 
 // Repository operations - all use :repo only, no owner in route
-app.get("/repos/:repo/log", requireAuthentication, requireScope("repo:read"), async (req, res) => {
+app.get("/api/v1/repos/:repo/log", requireAuthentication, requireScope("repo:read"), async (req, res) => {
   getRepoLog(req, res);
 });
-app.get("/repos/:repo/tree", requireAuthentication, requireScope("repo:read"), async (req, res) => {
+app.get("/api/v1/repos/:repo/tree", requireAuthentication, requireScope("repo:read"), async (req, res) => {
   getRepoTree(req, res);
 });
-app.get("/repos/:repo/file", requireAuthentication, requireScope("repo:read"), async (req, res) => {
+app.get("/api/v1/repos/:repo/file", requireAuthentication, requireScope("repo:read"), async (req, res) => {
   getRepoFile(req, res);
 });
-app.post("/repos/:repo/files", requireAuthentication, requireScope("repo:write"), uploadRepoFile);
-app.get("/repos/:repo/branches", requireAuthentication, requireScope("repo:read"), async (req, res) => {
+app.post("/api/v1/repos/:repo/files", requireAuthentication, requireScope("repo:write"), uploadRepoFile);
+app.get("/api/v1/repos/:repo/branches", requireAuthentication, requireScope("repo:read"), async (req, res) => {
   getRepoBranches(req, res);
 });
-app.get("/repos/:repo/tags", requireAuthentication, requireScope("repo:read"), async (req, res) => {
+app.get("/api/v1/repos/:repo/tags", requireAuthentication, requireScope("repo:read"), async (req, res) => {
   getRepoTags(req, res);
 });
-app.get("/repos/:repo/history", requireAuthentication, requireScope("repo:read"), async (req, res) => {
+app.get("/api/v1/repos/:repo/history", requireAuthentication, requireScope("repo:read"), async (req, res) => {
   getRepoHistory(req, res);
 });
-app.post("/repos/:repo/stage", requireAuthentication, requireScope("repo:write"), async (req, res) => {
+app.post("/api/v1/repos/:repo/stage", requireAuthentication, requireScope("repo:write"), async (req, res) => {
   const repo = req.params.repo;
   const repoPath = getSafeRepoPath(repo, req);
   if (!repoPath) {
@@ -854,7 +1037,7 @@ app.post("/repos/:repo/stage", requireAuthentication, requireScope("repo:write")
     return res.status(500).json({ error: error.message });
   }
 });
-app.post("/repos/:repo/unstage", requireAuthentication, requireScope("repo:write"), async (req, res) => {
+app.post("/api/v1/repos/:repo/unstage", requireAuthentication, requireScope("repo:write"), async (req, res) => {
   const repo = req.params.repo;
   const repoPath = getSafeRepoPath(repo, req);
   if (!repoPath) {
@@ -870,7 +1053,7 @@ app.post("/repos/:repo/unstage", requireAuthentication, requireScope("repo:write
     return res.status(500).json({ error: error.message });
   }
 });
-app.post("/repos/:repo/commit", requireAuthentication, requireScope("repo:write"), async (req, res) => {
+app.post("/api/v1/repos/:repo/commit", requireAuthentication, requireScope("repo:write"), async (req, res) => {
   const repo = req.params.repo;
   const repoPath = getSafeRepoPath(repo, req);
   if (!repoPath) {
@@ -886,12 +1069,15 @@ app.post("/repos/:repo/commit", requireAuthentication, requireScope("repo:write"
     }
     const message = req.body.message || "autocommit";
     await getGit(repoPath).commit(message);
-    return res.json({ message: "Changes committed successfully", commit: message });
+    return res.json({
+      message: "Changes committed successfully",
+      commit: message,
+    });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
 });
-app.post("/repos/:repo/tags", requireAuthentication, requireScope("repo:write"), async (req, res) => {
+app.post("/api/v1/repos/:repo/tags", requireAuthentication, requireScope("repo:write"), async (req, res) => {
   if (!isValidGitRef(req.body?.name)) {
     return res.status(400).json({ error: "Invalid tag name" });
   }
@@ -910,7 +1096,7 @@ app.post("/repos/:repo/tags", requireAuthentication, requireScope("repo:write"),
     return res.status(500).json({ error: error.message });
   }
 });
-app.delete("/repos/:repo/tags/:name", requireAuthentication, requireScope("repo:write"), async (req, res) => {
+app.delete("/api/v1/repos/:repo/tags/:name", requireAuthentication, requireScope("repo:write"), async (req, res) => {
   if (!isValidGitRef(req.params.name)) {
     return res.status(400).json({ error: "Invalid tag name" });
   }
@@ -929,7 +1115,7 @@ app.delete("/repos/:repo/tags/:name", requireAuthentication, requireScope("repo:
     return res.status(500).json({ error: error.message });
   }
 });
-app.post("/repos/:repo/branches", requireAuthentication, requireScope("repo:write"), async (req, res) => {
+app.post("/api/v1/repos/:repo/branches", requireAuthentication, requireScope("repo:write"), async (req, res) => {
   if (!isValidGitRef(req.body?.name) || (req.body.startPoint && !isValidGitRef(req.body.startPoint))) {
     return res.status(400).json({ error: "Invalid branch name or start point" });
   }
@@ -949,25 +1135,30 @@ app.post("/repos/:repo/branches", requireAuthentication, requireScope("repo:writ
     return res.status(500).json({ error: error.message });
   }
 });
-app.delete("/repos/:repo/branches/:name", requireAuthentication, requireScope("repo:write"), async (req, res) => {
-  if (!isValidGitRef(req.params.name)) {
-    return res.status(400).json({ error: "Invalid branch name" });
-  }
-  const repo = req.params.repo;
-  const repoPath = getSafeRepoPath(repo, req);
-  if (!repoPath) {
-    return res.status(400).json({ error: "Invalid repository name" });
-  }
-  if (!fs.existsSync(repoPath) || !fs.existsSync(path.join(repoPath, ".git"))) {
-    return res.status(404).json({ error: "Repo not found" });
-  }
-  try {
-    await getGit(repoPath).branch(["-D", req.params.name]);
-    return res.json({ message: `Branch ${req.params.name} removed` });
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
-  }
-});
+app.delete(
+  "/api/v1/repos/:repo/branches/:name",
+  requireAuthentication,
+  requireScope("repo:write"),
+  async (req, res) => {
+    if (!isValidGitRef(req.params.name)) {
+      return res.status(400).json({ error: "Invalid branch name" });
+    }
+    const repo = req.params.repo;
+    const repoPath = getSafeRepoPath(repo, req);
+    if (!repoPath) {
+      return res.status(400).json({ error: "Invalid repository name" });
+    }
+    if (!fs.existsSync(repoPath) || !fs.existsSync(path.join(repoPath, ".git"))) {
+      return res.status(404).json({ error: "Repo not found" });
+    }
+    try {
+      await getGit(repoPath).branch(["-D", req.params.name]);
+      return res.json({ message: `Branch ${req.params.name} removed` });
+    } catch (error) {
+      return res.status(500).json({ error: error.message });
+    }
+  },
+);
 
 /**
  * Generate the OpenAPI specification with updated routes (no owner parameter).
@@ -980,7 +1171,9 @@ function makeApiSpec() {
 
   const jsonBody = (properties, required = []) => ({
     required: required.length > 0,
-    content: { "application/json": { schema: { type: "object", properties, required } } },
+    content: {
+      "application/json": { schema: { type: "object", properties, required } },
+    },
   });
   const unauthorized = { description: "Unauthorized" };
   const notFound = { description: "Repository not found" };
@@ -988,16 +1181,22 @@ function makeApiSpec() {
     const protectedOperation =
       parameters.some(({ name }) => name === "repo") || summary.includes("authenticated subject");
     const readOperation = /^(Fetch|Get file|List|Read)/.test(summary);
-    return {
+    const result = {
       summary,
       parameters,
       ...(body ? { requestBody: body } : {}),
-      ...(protectedOperation ? { security: [{ bearerAuth: [] }] } : {}),
-      ...(protectedOperation ? { "x-required-scope": readOperation ? "repo:read or repo:write" : "repo:write" } : {}),
-      responses: protectedOperation
-        ? { ...responses, 401: unauthorized, 403: { description: "Insufficient scope" } }
-        : responses,
+      responses,
     };
+    if (protectedOperation) {
+      result.security = [{ bearerAuth: [] }];
+      result["x-required-scope"] = readOperation ? "repo:read or repo:write" : "repo:write";
+      result.responses = {
+        ...responses,
+        401: unauthorized,
+        403: { description: "Insufficient scope" },
+      };
+    }
+    return result;
   };
 
   const apiSpec = {
@@ -1005,49 +1204,13 @@ function makeApiSpec() {
     info: { title: "Git Store API", version: "1.0.0" },
     servers: [{ url: "/", description: "This git store server" }],
     paths: {
-      "/health": { get: operation("Health check", { 200: { description: "Healthy" } }, null, []) },
-      "/api": { get: operation("Get this OpenAPI document", { 200: { description: "OpenAPI document" } }, null, []) },
-      "/config": {
-        get: operation("Get browser configuration", { 200: { description: "Public configuration" } }, null, []),
+      "/api/v1/health": {
+        get: operation("Health check", { 200: { description: "Healthy" } }, null, []),
       },
-      "/session": {
-        get: operation(
-          "Get the current OIDC session profile",
-          { 200: { description: "Session profile or unauthenticated state" } },
-          null,
-          [],
-        ),
+      "/api/v1/openapi.json": {
+        get: operation("Get this OpenAPI document", { 200: { description: "OpenAPI document" } }, null, []),
       },
-      "/auth/login": {
-        get: operation(
-          "Start OIDC sign-in with authorization code and PKCE",
-          {
-            302: { description: "Redirect to the configured OIDC provider" },
-            503: { description: "OIDC sign-in is not configured" },
-          },
-          null,
-          [],
-        ),
-      },
-      "/auth/callback": {
-        get: operation(
-          "Complete OIDC sign-in and establish a browser session",
-          {
-            303: { description: "Redirect back to the application" },
-            400: { description: "Invalid authorization response" },
-            401: unauthorized,
-          },
-          null,
-          [],
-        ),
-      },
-      "/auth/logout": {
-        post: {
-          ...operation("End the current browser session", { 303: { description: "Session cleared" } }, null, []),
-          security: [{ cookieSession: [] }],
-        },
-      },
-      "/repos": {
+      "/api/v1/repos": {
         get: operation(
           "List repositories owned by the authenticated subject",
           { 200: { description: "Repository list" }, 401: unauthorized },
@@ -1055,15 +1218,85 @@ function makeApiSpec() {
           [],
         ),
       },
-      "/repos/{repo}": {
+      "/git/{repo}.git/info/refs": {
+        get: {
+          summary: "Advertise Git transport refs",
+          parameters: [
+            ...pathParametersRepo,
+            {
+              name: "service",
+              in: "query",
+              required: true,
+              schema: {
+                type: "string",
+                enum: ["git-upload-pack", "git-receive-pack"],
+              },
+            },
+          ],
+          security: [{ basicGitToken: [] }],
+          responses: {
+            200: { description: "Git Smart HTTP service advertisement" },
+            401: { description: "Missing or invalid Basic credentials" },
+            403: { description: "Insufficient scope" },
+            404: notFound,
+          },
+        },
+      },
+      "/git/{repo}.git/git-upload-pack": {
+        post: {
+          summary: "Fetch Git objects using Smart HTTP",
+          parameters: pathParametersRepo,
+          security: [{ basicGitToken: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/x-git-upload-pack-request": {
+                schema: { type: "string", format: "binary" },
+              },
+            },
+          },
+          responses: {
+            200: { description: "Git pack response" },
+            401: { description: "Missing or invalid Basic credentials" },
+            403: { description: "Insufficient scope" },
+            404: notFound,
+          },
+        },
+      },
+      "/git/{repo}.git/git-receive-pack": {
+        post: {
+          summary: "Push Git objects using Smart HTTP",
+          parameters: pathParametersRepo,
+          security: [{ basicGitToken: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/x-git-receive-pack-request": {
+                schema: { type: "string", format: "binary" },
+              },
+            },
+          },
+          responses: {
+            200: { description: "Git push response" },
+            401: { description: "Missing or invalid Basic credentials" },
+            403: { description: "Insufficient scope" },
+            404: notFound,
+          },
+        },
+      },
+      "/api/v1/repos/{repo}": {
         post: operation(
           "Create a repository for the authenticated subject",
-          { 201: { description: "Created" }, 400: { description: "Invalid repository name" }, 401: unauthorized },
+          {
+            201: { description: "Created" },
+            400: { description: "Invalid repository name" },
+            401: unauthorized,
+          },
           null,
           pathParametersRepo,
         ),
       },
-      "/repos/{repo}/log": {
+      "/api/v1/repos/{repo}/log": {
         get: operation(
           "Fetch the repository log",
           { 200: { description: "Commit array" }, 404: notFound },
@@ -1071,28 +1304,36 @@ function makeApiSpec() {
           pathParametersRepo,
         ),
       },
-      "/repos/{repo}/stage": {
+      "/api/v1/repos/{repo}/stage": {
         post: operation(
           "Stage files",
           { 200: { description: "Staged" }, 401: unauthorized, 404: notFound },
           jsonBody({ files: { type: "array", items: { type: "string" } } }, ["files"]),
         ),
       },
-      "/repos/{repo}/unstage": {
+      "/api/v1/repos/{repo}/unstage": {
         post: operation(
           "Unstage files",
-          { 200: { description: "Unstaged" }, 401: unauthorized, 404: notFound },
+          {
+            200: { description: "Unstaged" },
+            401: unauthorized,
+            404: notFound,
+          },
           jsonBody({ files: { type: "array", items: { type: "string" } } }, ["files"]),
         ),
       },
-      "/repos/{repo}/commit": {
+      "/api/v1/repos/{repo}/commit": {
         post: operation(
           "Commit staged changes",
-          { 200: { description: "Committed or no changes" }, 401: unauthorized, 404: notFound },
+          {
+            200: { description: "Committed or no changes" },
+            401: unauthorized,
+            404: notFound,
+          },
           jsonBody({ message: { type: "string" } }),
         ),
       },
-      "/repos/{repo}/tags": {
+      "/api/v1/repos/{repo}/tags": {
         get: operation(
           "List repository tags",
           { 200: { description: "Tags" }, 404: notFound },
@@ -1101,19 +1342,35 @@ function makeApiSpec() {
         ),
         post: operation(
           "Add a tag",
-          { 200: { description: "Tag added" }, 401: unauthorized, 404: notFound },
+          {
+            200: { description: "Tag added" },
+            401: unauthorized,
+            404: notFound,
+          },
           jsonBody({ name: { type: "string" } }, ["name"]),
         ),
       },
-      "/repos/{repo}/tags/{name}": {
+      "/api/v1/repos/{repo}/tags/{name}": {
         delete: operation(
           "Remove a tag",
-          { 200: { description: "Tag removed" }, 401: unauthorized, 404: notFound },
+          {
+            200: { description: "Tag removed" },
+            401: unauthorized,
+            404: notFound,
+          },
           null,
-          [...pathParametersRepo, { name: "name", in: "path", required: true, schema: { type: "string" } }],
+          [
+            ...pathParametersRepo,
+            {
+              name: "name",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
         ),
       },
-      "/repos/{repo}/branches": {
+      "/api/v1/repos/{repo}/branches": {
         get: operation(
           "List repository branches",
           { 200: { description: "Branches" }, 404: notFound },
@@ -1131,15 +1388,27 @@ function makeApiSpec() {
           jsonBody({ name: { type: "string" }, startPoint: { type: "string" } }, ["name"]),
         ),
       },
-      "/repos/{repo}/branches/{name}": {
+      "/api/v1/repos/{repo}/branches/{name}": {
         delete: operation(
           "Remove a branch",
-          { 200: { description: "Branch removed" }, 401: unauthorized, 404: notFound },
+          {
+            200: { description: "Branch removed" },
+            401: unauthorized,
+            404: notFound,
+          },
           null,
-          [...pathParametersRepo, { name: "name", in: "path", required: true, schema: { type: "string" } }],
+          [
+            ...pathParametersRepo,
+            {
+              name: "name",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
         ),
       },
-      "/repos/{repo}/tree": {
+      "/api/v1/repos/{repo}/tree": {
         get: operation(
           "List repository files",
           { 200: { description: "Repository tree" }, 404: notFound },
@@ -1147,15 +1416,27 @@ function makeApiSpec() {
           pathParametersRepo,
         ),
       },
-      "/repos/{repo}/file": {
+      "/api/v1/repos/{repo}/file": {
         get: operation(
           "Read a repository file",
-          { 200: { description: "File contents" }, 400: { description: "Invalid path" }, 404: notFound },
+          {
+            200: { description: "File contents" },
+            400: { description: "Invalid path" },
+            404: notFound,
+          },
           null,
-          [...pathParametersRepo, { name: "path", in: "query", required: true, schema: { type: "string" } }],
+          [
+            ...pathParametersRepo,
+            {
+              name: "path",
+              in: "query",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
         ),
       },
-      "/repos/{repo}/files": {
+      "/api/v1/repos/{repo}/files": {
         post: operation(
           "Upload an unstaged file",
           {
@@ -1164,18 +1445,33 @@ function makeApiSpec() {
             401: unauthorized,
             404: notFound,
           },
-          jsonBody({ path: { type: "string" }, content: { type: "string", description: "Base64-encoded bytes" } }, [
-            "path",
-            "content",
-          ]),
+          jsonBody(
+            {
+              path: { type: "string" },
+              content: { type: "string", description: "Base64-encoded bytes" },
+            },
+            ["path", "content"],
+          ),
         ),
       },
-      "/repos/{repo}/history": {
+      "/api/v1/repos/{repo}/history": {
         get: operation(
           "List file history",
-          { 200: { description: "Commit history" }, 400: { description: "Invalid path" }, 404: notFound },
+          {
+            200: { description: "Commit history" },
+            400: { description: "Invalid path" },
+            404: notFound,
+          },
           null,
-          [...pathParametersRepo, { name: "path", in: "query", required: true, schema: { type: "string" } }],
+          [
+            ...pathParametersRepo,
+            {
+              name: "path",
+              in: "query",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
         ),
       },
     },
@@ -1185,13 +1481,18 @@ function makeApiSpec() {
           type: "apiKey",
           in: "cookie",
           name: sessionCookieName,
-          description: "HttpOnly OIDC browser session established by /auth/callback",
+          description: "HttpOnly OIDC browser session established by /ui/auth/callback",
         },
         bearerAuth: {
           type: "http",
           scheme: "bearer",
           bearerFormat: "OIDC access token",
           description: "Active OIDC access token. repo:write also grants repository reads.",
+        },
+        basicGitToken: {
+          type: "http",
+          scheme: "basic",
+          description: "Arbitrary username; OIDC access token as the password. repo:read fetches, repo:write pushes.",
         },
       },
     },

@@ -7,11 +7,18 @@ short repo names only — no owner segment in the URL.
 ## Current status
 
 - Docker deployment uses `ghcr.io/cloud-cli/image-node:latest` and `/home/app`.
-- `GET /api` serves an OpenAPI 3.0.3 document containing every route.
+- `GET /api/v1/openapi.json` serves an OpenAPI 3.0.3 document for the versioned API
+  and Git Smart HTTP endpoints; UI-only routes are excluded.
 - Repository listing and creation are scoped to the authenticated OIDC subject.
 - All repository operations require an authenticated OIDC subject. API bearer tokens
   need `repo:read` for reads and `repo:write` for creation/mutations; `repo:write` also
   grants read access. The browser UI may use a provider-validated same-origin session.
+- Git Smart HTTP is available at `/git/<repo>.git`. Git clients use HTTP Basic auth
+  with any username and an active OIDC access token as the password; fetch needs
+  `repo:read` (or `repo:write`) and push needs `repo:write`. Git transport never
+  falls back to browser sessions. Use HTTPS in deployment; plain HTTP is suitable
+  only for local testing. PATs are not issued by this version; use an OIDC access
+  token until PAT management is added.
 - Repository names are short paths-only identifiers; the authenticated subject's
   stable hashed `sub` claim derives the filesystem directory.
 - `npm test` runs a Node-built-in integration suite covering subject isolation,
@@ -47,34 +54,41 @@ DATA_PATH="$PWD/data" npm start
 
 ## Endpoints
 
-| Method | Path                          | Auth   |
-| ------ | ----------------------------- | ------ |
-| GET    | `/health`                     | public |
-| GET    | `/api`                        | public |
-| GET    | `/config`                     | public |
-| GET    | `/session`                    | public |
-| GET    | `/auth/login`                 | public |
-| GET    | `/auth/callback`              | OIDC   |
-| POST   | `/auth/logout`                | OIDC   |
-| GET    | `/repos`                      | OIDC   |
-| POST   | `/repos/:repo`                | OIDC   |
-| GET    | `/repos/:repo/log`            | OIDC   |
-| GET    | `/repos/:repo/tree`           | OIDC   |
-| GET    | `/repos/:repo/file`           | OIDC   |
-| GET    | `/repos/:repo/branches`       | OIDC   |
-| GET    | `/repos/:repo/tags`           | OIDC   |
-| GET    | `/repos/:repo/history`        | OIDC   |
-| POST   | `/repos/:repo/stage`          | OIDC   |
-| POST   | `/repos/:repo/unstage`        | OIDC   |
-| POST   | `/repos/:repo/commit`         | OIDC   |
-| POST   | `/repos/:repo/tags`           | OIDC   |
-| DELETE | `/repos/:repo/tags/:name`     | OIDC   |
-| POST   | `/repos/:repo/branches`       | OIDC   |
-| DELETE | `/repos/:repo/branches/:name` | OIDC   |
+| Method | Path                                                | Auth        |
+| ------ | --------------------------------------------------- | ----------- |
+| GET    | `/api/v1/health`                                    | public      |
+| GET    | `/api/v1/openapi.json`                              | public      |
+| GET    | `/ui/config`                                        | public      |
+| GET    | `/ui/session`                                       | public      |
+| GET    | `/ui/auth/login`                                    | public      |
+| GET    | `/ui/auth/callback`                                 | OIDC        |
+| POST   | `/ui/auth/logout`                                   | OIDC        |
+| GET    | `/api/v1/repos`                                     | OIDC        |
+| POST   | `/api/v1/repos/:repo`                               | OIDC        |
+| GET    | `/api/v1/repos/:repo/log`                           | OIDC        |
+| GET    | `/api/v1/repos/:repo/tree`                          | OIDC        |
+| GET    | `/api/v1/repos/:repo/file`                          | OIDC        |
+| GET    | `/api/v1/repos/:repo/branches`                      | OIDC        |
+| GET    | `/api/v1/repos/:repo/tags`                          | OIDC        |
+| GET    | `/git/:repo.git/info/refs?service=git-upload-pack`  | Basic token |
+| POST   | `/git/:repo.git/git-upload-pack`                    | Basic token |
+| GET    | `/git/:repo.git/info/refs?service=git-receive-pack` | Basic token |
+| POST   | `/git/:repo.git/git-receive-pack`                   | Basic token |
+| GET    | `/api/v1/repos/:repo/history`                       | OIDC        |
+| POST   | `/api/v1/repos/:repo/stage`                         | OIDC        |
+| POST   | `/api/v1/repos/:repo/unstage`                       | OIDC        |
+| POST   | `/api/v1/repos/:repo/commit`                        | OIDC        |
+| POST   | `/api/v1/repos/:repo/tags`                          | OIDC        |
+| DELETE | `/api/v1/repos/:repo/tags/:name`                    | OIDC        |
+| POST   | `/api/v1/repos/:repo/branches`                      | OIDC        |
+| DELETE | `/api/v1/repos/:repo/branches/:name`                | OIDC        |
 
 The canonical request and response documentation is in [`docs/api-reference.md`](docs/api-reference.md).
 
-The browser UI is served at `/`. Repository and file-preview state is stored in the
+The browser UI is served at `/ui/` (`/` redirects there); UI-only configuration,
+session, and OIDC endpoints use `/ui/*`, and static assets are served under `/ui/`.
+The OpenAPI document lists the `/api/v1/*` application API and Git Smart HTTP routes,
+not UI-only endpoints. Repository and file-preview state is stored in the
 URL query string (`repo`, `ref`, and `path`), so navigation survives refreshes.
 The UI is a Li³ application split into independent `<template app>` islands for the
 session topbar, repository navigation, selected repository viewer, and refs panel.
@@ -89,12 +103,12 @@ reactive theme state across all four page islands using Tailwind v4's class-base
 The repository plus button opens an anchored HTML popover. Empty repositories offer a file upload that creates the initial commit;
 files dropped into or selected for an existing repository remain unstaged and are marked
 with `*`. Branch and tag empty states provide matching create popovers.
-The topbar reads the current session profile from `/session`, displaying the authenticated
+The topbar reads the current session profile from `/ui/session`, displaying the authenticated
 OIDC name, email, and picture when available, or a signed-out state otherwise.
 
 The service reads configuration only from process environment variables; it does not load
-`.env` files. Browser sign-in uses `/auth/login` and requires the OIDC client callback URI
-to be registered as `/auth/callback`.
+`.env` files. Browser sign-in uses `/ui/auth/login` and requires the OIDC client callback URI
+to be registered as `/ui/auth/callback`.
 
 ## Configuration
 
@@ -105,7 +119,7 @@ to be registered as `/auth/callback`.
 | `OIDC_ISSUER`         | unset                | OIDC discovery issuer                                      |
 | `OIDC_CLIENT_ID`      | unset                | OIDC client identifier                                     |
 | `OIDC_CLIENT_SECRET`  | unset                | OIDC introspection credential                              |
-| `OIDC_REDIRECT_URI`   | derived              | Registered `/auth/callback` URL (recommended)              |
+| `OIDC_REDIRECT_URI`   | derived              | Registered `/ui/auth/callback` URL (recommended)           |
 | `PUBLIC_URL`          | derived              | Public origin used to derive the callback URL              |
 | `OIDC_JWKS_URI`       | issuer metadata      | Same-issuer JWKS override for incorrect discovery metadata |
 | `OIDC_BROWSER_SCOPES` | unset                | Scopes granted to validated browser sessions               |
