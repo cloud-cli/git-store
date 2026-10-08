@@ -79,12 +79,12 @@
               title="Open profile"
             >
               <span class="hidden text-right leading-tight sm:block"
-                ><span class="block font-medium">{{ userName }}</span
+                ><span class="block font-medium">{{ userEmail }}</span
                 ><span class="block text-xs text-gray-500 dark:text-gray-400">{{ userEmail }}</span></span
               >
               <img
                 attr-src="userAvatar"
-                attr-alt="userName"
+                attr-alt="userEmail"
                 class="h-8 w-8 rounded-full border border-gray-200 object-cover dark:border-gray-700"
               /> </a
           ></template>
@@ -114,14 +114,7 @@
           const darkMode = ref(
             savedTheme ? savedTheme === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches,
           );
-          const userName = computed(
-            () =>
-              profile.value?.alias ||
-              profile.value?.name ||
-              profile.value?.preferred_username ||
-              profile.value?.email ||
-              "Signed in",
-          );
+          const userAlias = computed(() => profile.value?.alias || "Signed in");
           const userEmail = computed(() => profile.value?.email || "Signed in");
           const userAvatar = computed(
             () =>
@@ -130,7 +123,7 @@
               profile.value?.avatar_url ||
               profile.value?.image ||
               profile.value?.photo ||
-              `https://placehold.co/100x100/6366f1/ffffff?text=${encodeURIComponent(userName.value.slice(0, 1).toUpperCase())}`,
+              "https://placehold.co/100x100/6366f1/ffffff?text=U",
           );
           const toggleTheme = () => {
             darkMode.value = !darkMode.value;
@@ -165,7 +158,6 @@
             userUrl,
             profileUrl,
             darkMode,
-            userName,
             userEmail,
             userAvatar,
             toggleTheme,
@@ -195,10 +187,42 @@
               <i class="fa-solid fa-plus"></i>
             </button>
           </div>
+          <div class="space-y-2 border-b border-gray-200 p-3 dark:border-gray-800">
+            <label class="block text-xs font-medium text-gray-500 dark:text-gray-300" for="org-select">Organization</label>
+            <select
+              id="org-select"
+              class="w-full rounded-md border border-gray-300 bg-white px-2 py-2 dark:border-gray-700 dark:bg-gray-900"
+              on-change="selectOrg($event.target.value)"
+            >
+              <option value="">Select organization</option>
+              <template for="org of orgs"
+                ><option attr-value="org.slug" attr-selected="org.slug === selectedOrg">
+                  {{ org.slug }}
+                </option></template
+              >
+            </select>
+            <form class="flex gap-1" on-submit.prevent="createOrg()">
+              <input
+                class="min-w-0 flex-1 rounded-md border border-gray-300 bg-transparent px-2 py-1 dark:border-gray-700"
+                placeholder="organization-slug"
+                aria-label="New organization slug"
+                on-input="setOrgName($event.target.value)"
+              />
+              <button class="rounded bg-indigo-600 px-2 text-white" type="submit" aria-label="Create organization">
+                <i class="fa-solid fa-plus"></i>
+              </button>
+            </form>
+            <template if="orgError"><p class="text-xs text-red-600" role="alert">{{ orgError }}</p></template>
+          </div>
           <div class="flex-1 space-y-1 overflow-y-auto p-2">
-            <template if="!repositories.length"
+            <template if="!selectedOrg"
               ><p class="px-3 py-2 text-xs text-gray-500 dark:text-gray-300">
-                No repositories yet. Create one to get started.
+                Create an organization to get started.
+              </p></template
+            >
+            <template if="selectedOrg && !repositories.length"
+              ><p class="px-3 py-2 text-xs text-gray-500 dark:text-gray-300">
+                No repositories in this organization yet. Create one to get started.
               </p></template
             >
             <template for="repo of repositories"
@@ -276,12 +300,25 @@
           ><div class="fixed inset-0 z-30 bg-black/40 md:hidden" on-click="closeMenu()"></div
         ></template>
         <script state type="application/json">
-          { "repositories": [], "menuOpen": false, "repoName": "", "errorMessage": "", "darkMode": true }
+          {
+            "repositories": [],
+            "orgs": [],
+            "selectedOrg": "",
+            "menuOpen": false,
+            "repoName": "",
+            "errorMessage": "",
+            "orgError": "",
+            "darkMode": true
+          }
         </script>
         <script setup>
           import { ref, onInit } from "@li3/web";
           export default function () {
             const repositories = ref([]);
+            const orgs = ref([]);
+            const selectedOrg = ref("");
+            const orgName = ref("");
+            const orgError = ref("");
             const menuOpen = ref(false);
             const repoName = ref("");
             const errorMessage = ref("");
@@ -290,7 +327,51 @@
               savedTheme ? savedTheme === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches,
             );
             const route = () => new URL(window.location.href).searchParams;
-            const repoHref = (repo) => `/?repo=${encodeURIComponent(repo.repo)}`;
+            const repoHref = (repo) =>
+              `/?org=${encodeURIComponent(selectedOrg.value)}&repo=${encodeURIComponent(repo.repo)}`;
+            const setOrgName = (value) => {
+              orgName.value = value;
+            };
+            const selectOrg = (slug) => {
+              const current = new URL(window.location.href);
+              if (slug) current.searchParams.set("org", slug);
+              else current.searchParams.delete("org");
+              current.searchParams.delete("repo");
+              current.searchParams.delete("path");
+              current.searchParams.delete("dir");
+              window.location.assign(current);
+            };
+            const loadRepositories = async () => {
+              const org = new URL(window.location.href).searchParams.get("org") || selectedOrg.value;
+              selectedOrg.value = org;
+              const response = org
+                ? await fetch(`/api/v1/orgs/${encodeURIComponent(org)}/repos`, { headers: tokenHeaders() }).catch(
+                    () => null,
+                  )
+                : null;
+              const result = response?.ok ? await response.json().catch(() => ({})) : {};
+              repositories.value = Array.isArray(result.repos) ? result.repos : [];
+            };
+            const createOrg = async () => {
+              const slug = orgName.value.trim();
+              orgError.value = "";
+              if (!/^[a-zA-Z0-9._-]+$/.test(slug)) {
+                orgError.value = "Use letters, numbers, dots, underscores, or hyphens.";
+                return;
+              }
+              try {
+                const response = await fetch("/api/v1/orgs", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", ...tokenHeaders() },
+                  body: JSON.stringify({ slug }),
+                });
+                if (!response.ok) throw new Error("Organization creation failed.");
+                const result = await response.json();
+                window.location.assign(`/?org=${encodeURIComponent(result.org.slug)}`);
+              } catch (error) {
+                orgError.value = error.message || "Organization creation failed.";
+              }
+            };
             const isSelected = (repo) => route().get("repo") === repo.repo;
             const setRepoName = (value) => {
               repoName.value = value;
@@ -310,10 +391,13 @@
                 return;
               }
               try {
-                const response = await fetch(`/api/v1/repos/${encodeURIComponent(name)}`, {
-                  method: "POST",
-                  headers: tokenHeaders(),
-                });
+                const response = await fetch(
+                  `/api/v1/orgs/${encodeURIComponent(new URL(window.location.href).searchParams.get("org"))}/repos/${encodeURIComponent(name)}`,
+                  {
+                    method: "POST",
+                    headers: tokenHeaders(),
+                  },
+                );
                 if (response.ok) window.location.assign(repoHref({ repo: name }));
                 else {
                   const result = await response.json().catch(() => ({}));
@@ -336,23 +420,25 @@
               window.addEventListener("keydown", (event) => {
                 if (event.key === "Escape" && menuOpen.value) closeMenu();
               });
-              const session = await fetch("/ui/session", { headers: tokenHeaders() })
-                .then((response) => response.json())
-                .catch(() => ({ authenticated: false }));
-              if (!session.authenticated) {
-                repositories.value = [];
-                return;
+              const response = await fetch("/api/v1/orgs", { headers: tokenHeaders() }).catch(() => null);
+              const result = response?.ok ? await response.json().catch(() => ({})) : {};
+              orgs.value = Array.isArray(result.orgs) ? result.orgs : [];
+              const requested = new URL(window.location.href).searchParams.get("org");
+              selectedOrg.value = orgs.value.some((org) => org.slug === requested)
+                ? requested
+                : orgs.value[0]?.slug || "";
+              if (selectedOrg.value && requested !== selectedOrg.value) {
+                const current = new URL(window.location.href);
+                current.searchParams.set("org", selectedOrg.value);
+                history.replaceState(null, "", current);
               }
-              const response = await fetch("/api/v1/repos", { headers: tokenHeaders() }).catch(() => null);
-              if (response?.ok) {
-                const result = await response.json().catch(() => []);
-                repositories.value = Array.isArray(result) ? result : [];
-              } else {
-                repositories.value = [];
-              }
+              await loadRepositories();
             });
             return {
               repositories,
+              orgs,
+              selectedOrg,
+              orgError,
               menuOpen,
               repoName,
               errorMessage,
@@ -361,6 +447,9 @@
               isSelected,
               closeMenu,
               setRepoName,
+              setOrgName,
+              selectOrg,
+              createOrg,
               createRepository,
             };
           }
@@ -625,8 +714,12 @@
               );
               const hasUncommitted = computed(() => entries.value.some((entry) => entry.uncommitted));
               const url = () => new URL(window.location.href);
-              const base = () => `/api/v1/repos/${encodeURIComponent(repo.value.repo)}`;
-              const rootHref = computed(() => `/?repo=${encodeURIComponent(repo.value?.repo || "")}`);
+              const base = () =>
+                `/api/v1/orgs/${encodeURIComponent(new URL(window.location.href).searchParams.get("org"))}/repos/${encodeURIComponent(repo.value.repo)}`;
+              const rootHref = computed(
+                () =>
+                  `/?org=${encodeURIComponent(url().searchParams.get("org") || "")}&repo=${encodeURIComponent(repo.value?.repo || "")}`,
+              );
               const setRepoName = (value) => {
                 repoName.value = value;
               };
@@ -660,12 +753,12 @@
                 const name = current.searchParams.get("repo");
                 directory.value = current.searchParams.get("dir") || "";
                 previewPath.value = current.searchParams.get("path") || "";
-                if (!name) {
+                if (!name || !current.searchParams.get("org")) {
                   repo.value = null;
                   return;
                 }
                 repo.value = { repo: name };
-                const apiBase = `/api/v1/repos/${encodeURIComponent(name)}`;
+                const apiBase = `/api/v1/orgs/${encodeURIComponent(current.searchParams.get("org"))}/repos/${encodeURIComponent(name)}`;
                 const [treeResponse, logResponse] = await Promise.all([
                   fetch(`${apiBase}/tree${directory.value ? `?path=${encodeURIComponent(directory.value)}` : ""}`, {
                     headers: tokenHeaders(),
@@ -688,11 +781,17 @@
                   return;
                 }
                 try {
-                  const response = await fetch(`/api/v1/repos/${encodeURIComponent(name)}`, {
-                    method: "POST",
-                    headers: tokenHeaders(),
-                  });
-                  if (response.ok) window.location.assign(`/?repo=${encodeURIComponent(name)}`);
+                  const response = await fetch(
+                    `/api/v1/orgs/${encodeURIComponent(url().searchParams.get("org"))}/repos/${encodeURIComponent(name)}`,
+                    {
+                      method: "POST",
+                      headers: tokenHeaders(),
+                    },
+                  );
+                  if (response.ok)
+                    window.location.assign(
+                      `/?org=${encodeURIComponent(url().searchParams.get("org"))}&repo=${encodeURIComponent(name)}`,
+                    );
                   else {
                     const result = await response.json().catch(() => ({}));
                     errorMessage.value =
@@ -1066,9 +1165,9 @@
               onInit(async () => {
                 const query = new URL(window.location.href).searchParams;
                 const name = query.get("repo");
-                if (name) {
+                if (name && query.get("org")) {
                   repo.value = { repo: name };
-                  const base = `/api/v1/repos/${encodeURIComponent(name)}`;
+                  const base = `/api/v1/orgs/${encodeURIComponent(query.get("org"))}/repos/${encodeURIComponent(name)}`;
                   const results = await Promise.all([
                     fetch(`${base}/branches`, { headers: tokenHeaders() }),
                     fetch(`${base}/tags`, { headers: tokenHeaders() }),
@@ -1091,11 +1190,14 @@
                 if (!name) return;
                 errorMessage.value = "";
                 try {
-                  const response = await fetch(`/api/v1/repos/${encodeURIComponent(repo.value.repo)}/branches`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json", ...tokenHeaders() },
-                    body: JSON.stringify({ name }),
-                  });
+                  const response = await fetch(
+                    `/api/v1/orgs/${encodeURIComponent(new URL(window.location.href).searchParams.get("org"))}/repos/${encodeURIComponent(repo.value.repo)}/branches`,
+                    {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json", ...tokenHeaders() },
+                      body: JSON.stringify({ name }),
+                    },
+                  );
                   if (response.ok) window.location.reload();
                   else errorMessage.value = "Failed to create branch.";
                 } catch {
@@ -1107,11 +1209,14 @@
                 if (!name) return;
                 errorMessage.value = "";
                 try {
-                  const response = await fetch(`/api/v1/repos/${encodeURIComponent(repo.value.repo)}/tags`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json", ...tokenHeaders() },
-                    body: JSON.stringify({ name }),
-                  });
+                  const response = await fetch(
+                    `/api/v1/orgs/${encodeURIComponent(new URL(window.location.href).searchParams.get("org"))}/repos/${encodeURIComponent(repo.value.repo)}/tags`,
+                    {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json", ...tokenHeaders() },
+                      body: JSON.stringify({ name }),
+                    },
+                  );
                   if (response.ok) window.location.reload();
                   else errorMessage.value = "Failed to create tag.";
                 } catch {
