@@ -623,17 +623,42 @@ async function run() {
       },
     );
     assert.strictEqual(foreignAliasGit.status, 404);
-    for (const oldPath of ["/api", "/health", "/repos", "/config", "/session", "/auth/login"]) {
+    for (const oldPath of ["/health", "/repos", "/config", "/session", "/auth/login"]) {
       const oldRoute = await request(port, "GET", oldPath);
       assert.strictEqual(oldRoute.status, 404, `${oldPath} must not remain as an alias`);
     }
 
+    const discoveryResponse = await request(port, "GET", "/api");
+    assert.strictEqual(discoveryResponse.status, 200);
+    assert.match(discoveryResponse.headers["content-type"], /application\/json/);
+    const discoverySpec = JSON.parse(discoveryResponse.body);
+    assert.strictEqual(discoverySpec.openapi, "3.0.3");
+    assert.ok(discoverySpec.paths["/api/v1/orgs"]);
+    assert.ok(discoverySpec.paths["/api/v1/orgs/{org}/repos/{repo}/tree"]);
+    assert.ok(discoverySpec.paths["/git/{alias}/{repo}.git/git-upload-pack"]);
+    assert.ok(!Object.keys(discoverySpec.paths).some((route) => route.startsWith("/ui/") || route.includes("static")));
     const specResponse = await request(port, "GET", "/api/v1/openapi.json");
     assert.strictEqual(specResponse.status, 200);
     const spec = JSON.parse(specResponse.body);
     const expectedMethods = {
       "/api/v1/health": ["get"],
       "/api/v1/openapi.json": ["get"],
+      "/api": ["get"],
+      "/api/v1/orgs": ["get", "post"],
+      "/api/v1/orgs/{org}/repos": ["get"],
+      "/api/v1/orgs/{org}/repos/{repo}": ["post"],
+      "/api/v1/orgs/{org}/repos/{repo}/log": ["get"],
+      "/api/v1/orgs/{org}/repos/{repo}/tree": ["get"],
+      "/api/v1/orgs/{org}/repos/{repo}/file": ["get"],
+      "/api/v1/orgs/{org}/repos/{repo}/history": ["get"],
+      "/api/v1/orgs/{org}/repos/{repo}/branches": ["get", "post"],
+      "/api/v1/orgs/{org}/repos/{repo}/tags": ["get", "post"],
+      "/api/v1/orgs/{org}/repos/{repo}/files": ["post"],
+      "/api/v1/orgs/{org}/repos/{repo}/stage": ["post"],
+      "/api/v1/orgs/{org}/repos/{repo}/unstage": ["post"],
+      "/api/v1/orgs/{org}/repos/{repo}/commit": ["post"],
+      "/api/v1/orgs/{org}/repos/{repo}/tags/{name}": ["delete"],
+      "/api/v1/orgs/{org}/repos/{repo}/branches/{name}": ["delete"],
       "/api/v1/repos": ["get"],
       "/api/v1/profile/alias": ["get", "put"],
       "/api/v1/repos/{alias}": ["get"],
@@ -664,7 +689,9 @@ async function run() {
     }
     assert.deepStrictEqual(Object.keys(spec.paths).sort(), Object.keys(expectedMethods).sort());
     assert.ok(
-      Object.keys(spec.paths).every((specPath) => specPath.startsWith("/api/v1/") || specPath.startsWith("/git/")),
+      Object.keys(spec.paths).every(
+        (specPath) => specPath === "/api" || specPath.startsWith("/api/v1/") || specPath.startsWith("/git/"),
+      ),
     );
     for (const [specPath, methods] of Object.entries(expectedMethods)) {
       assert.deepStrictEqual(Object.keys(spec.paths[specPath]).sort(), methods.sort(), `methods for ${specPath}`);
@@ -940,11 +967,14 @@ async function run() {
     assert.ok(uiResponse.body.includes('<style type="text/tailwindcss">'));
     assert.ok(uiResponse.body.includes("@custom-variant dark (&:where(.dark, .dark *));"));
     assert.ok(uiResponse.body.includes("<span>Sign in</span>"));
+    assert.ok(uiResponse.body.includes("Sign in to get started"));
+    assert.ok(uiResponse.body.includes("authStatus === 'anonymous'"));
     assert.ok(uiResponse.body.includes('<template if="showWorkspace">'));
     assert.ok(uiResponse.body.includes("Create an organization"));
     assert.ok(uiResponse.body.includes("Step 2 of 2"));
     assert.ok(uiResponse.body.includes('document.documentElement.classList.toggle("dark", darkMode.value)'));
-    assert.strictEqual((uiResponse.body.match(/window\.addEventListener\("git-api-theme"/g) || []).length, 4);
+    assert.ok(uiResponse.body.includes('themeMedia.addEventListener("change"'));
+    assert.ok(!uiResponse.body.includes('localStorage.getItem("theme")'));
     assert.ok(
       uiResponse.body.includes('<template if="dragging"'),
       "drag/drop helper should only appear while dragging",
@@ -957,8 +987,8 @@ async function run() {
     assert.ok(uiResponse.body.includes("No tags."));
     assert.strictEqual(
       (uiResponse.body.match(/window\.matchMedia\("\(prefers-color-scheme: dark\)"\)/g) || []).length,
-      4,
-      "each UI island should default to the system theme when no preference is saved",
+      2,
+      "the page should initialize its theme from the system preference",
     );
     assert.ok(
       uiResponse.body.includes("profile.value?.alias"),

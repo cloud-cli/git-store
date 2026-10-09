@@ -870,6 +870,7 @@ async function getRepoHistory(req, res) {
 // Old owner-based routes are intentionally omitted to reject spoofed paths
 
 app.get("/api/v1/health", (req, res) => res.json({ status: "ok" }));
+app.get("/api", (req, res) => res.json(makeApiSpec()));
 app.get("/api/v1/openapi.json", (req, res) => res.json(makeApiSpec()));
 app.get("/ui/config", (req, res) => {
   const issuer = process.env.OIDC_ISSUER;
@@ -1408,6 +1409,55 @@ function makeApiSpec() {
       "/api/v1/openapi.json": {
         get: operation("Get this OpenAPI document", { 200: { description: "OpenAPI document" } }, null, []),
       },
+      "/api/v1/orgs": {
+        get: {
+          ...operation(
+            "List organizations owned by the authenticated subject",
+            {
+              200: { description: "Organization list" },
+              401: unauthorized,
+              403: { description: "Insufficient scope" },
+            },
+            null,
+            [],
+          ),
+          security: [{ bearerAuth: [] }],
+          "x-required-scope": "repo:read or repo:write",
+        },
+        post: {
+          ...operation(
+            "Create an organization for the authenticated subject",
+            {
+              201: { description: "Created" },
+              400: { description: "Invalid organization slug" },
+              409: { description: "Organization already exists" },
+              401: unauthorized,
+              403: { description: "Insufficient scope" },
+            },
+            jsonBody({ slug: { type: "string" }, name: { type: "string" } }, []),
+            [],
+          ),
+          security: [{ bearerAuth: [] }],
+          "x-required-scope": "repo:write",
+        },
+      },
+      "/api/v1/orgs/{org}/repos": {
+        get: {
+          ...operation(
+            "List repositories in an owned organization",
+            {
+              200: { description: "Repository list" },
+              401: unauthorized,
+              403: { description: "Insufficient scope" },
+              404: { description: "Organization not found" },
+            },
+            null,
+            [{ name: "org", in: "path", required: true, schema: { type: "string" } }],
+          ),
+          security: [{ bearerAuth: [] }],
+          "x-required-scope": "repo:read or repo:write",
+        },
+      },
       "/api/v1/repos": {
         get: operation(
           "List repositories owned by the authenticated subject",
@@ -1757,6 +1807,36 @@ function makeApiSpec() {
       },
     },
   };
+
+  apiSpec.paths["/api"] = {
+    get: operation("Get this OpenAPI document", { 200: { description: "OpenAPI document" } }, null, []),
+  };
+  const organizationRepoPrefix = "/api/v1/orgs/{org}/repos";
+  for (const [route, methods] of Object.entries(apiSpec.paths)) {
+    if (route.startsWith("/api/v1/repos/{repo}")) {
+      const suffix = route.slice("/api/v1/repos/{repo}".length);
+      apiSpec.paths[`${organizationRepoPrefix}/{repo}${suffix}`] = Object.fromEntries(
+        Object.entries(methods).map(([method, definition]) => [
+          method,
+          {
+            ...definition,
+            parameters: [
+              { name: "org", in: "path", required: true, schema: { type: "string" } },
+              ...(definition.parameters || []),
+            ],
+            security: [{ bearerAuth: [] }],
+            "x-required-scope": definition["x-required-scope"] || "repo:read or repo:write",
+            responses: {
+              401: unauthorized,
+              403: { description: "Insufficient scope" },
+              404: { description: "Organization or repository not found" },
+              ...definition.responses,
+            },
+          },
+        ]),
+      );
+    }
+  }
 
   const aliasParameter = {
     name: "alias",
