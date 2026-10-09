@@ -871,7 +871,6 @@ async function getRepoHistory(req, res) {
 
 app.get("/api/v1/health", (req, res) => res.json({ status: "ok" }));
 app.get("/api", (req, res) => res.json(makeApiSpec()));
-app.get("/api/v1/openapi.json", (req, res) => res.json(makeApiSpec()));
 app.get("/ui/config", (req, res) => {
   const issuer = process.env.OIDC_ISSUER;
   const oidcConfigured = Boolean(
@@ -1405,9 +1404,6 @@ function makeApiSpec() {
     paths: {
       "/api/v1/health": {
         get: operation("Health check", { 200: { description: "Healthy" } }, null, []),
-      },
-      "/api/v1/openapi.json": {
-        get: operation("Get this OpenAPI document", { 200: { description: "OpenAPI document" } }, null, []),
       },
       "/api/v1/orgs": {
         get: {

@@ -637,12 +637,10 @@ async function run() {
     assert.ok(discoverySpec.paths["/api/v1/orgs/{org}/repos/{repo}/tree"]);
     assert.ok(discoverySpec.paths["/git/{alias}/{repo}.git/git-upload-pack"]);
     assert.ok(!Object.keys(discoverySpec.paths).some((route) => route.startsWith("/ui/") || route.includes("static")));
-    const specResponse = await request(port, "GET", "/api/v1/openapi.json");
-    assert.strictEqual(specResponse.status, 200);
-    const spec = JSON.parse(specResponse.body);
+    assert.strictEqual((await request(port, "GET", "/api/v1/openapi.json")).status, 404);
+    const spec = discoverySpec;
     const expectedMethods = {
       "/api/v1/health": ["get"],
-      "/api/v1/openapi.json": ["get"],
       "/api": ["get"],
       "/api/v1/orgs": ["get", "post"],
       "/api/v1/orgs/{org}/repos": ["get"],
