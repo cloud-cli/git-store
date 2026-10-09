@@ -1,5 +1,4 @@
 const fs = require("fs");
-const path = require("path");
 const crypto = require("crypto");
 
 const DATA_PATH = process.env.DATA_PATH;
@@ -13,50 +12,15 @@ if (!fs.existsSync(DATA_PATH)) {
 }
 
 /**
- * Derives a stable, safe filesystem directory name from an OIDC subject claim.
- * Uses SHA-256 hashing to produce a deterministic, one-way encoded directory name.
- * This ensures the original subject value is never exposed or stored in the path.
+ * Derives a stable SHA-256 ownership fingerprint from an OIDC subject claim.
+ * The original subject value is not exposed or stored in organization metadata.
  *
  * @param {string} sub The OIDC subject claim value
- * @returns {string} A filesystem-safe hashed directory name (hex-encoded, lowercase)
+ * @returns {string} A lowercase hexadecimal SHA-256 hash
  */
-function encodeSubjectDir(sub) {
+function hashSubject(sub) {
   const hash = crypto.createHash("sha256").update(sub).digest("hex");
   return hash;
-}
-
-/**
- * Gets the absolute path to a repository using the hashed subject directory.
- * @param {string} hashedSub The hashed OIDC subject value
- * @param {string} repo The repository short name
- * @returns {string} The directory path
- */
-function getRepoPath(hashedSub, repo) {
-  return path.join(DATA_PATH, hashedSub, repo);
-}
-
-/**
- * Ensures the repository directory exists for the authenticated subject.
- * Creates the hashed subject directory if it doesn't exist.
- * Does NOT create directories for raw nickname/owner values.
- *
- * @param {string} hashedSub The hashed OIDC subject value
- * @param {string} repo The repository short name
- * @returns {string} The directory path
- */
-function ensureRepoDir(hashedSub, repo) {
-  const repoPath = getRepoPath(hashedSub, repo);
-  const subPath = path.join(DATA_PATH, hashedSub);
-
-  if (!fs.existsSync(subPath)) {
-    fs.mkdirSync(subPath, { recursive: true });
-  }
-
-  if (!fs.existsSync(repoPath)) {
-    fs.mkdirSync(repoPath, { recursive: true });
-  }
-
-  return repoPath;
 }
 
 /**
@@ -91,21 +55,19 @@ function validateRepoName(repo) {
 }
 
 /**
- * Gets the hashed subject directory for the current request.
- * This replaces the old owner-based directory lookup.
+ * Gets the ownership hash for the current request.
+ * Organizations store this hash as their owner identifier.
  * @param {object} req The Express request object (must have req.user with sub)
- * @returns {string} The hashed subject directory name
+ * @returns {string} The lowercase hexadecimal SHA-256 hash
  */
-function getHashedSubjectDir(req) {
+function getSubjectHash(req) {
   // req.user.sub should be the OIDC subject claim, already validated by auth middleware
-  return encodeSubjectDir(req.user.sub);
+  return hashSubject(req.user.sub);
 }
 
 module.exports = {
-  encodeSubjectDir,
-  getRepoPath,
-  ensureRepoDir,
+  hashSubject,
   validateRepoName,
-  getHashedSubjectDir,
+  getSubjectHash,
   DATA_PATH,
 };

@@ -189,8 +189,11 @@
         return token ? { Authorization: `Bearer ${token}` } : {};
       };
       const selectRef = (ref) => {
-        const query = new URLSearchParams({ repo: repo.value.repo, ref });
-        window.history.pushState({}, "", `${window.location.pathname}?${query}`);
+        const query = new URL(window.location.href).searchParams;
+        query.set("org", new URL(window.location.href).searchParams.get("org") || "");
+        query.set("repo", repo.value.repo);
+        query.set("ref", ref);
+        window.history.pushState({}, "", `${window.location.pathname}?${query}${window.location.hash}`);
         window.dispatchEvent(new PopStateEvent("popstate"));
       };
       const selectBranch = (branch) => selectRef(branch);
@@ -200,14 +203,18 @@
         if (!name) return;
         errorMessage.value = "";
         try {
-          const response = await fetch(`/api/v1/repos/${encodeURIComponent(repo.value.repo)}/branches`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              ...tokenHeaders(),
+          const org = new URL(window.location.href).searchParams.get("org");
+          const response = await fetch(
+            `/api/v1/orgs/${encodeURIComponent(org)}/repos/${encodeURIComponent(repo.value.repo)}/branches`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...tokenHeaders(),
+              },
+              body: JSON.stringify({ name }),
             },
-            body: JSON.stringify({ name }),
-          });
+          );
           if (response.ok) {
             window.location.reload();
           } else {
@@ -222,14 +229,18 @@
         if (!name) return;
         errorMessage.value = "";
         try {
-          const response = await fetch(`/api/v1/repos/${encodeURIComponent(repo.value.repo)}/tags`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              ...tokenHeaders(),
+          const org = new URL(window.location.href).searchParams.get("org");
+          const response = await fetch(
+            `/api/v1/orgs/${encodeURIComponent(org)}/repos/${encodeURIComponent(repo.value.repo)}/tags`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...tokenHeaders(),
+              },
+              body: JSON.stringify({ name }),
             },
-            body: JSON.stringify({ name }),
-          });
+          );
           if (response.ok) {
             window.location.reload();
           } else {

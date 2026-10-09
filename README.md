@@ -9,37 +9,33 @@ participate in organization or repository naming.
 - Docker deployment uses `ghcr.io/cloud-cli/image-node:latest` and `/home/app`.
 - `GET /api` serves an OpenAPI 3.0.3 document for the versioned API
   and Git Smart HTTP endpoints; UI-only routes are excluded.
-- Repository listing and creation are scoped to the authenticated OIDC subject.
+- Organizations and their repositories are scoped to the authenticated OIDC subject.
+  Organization slugs are globally unique, lowercase, and case-insensitive on input.
 - All repository operations require an authenticated OIDC subject. API bearer tokens
   need `repo:read` for reads and `repo:write` for creation/mutations; `repo:write` also
   grants read access. The browser UI may use a provider-validated same-origin session.
-- Git Smart HTTP is available at `/git/<repo>.git`. Git clients use HTTP Basic auth
+- Git Smart HTTP is available at `/git/<org>/<repo>.git`. Git clients use HTTP Basic auth
   with any username and an active OIDC access token as the password; fetch needs
   `repo:read` (or `repo:write`) and push needs `repo:write`. Git transport never
   falls back to browser sessions. Use HTTPS in deployment; plain HTTP is suitable
   only for local testing. PATs are not issued by this version; use an OIDC access
   token until PAT management is added.
-- Browser sign-in identifies an account by the stable OIDC `sub` claim; a provider
-  username is optional and does not determine organization or repository names.
-  Organization and repository slugs are chosen in Git Store and routed as
-  `/api/v1/orgs/<org>/repos/<repo>` and `/git/<org>/<repo>.git`. Organization
-  ownership is still enforced against the authenticated subject, not its OIDC
-  username. Legacy subject-owned repositories and alias-qualified routes remain
-  available for compatibility.
+- Browser sign-in identifies an account by the stable OIDC `sub` claim. Username
+  claims have no authentication or naming role and are omitted from the UI profile.
+  Organization slugs are chosen in Git Store and repositories are routed as
+  `/api/v1/orgs/<org>/repos/<repo>` and `/git/<org>/<repo>.git`.
 - Organization and repository names are short path-only identifiers. The
-  authenticated subject's stable hashed `sub` claim is used for ownership metadata,
-  independently of the names shown in organization/repository paths.
+  authenticated subject's stable hashed `sub` claim is used for organization ownership
+  metadata. Organizations are recorded in `DATA_PATH/organizations.json`; repositories
+  live under `DATA_PATH/orgs/<slug>/<repo>`.
 - `npm test` runs a Node-built-in integration suite covering subject isolation,
   unauthorized access, route inventory, traversal rejection, and UI wiring.
 
-### Migration note
+### Storage note
 
-This version replaces the old `owner/repo` directory structure with a one-way
-hashed subject directory. Old repositories stored under `DATA_PATH/<nickname>/repo`
-cannot be automatically migrated because the nickname cannot be safely attributed
-to an OIDC subject. If migrating from an old installation, back up the `DATA_PATH`
-directory before upgrading. Repositories created with this version are stored under
-`DATA_PATH/<sha256(sub)>/<repo>`, where `sub` is the OIDC subject claim.
+This MVP stores organization metadata in `DATA_PATH/organizations.json` and repositories
+under `DATA_PATH/orgs/<slug>/<repo>`. Ownership metadata is the SHA-256 hash of the OIDC
+`sub` claim. This release has no storage migration; start with an empty data volume.
 
 ## Run
 
@@ -79,37 +75,6 @@ DATA_PATH="$PWD/data" npm start
 | POST   | `/git/:org/:repo.git/git-upload-pack`                    | Basic token |
 | GET    | `/git/:org/:repo.git/info/refs?service=git-receive-pack` | Basic token |
 | POST   | `/git/:org/:repo.git/git-receive-pack`                   | Basic token |
-| GET    | `/api/v1/repos`                                          | OIDC        |
-| GET    | `/api/v1/profile/alias`                                  | OIDC        |
-| PUT    | `/api/v1/profile/alias`                                  | OIDC        |
-| GET    | `/api/v1/repos/:alias`                                   | OIDC        |
-| POST   | `/api/v1/repos/:alias/:repo`                             | OIDC        |
-| GET    | `/api/v1/repos/:alias/:repo/log`                         | OIDC        |
-| POST   | `/api/v1/repos/:repo`                                    | OIDC        |
-| GET    | `/api/v1/repos/:repo/log`                                | OIDC        |
-| GET    | `/api/v1/repos/:repo/tree`                               | OIDC        |
-| GET    | `/api/v1/repos/:repo/file`                               | OIDC        |
-| GET    | `/api/v1/repos/:repo/branches`                           | OIDC        |
-| GET    | `/api/v1/repos/:repo/tags`                               | OIDC        |
-| GET    | `/git/:repo.git/info/refs?service=git-upload-pack`       | Basic token |
-| POST   | `/git/:repo.git/git-upload-pack`                         | Basic token |
-| GET    | `/git/:repo.git/info/refs?service=git-receive-pack`      | Basic token |
-| POST   | `/git/:repo.git/git-receive-pack`                        | Basic token |
-
-Subject-owned short-repository and alias-qualified routes listed below are retained
-for compatibility; organization/repository pairs are the primary namespace.
-| GET | `/git/:alias/:repo.git/info/refs?service=git-upload-pack` | Basic token |
-| POST | `/git/:alias/:repo.git/git-upload-pack` | Basic token |
-| GET | `/git/:alias/:repo.git/info/refs?service=git-receive-pack` | Basic token |
-| POST | `/git/:alias/:repo.git/git-receive-pack` | Basic token |
-| GET | `/api/v1/repos/:repo/history` | OIDC |
-| POST | `/api/v1/repos/:repo/stage` | OIDC |
-| POST | `/api/v1/repos/:repo/unstage` | OIDC |
-| POST | `/api/v1/repos/:repo/commit` | OIDC |
-| POST | `/api/v1/repos/:repo/tags` | OIDC |
-| DELETE | `/api/v1/repos/:repo/tags/:name` | OIDC |
-| POST | `/api/v1/repos/:repo/branches` | OIDC |
-| DELETE | `/api/v1/repos/:repo/branches/:name` | OIDC |
 
 The canonical request and response documentation is in [`docs/api-reference.md`](docs/api-reference.md).
 
@@ -133,8 +98,7 @@ reactive theme state across all four page islands using Tailwind v4's class-base
 The repository plus button opens an anchored HTML popover. Empty repositories offer a file upload that creates the initial commit;
 files dropped into or selected for an existing repository remain unstaged and are marked
 with `*`. Branch and tag empty states provide matching create popovers.
-The topbar reads the current session profile from `/ui/session`, displaying the authenticated
-OIDC name, email, and picture when available, or a signed-out state otherwise.
+The topbar reads the current session profile from `/ui/session`; username claims are omitted from the profile UI.
 
 The service reads configuration only from process environment variables; it does not load
 `.env` files. Browser sign-in uses `/ui/auth/login` and requires the OIDC client callback URI

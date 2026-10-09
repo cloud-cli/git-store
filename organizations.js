@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
-const { encodeSubjectDir } = require("./storage");
+const { hashSubject } = require("./storage");
 
 const registryFile = path.join(process.env.DATA_PATH, "organizations.json");
 const slugPattern = /^[a-z0-9](?:[a-z0-9._-]{0,61}[a-z0-9])?$/;
@@ -51,7 +51,7 @@ function save(organizations) {
 }
 
 function listForSubject(sub) {
-  const ownerHash = encodeSubjectDir(sub);
+  const ownerHash = hashSubject(sub);
   return load()
     .filter((organization) => organization.ownerHash === ownerHash)
     .map(({ slug }) => ({ slug }));
@@ -75,9 +75,8 @@ function create(sub, value) {
     return false;
   }
   const organization = {
-    id: crypto.randomBytes(16).toString("hex"),
     slug,
-    ownerHash: encodeSubjectDir(sub),
+    ownerHash: hashSubject(sub),
   };
   organizations.push(organization);
   save(organizations);

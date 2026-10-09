@@ -14,7 +14,7 @@ process.env.OIDC_CLIENT_ID = "";
 process.env.OIDC_CLIENT_SECRET = "test-client-secret";
 
 const app = require("../index");
-const { encodeSubjectDir } = require("../storage");
+require("../organizations").create("introspected-subject", "introspected-org");
 const readWriteScopes = ["repo:read", "repo:write"];
 const tokenSubjects = new Map([
   [
@@ -40,11 +40,22 @@ const tokenSubjects = new Map([
   ["browser-session-token", { active: true, sub: "browser-subject", scope: "repo:read repo:write" }],
 ]);
 
+const organizationsByToken = {
+  "token-a": "team-one",
+  "token-b": "team-two",
+  "read-only": "reader-org",
+  unscoped: "unscoped-org",
+  "browser-session-token": "browser-org",
+  "opaque-api-token": "introspected-org",
+};
+
 // This injects verification inside this test process only. No fake token is
 // accepted by production HTTP requests unless a test explicitly installs it.
 app.locals.verifyToken = async (token) => tokenSubjects.get(token) || null;
 
-function request(port, method, requestPath, body, token, extraHeaders = {}) {
+// Legacy-shaped test paths are shorthand for the actor's organization; rawPath
+// bypasses this test-only mapping to assert removed public routes stay absent.
+function request(port, method, requestPath, body, token, extraHeaders = {}, rawPath = false) {
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? undefined : JSON.stringify(body);
     const headers = { ...extraHeaders };
@@ -56,7 +67,20 @@ function request(port, method, requestPath, body, token, extraHeaders = {}) {
       headers.Authorization = `Bearer ${token}`;
     }
 
-    const req = http.request({ hostname: "127.0.0.1", port, method, path: requestPath, headers }, (res) => {
+    let actualPath = requestPath;
+    if (!rawPath && /^\/api\/v1\/repos(?:\/|$)/.test(actualPath)) {
+      const browserToken = headers.Cookie?.includes("git_store_session=") ? "browser-session-token" : null;
+      const organization = organizationsByToken[token || browserToken] || "team-one";
+      actualPath = actualPath.replace(/^\/api\/v1\/repos(?=\/|$)/, `/api/v1/orgs/${organization}/repos`);
+    }
+    if (!rawPath && /^\/git\/[^/]+\.git\//.test(actualPath)) {
+      const basic = /^Basic\s+([A-Za-z0-9+/]+=*)$/i.exec(headers.Authorization || "");
+      const password = basic ? Buffer.from(basic[1], "base64").toString("utf8").split(":").slice(1).join(":") : "";
+      const organization = organizationsByToken[password] || "team-one";
+      actualPath = actualPath.replace(/^\/git\//, `/git/${organization}/`);
+    }
+
+    const req = http.request({ hostname: "127.0.0.1", port, method, path: actualPath, headers }, (res) => {
       let responseBody = "";
       res.setEncoding("utf8");
       res.on("data", (chunk) => {
@@ -96,12 +120,35 @@ async function run() {
     assert.strictEqual((await request(port, "POST", "/api/v1/orgs", { slug: "bad slug" }, "token-a")).status, 400);
     const orgCreated = await request(port, "POST", "/api/v1/orgs", { slug: "Team-One" }, "token-a");
     assert.strictEqual(orgCreated.status, 201);
-    assert.deepStrictEqual(JSON.parse(orgCreated.body), { slug: "team-one" });
-    assert.strictEqual((await request(port, "POST", "/api/v1/orgs", { slug: "team-one" }, "token-a")).status, 409);
-    assert.deepStrictEqual(JSON.parse((await request(port, "GET", "/api/v1/orgs", undefined, "token-a")).body), [
+    assert.deepStrictEqual(JSON.parse(orgCreated.body), { org: { slug: "team-one" } });
+    assert.strictEqual((await request(port, "POST", "/api/v1/orgs", { slug: "team-one" }, "token-b")).status, 409);
+    for (const [token, slug] of [
+      ["token-a", "team-extra"],
+      ["token-b", "team-two"],
+      ["read-only", "reader-org"],
+      ["unscoped", "unscoped-org"],
+      ["browser-session-token", "browser-org"],
+    ]) {
+      const oldClaims = tokenSubjects.get(token);
+      tokenSubjects.set(token, { ...oldClaims, scope: "repo:write" });
+      const created = await request(port, "POST", "/api/v1/orgs", { slug }, token);
+      assert.strictEqual(created.status, 201);
+      tokenSubjects.set(token, oldClaims);
+    }
+    assert.deepStrictEqual(JSON.parse((await request(port, "GET", "/api/v1/orgs", undefined, "token-a")).body), {
+      orgs: [{ slug: "team-one" }, { slug: "team-extra" }],
+    });
+    assert.deepStrictEqual(JSON.parse((await request(port, "GET", "/api/v1/orgs", undefined, "token-b")).body), {
+      orgs: [{ slug: "team-two" }],
+    });
+    const organizationRegistry = fs.readFileSync(path.join(dataPath, "organizations.json"), "utf8");
+    assert.ok(!organizationRegistry.includes("oidc-subject-a"), "organization registry must not persist raw subjects");
+    const organizationsModulePath = require.resolve("../organizations");
+    delete require.cache[organizationsModulePath];
+    assert.deepStrictEqual(require("../organizations").listForSubject("oidc-subject-a"), [
       { slug: "team-one" },
+      { slug: "team-extra" },
     ]);
-    assert.deepStrictEqual(JSON.parse((await request(port, "GET", "/api/v1/orgs", undefined, "token-b")).body), []);
     assert.strictEqual(
       (await request(port, "POST", "/api/v1/orgs/team-one/repos/inside", undefined, "token-a")).status,
       201,
@@ -173,20 +220,29 @@ async function run() {
       { Authorization: `Basic ${Buffer.from("user:token-b").toString("base64")}` },
     );
     assert.strictEqual(foreignOrgGit.status, 404, "organization Git transport is limited to its owning subject");
+    const canonicalizedOrgGit = await request(
+      port,
+      "GET",
+      "/git/TEAM-ONE/inside.git/info/refs?service=git-upload-pack",
+      undefined,
+      undefined,
+      { Authorization: `Basic ${Buffer.from("user:token-a").toString("base64")}` },
+    );
+    assert.strictEqual(canonicalizedOrgGit.status, 200, "Git transport canonicalizes case-insensitive org slugs");
     const createA = await request(port, "POST", "/api/v1/repos/shared-repo", undefined, "token-a");
     const createB = await request(port, "POST", "/api/v1/repos/shared-repo", undefined, "token-b");
     assert.strictEqual(createA.status, 201);
     assert.strictEqual(createB.status, 201);
 
-    const repoA = path.join(dataPath, encodeSubjectDir("oidc-subject-a"), "shared-repo");
-    const repoB = path.join(dataPath, encodeSubjectDir("oidc-subject-b"), "shared-repo");
+    const repoA = path.join(dataPath, "orgs", "team-one", "shared-repo");
+    const repoB = path.join(dataPath, "orgs", "team-two", "shared-repo");
     assert.ok(fs.existsSync(path.join(repoA, ".git")));
     assert.ok(fs.existsSync(path.join(repoB, ".git")));
     assert.notStrictEqual(repoA, repoB);
     assert.ok(!repoA.includes("same-nickname"), "nickname must not appear in ownership path");
 
     assert.strictEqual((await request(port, "POST", "/api/v1/repos/git-http", undefined, "token-a")).status, 201);
-    const gitRepoPath = path.join(dataPath, encodeSubjectDir("oidc-subject-a"), "git-http");
+    const gitRepoPath = path.join(dataPath, "orgs", "team-one", "git-http");
     await git(["-C", gitRepoPath, "config", "receive.denyCurrentBranch", "updateInstead"]);
     fs.writeFileSync(path.join(gitRepoPath, "initial.txt"), "initial\n");
     await git(["-C", gitRepoPath, "add", "initial.txt"]);
@@ -203,7 +259,7 @@ async function run() {
     ]);
     const gitClonePath = path.join(dataPath, "clone-a");
     const authHeader = `Authorization: Basic ${Buffer.from("arbitrary-user:token-a").toString("base64")}`;
-    const gitUrl = `http://127.0.0.1:${port}/git/git-http.git`;
+    const gitUrl = `http://127.0.0.1:${port}/git/team-one/git-http.git`;
     await git(["-c", `http.extraheader=${authHeader}`, "clone", gitUrl, gitClonePath]);
     assert.strictEqual(fs.readFileSync(path.join(gitClonePath, "initial.txt"), "utf8"), "initial\n");
     fs.writeFileSync(path.join(gitClonePath, "pushed.txt"), "push works\n");
@@ -270,12 +326,14 @@ async function run() {
 
     const listA = await request(port, "GET", "/api/v1/repos", undefined, "token-a");
     const listB = await request(port, "GET", "/api/v1/repos", undefined, "token-b");
-    assert.deepStrictEqual(JSON.parse(listA.body), [{ repo: "git-http" }, { repo: "shared-repo" }]);
-    assert.deepStrictEqual(JSON.parse(listB.body), [{ repo: "shared-repo" }]);
+    assert.deepStrictEqual(JSON.parse(listA.body), {
+      repos: [{ repo: "git-http" }, { repo: "inside" }, { repo: "shared-repo" }],
+    });
+    assert.deepStrictEqual(JSON.parse(listB.body), { repos: [{ repo: "shared-repo" }] });
 
     const readOnlyList = await request(port, "GET", "/api/v1/repos", undefined, "read-only");
     assert.strictEqual(readOnlyList.status, 200, "repo:read permits repository listing");
-    const readOnlyRepo = path.join(dataPath, encodeSubjectDir("read-only-subject"), "read-only-repo");
+    const readOnlyRepo = path.join(dataPath, "orgs", "reader-org", "read-only-repo");
     fs.mkdirSync(readOnlyRepo, { recursive: true });
     await require("simple-git").simpleGit(readOnlyRepo).init();
     fs.writeFileSync(path.join(readOnlyRepo, "readme.txt"), "read only");
@@ -513,178 +571,26 @@ async function run() {
     const rootRedirect = await request(port, "GET", "/?repo=shared-repo&file=private.txt");
     assert.strictEqual(rootRedirect.status, 302);
     assert.strictEqual(rootRedirect.headers.location, "/ui/?repo=shared-repo&file=private.txt");
-    const aliasDefault = await request(port, "PUT", "/api/v1/profile/alias", { alias: "same-nickname" }, "token-a");
-    assert.strictEqual(aliasDefault.status, 200);
-    assert.deepStrictEqual(JSON.parse(aliasDefault.body), {
-      alias: "same-nickname",
-    });
-    assert.deepStrictEqual(
-      JSON.parse((await request(port, "GET", "/api/v1/profile/alias", undefined, "token-a")).body),
-      { alias: "same-nickname" },
-    );
+    assert.strictEqual((await request(port, "GET", "/api/v1/profile/alias", undefined, "token-a")).status, 404);
     assert.strictEqual(
-      (await request(port, "PUT", "/api/v1/profile/alias", { alias: "SAME-NICKNAME" }, "token-a")).status,
-      200,
-      "aliases are case-insensitive and independent of the provider username",
-    );
-    assert.strictEqual(
-      (await request(port, "PUT", "/api/v1/profile/alias", { alias: "renamed" }, "token-a")).status,
-      409,
-    );
-    const originalTokenClaims = tokenSubjects.get("token-a");
-    tokenSubjects.set("token-a", {
-      ...originalTokenClaims,
-      preferred_username: "renamed-at-provider",
-    });
-    assert.deepStrictEqual(
-      JSON.parse((await request(port, "GET", "/api/v1/profile/alias", undefined, "token-a")).body),
-      { alias: "same-nickname" },
-      "provider username changes do not rename the independent alias",
-    );
-    tokenSubjects.set("token-a", originalTokenClaims);
-    assert.strictEqual(
-      (await request(port, "PUT", "/api/v1/profile/alias", { alias: "same-nickname" }, "token-b")).status,
-      409,
-    );
-    const missingAlias = await request(port, "PUT", "/api/v1/profile/alias", {}, "unscoped");
-    assert.strictEqual(
-      missingAlias.status,
-      400,
-      "only the compatibility alias itself is required by this legacy endpoint",
-    );
-    const usernameFreeAlias = await request(
-      port,
-      "PUT",
-      "/api/v1/profile/alias",
-      { alias: "username-free" },
-      "unscoped",
-    );
-    assert.strictEqual(usernameFreeAlias.status, 200, "a token without a username can create a compatibility alias");
-    assert.strictEqual(
-      (await request(port, "PUT", "/api/v1/profile/alias", { alias: "../bad" }, "token-b")).status,
-      400,
-    );
-    assert.strictEqual(
-      (await request(port, "PUT", "/api/v1/profile/alias", { alias: "another-name" }, "token-b")).status,
-      200,
-      "custom compatibility aliases do not need to match an OIDC username",
-    );
-    const aliasesModulePath = require.resolve("../aliases");
-    delete require.cache[aliasesModulePath];
-    assert.strictEqual(
-      require("../aliases").get("oidc-subject-a"),
-      "same-nickname",
-      "alias persists across module reload",
-    );
-    assert.ok(!fs.readFileSync(path.join(dataPath, "aliases.json"), "utf8").includes("oidc-subject-a"));
-    assert.strictEqual((await request(port, "GET", "/api/v1/repos/same-nickname", undefined, "token-a")).status, 200);
-    assert.strictEqual(
-      (await request(port, "POST", "/api/v1/repos/same-nickname/alias-created", undefined, "token-a")).status,
-      201,
-      "alias-qualified API routes can create repositories for their owner",
-    );
-    assert.strictEqual(
-      (await request(port, "POST", "/api/v1/repos/same-nickname/shared-repo/tags", { name: "alias-v1" }, "token-a"))
-        .status,
-      200,
-      "alias-qualified API routes preserve JSON mutation bodies",
-    );
-    assert.strictEqual(
-      (await request(port, "DELETE", "/api/v1/repos/same-nickname/shared-repo/tags/alias-v1", undefined, "token-a"))
-        .status,
-      200,
-    );
-    assert.strictEqual(
-      (await request(port, "POST", "/api/v1/repos/same-nickname", undefined, "token-a")).status,
-      201,
-      "an alias may also be a repository name",
-    );
-    assert.strictEqual(
-      (await request(port, "GET", "/api/v1/repos/same-nickname/log", undefined, "token-a")).status,
-      200,
-      "direct short routes take precedence when a repository shares the alias",
-    );
-    assert.strictEqual(
-      (await request(port, "GET", "/api/v1/repos/same-nickname/shared-repo/log", undefined, "token-a")).status,
-      200,
-    );
-    assert.strictEqual(
-      (await request(port, "GET", "/api/v1/repos/same-nickname/shared-repo/log", undefined, "token-b")).status,
+      (await request(port, "PUT", "/api/v1/profile/alias", { alias: "ignored" }, "token-a")).status,
       404,
     );
+    assert.strictEqual((await request(port, "GET", "/api/v1/repos", undefined, "token-a", {}, true)).status, 404);
     assert.strictEqual(
-      (await request(port, "GET", "/api/v1/repos/shared-repo/log", undefined, "token-a")).status,
-      200,
-      "direct short route must remain available",
+      (
+        await request(
+          port,
+          "GET",
+          "/git/git-http.git/info/refs?service=git-upload-pack",
+          undefined,
+          undefined,
+          { Authorization: `Basic ${Buffer.from("user:token-a").toString("base64")}` },
+          true,
+        )
+      ).status,
+      404,
     );
-    const aliasGit = await request(
-      port,
-      "GET",
-      "/git/same-nickname/git-http.git/info/refs?service=git-upload-pack",
-      undefined,
-      undefined,
-      {
-        Authorization: `Basic ${Buffer.from("user:token-a").toString("base64")}`,
-      },
-    );
-    assert.strictEqual(aliasGit.status, 200);
-    const aliasClonePath = path.join(dataPath, "alias-clone");
-    await git([
-      "-c",
-      `http.extraheader=${authHeader}`,
-      "clone",
-      `http://127.0.0.1:${port}/git/SAME-NICKNAME/git-http.git`,
-      aliasClonePath,
-    ]);
-    assert.strictEqual(
-      fs.readFileSync(path.join(aliasClonePath, "initial.txt"), "utf8"),
-      "initial\n",
-      "alias-qualified Smart HTTP routes support a real Git clone",
-    );
-    fs.writeFileSync(path.join(aliasClonePath, "alias-push.txt"), "alias push works\n");
-    await git(["-C", aliasClonePath, "add", "alias-push.txt"]);
-    await git([
-      "-C",
-      aliasClonePath,
-      "-c",
-      "user.name=Test",
-      "-c",
-      "user.email=test@example.test",
-      "commit",
-      "-m",
-      "alias push",
-    ]);
-    await git([
-      "-c",
-      `http.extraheader=${authHeader}`,
-      "-C",
-      aliasClonePath,
-      "push",
-      "origin",
-      "HEAD:refs/heads/alias-push",
-    ]);
-    const pushedAliasFile = await git([
-      "--git-dir",
-      path.join(dataPath, encodeSubjectDir("oidc-subject-a"), "git-http", ".git"),
-      "show",
-      "refs/heads/alias-push:alias-push.txt",
-    ]);
-    assert.strictEqual(
-      pushedAliasFile.stdout,
-      "alias push works\n",
-      "alias-qualified Smart HTTP routes support an authenticated push",
-    );
-    const foreignAliasGit = await request(
-      port,
-      "GET",
-      "/git/same-nickname/git-http.git/info/refs?service=git-upload-pack",
-      undefined,
-      undefined,
-      {
-        Authorization: `Basic ${Buffer.from("user:token-b").toString("base64")}`,
-      },
-    );
-    assert.strictEqual(foreignAliasGit.status, 404);
     for (const oldPath of ["/health", "/repos", "/config", "/session", "/auth/login"]) {
       const oldRoute = await request(port, "GET", oldPath);
       assert.strictEqual(oldRoute.status, 404, `${oldPath} must not remain as an alias`);
@@ -747,6 +653,15 @@ async function run() {
         expectedMethods[route.replace("/git/{repo}.git", "/git/{org}/{repo}.git")] = [...methods];
       }
     }
+    for (const route of Object.keys(expectedMethods)) {
+      if (
+        route.startsWith("/api/v1/repos") ||
+        route === "/api/v1/profile/alias" ||
+        route.startsWith("/git/{repo}.git/")
+      ) {
+        delete expectedMethods[route];
+      }
+    }
     assert.deepStrictEqual(Object.keys(spec.paths).sort(), Object.keys(expectedMethods).sort());
     assert.ok(
       Object.keys(spec.paths).every(
@@ -755,15 +670,17 @@ async function run() {
     );
     for (const [specPath, methods] of Object.entries(expectedMethods)) {
       assert.deepStrictEqual(Object.keys(spec.paths[specPath]).sort(), methods.sort(), `methods for ${specPath}`);
-      if (specPath.startsWith("/api/v1/repos")) {
+      if (specPath.startsWith("/api/v1/orgs/{org}/repos")) {
         for (const method of methods) {
           assert.ok(spec.paths[specPath][method].security, `${method} ${specPath} must be authenticated`);
         }
       }
     }
-    assert.strictEqual(spec.paths["/api/v1/repos"]["get"]["x-required-scope"], "repo:read or repo:write");
-    assert.strictEqual(spec.paths["/api/v1/repos/{repo}"].post["x-required-scope"], "repo:write");
-    assert.strictEqual(spec.paths["/api/v1/repos/{repo}/tags"].post["x-required-scope"], "repo:write");
+    assert.strictEqual(spec.paths["/api/v1/orgs"]["get"]["x-required-scope"], "repo:read or repo:write");
+    assert.strictEqual(spec.paths["/api/v1/orgs/{org}/repos/{repo}"].post["x-required-scope"], "repo:write");
+    assert.strictEqual(spec.paths["/api/v1/orgs/{org}/repos/{repo}/tags"].post["x-required-scope"], "repo:write");
+    assert.ok(!spec.paths["/api/v1/profile/alias"]);
+    assert.ok(!spec.paths["/api/v1/repos"]);
 
     const configResponse = await request(port, "GET", "/ui/config");
     assert.strictEqual(configResponse.status, 200);
@@ -925,11 +842,6 @@ async function run() {
       { Cookie: changedUsernameCookies },
     );
     assert.strictEqual(changedUsernameCallback.status, 303, "provider username changes do not block sign-in");
-    assert.strictEqual(
-      require("../aliases").get("browser-subject"),
-      null,
-      "sign-in does not register a username alias",
-    );
 
     oidcUserInfo = { id: "id-only-subject", name: "Signed In" };
     oidcIdClaims = { sub: "id-only-subject", preferred_username: "id-only-user" };
@@ -950,11 +862,6 @@ async function run() {
       idTokenUsernameCallback.status,
       303,
       "sign-in succeeds using the subject without username coupling",
-    );
-    assert.strictEqual(
-      require("../aliases").get("id-only-subject"),
-      null,
-      "OIDC usernames are not registered as aliases",
     );
 
     oidcUserInfo = { id: "browser-subject", name: "Signed In", preferred_username: "browser-user" };
@@ -991,8 +898,6 @@ async function run() {
         id: "browser-subject",
         sub: "browser-subject",
         name: "Signed In",
-        preferred_username: "browser-user",
-        alias: null,
       },
     });
     const tokenVerifier = app.locals.verifyToken;
@@ -1067,9 +972,8 @@ async function run() {
     assert.ok(uiResponse.body.includes('<template if="showWorkspace">'));
     assert.ok(uiResponse.body.includes("Create an organization"));
     assert.ok(uiResponse.body.includes("Step 2 of 2"));
-    assert.ok(uiResponse.body.includes("const showOrganization = (slug) =>"));
-    assert.ok(uiResponse.body.includes('history.replaceState(null, "", `${next.pathname}${next.search}${next.hash}`)'));
-    assert.ok(uiResponse.body.includes("window.location.assign(`/ui/?org=${encodeURIComponent(result.slug)}`)"));
+    assert.ok(uiResponse.body.includes("window.location.assign(`/ui/?org=${encodeURIComponent(result.org.slug)}`)"));
+    assert.ok(uiResponse.body.includes('searchParams.has("org")'));
     assert.ok(uiResponse.body.includes('document.documentElement.classList.toggle("dark", darkMode.value)'));
     assert.ok(uiResponse.body.includes('themeMedia.addEventListener("change"'));
     assert.ok(!uiResponse.body.includes('localStorage.getItem("theme")'));

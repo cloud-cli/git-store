@@ -4,8 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { spawn } = require("child_process");
-const { getRepoPath, ensureRepoDir, validateRepoName, getHashedSubjectDir } = require("./storage");
-const aliases = require("./aliases");
+const { validateRepoName, getSubjectHash } = require("./storage");
 const organizations = require("./organizations");
 
 const getGit = (repoPath) => simpleGit.simpleGit(repoPath);
@@ -189,9 +188,6 @@ function clearLoginCookies(res, options) {
  * @param {function} next - Express next middleware function
  */
 async function requireAuthentication(req, res, next) {
-  if (req.aliasRouteAuthenticated && req.user) {
-    return next();
-  }
   // Check for Bearer token in Authorization header
   const header = req.headers.authorization || "";
   if (/^Bearer\s+/i.test(header)) {
@@ -220,8 +216,6 @@ async function requireAuthentication(req, res, next) {
       sub: session.sub,
       scope: session.scope,
       active: true,
-      preferred_username: session.profile.preferred_username,
-      username: session.profile.username,
     };
     req.authType = "session";
     return next();
@@ -239,6 +233,16 @@ function getTokenScopes(claims) {
     return new Set(rawScopes.split(/\s+/).filter(Boolean));
   }
   return new Set();
+}
+
+function sanitizeUserProfile(profile, subject) {
+  const safeProfile = { sub: subject };
+  for (const key of ["id", "name", "email", "picture", "avatar", "avatar_url", "image", "photo"]) {
+    if (typeof profile?.[key] === "string") {
+      safeProfile[key] = profile[key];
+    }
+  }
+  return safeProfile;
 }
 
 function requireScope(scope) {
@@ -289,32 +293,21 @@ function requireGitBasicAuth(req, res, next) {
 
 function gitSmartHttp(req, res) {
   const match =
-    /^\/git\/(?:([A-Za-z0-9][A-Za-z0-9._-]{0,62})\/)?([A-Za-z0-9][A-Za-z0-9._-]{0,99})\.git\/(info\/refs|git-upload-pack|git-receive-pack)$/.exec(
+    /^\/git\/([A-Za-z0-9](?:[A-Za-z0-9._-]{0,61}[A-Za-z0-9])?)\/([A-Za-z0-9][A-Za-z0-9._-]{0,99})\.git\/(info\/refs|git-upload-pack|git-receive-pack)$/.exec(
       req.path,
     );
   if (!match || !validateRepoName(match[2]) || Object.keys(req.query).some((key) => key !== "service")) {
     return res.status(400).send("Malformed Git request");
   }
-  const orgOrAlias = match[1];
+  const orgSlug = match[1];
   const repo = match[2];
   const operation = match[3];
-  const subjectHash = getHashedSubjectDir(req);
-  let repoRoot = path.join(process.env.DATA_PATH, subjectHash);
-  if (orgOrAlias) {
-    const organization = organizations.get(orgOrAlias);
-    if (organization) {
-      if (organization.ownerHash !== subjectHash) {
-        return res.status(404).send("Repository not found");
-      }
-      repoRoot = path.join(process.env.DATA_PATH, "orgs", organization.slug);
-    } else {
-      const aliasOwner = aliases.validAlias(orgOrAlias) ? aliases.owner(orgOrAlias) : null;
-      if (!aliasOwner || aliasOwner !== subjectHash) {
-        return res.status(404).send("Repository not found");
-      }
-      repoRoot = path.join(process.env.DATA_PATH, aliasOwner);
-    }
+  const subjectHash = getSubjectHash(req);
+  const organization = organizations.get(orgSlug);
+  if (!organization || organization.ownerHash !== subjectHash) {
+    return res.status(404).send("Repository not found");
   }
+  const repoRoot = path.join(process.env.DATA_PATH, "orgs", organization.slug);
   const service = req.query.service;
   let write;
   if (operation === "info/refs" && (service === "git-upload-pack" || service === "git-receive-pack")) {
@@ -432,27 +425,21 @@ function gitSmartHttp(req, res) {
   });
 }
 
-app.all("/git/:repo.git/*path", requireGitBasicAuth, gitSmartHttp);
-app.all("/git/:alias/:repo.git/*path", requireGitBasicAuth, gitSmartHttp);
+app.all("/git/:org/:repo.git/*path", requireGitBasicAuth, gitSmartHttp);
 
 /**
- * Safely get the repo path using the authenticated subject's hashed directory.
- * Validates the repo short name. Rejects if the repo name is invalid or if
- * there's an attempt to access a repo outside the authenticated subject's directory.
+ * Safely get the repository path within the authenticated organization.
+ * Validates the repo short name and requires an organization-resolved request.
  *
  * @param {string} repo - The repository short name from the route
  * @param {object} req - Express request object (must have req.user with sub)
  * @returns {string|false} The repo path if valid, or false if invalid
  */
 function getSafeRepoPath(repo, req) {
-  if (!validateRepoName(repo)) {
+  if (!validateRepoName(repo) || !req.organizationPath) {
     return false;
   }
-  const hashedSub = getHashedSubjectDir(req);
-  if (req.organizationPath) {
-    return path.join(req.organizationPath, repo);
-  }
-  return getRepoPath(hashedSub, repo);
+  return path.join(req.organizationPath, repo);
 }
 
 /** Resolve a repository-relative path and reject lexical or symlink escapes. */
@@ -535,32 +522,7 @@ async function treeEntries(directory, relative = "") {
 }
 
 /**
- * List repositories belonging to the authenticated subject only.
- * Unauthenticated access is rejected.
- *
- * @param {object} req - Express request object
- * @param {object} res - Express response object
- * @returns {void}
- */
-function listOwnRepos(req, res) {
-  const hashedSub = getHashedSubjectDir(req);
-  const subPath = path.join(process.env.DATA_PATH, hashedSub);
-
-  const repositories = [];
-  if (fs.existsSync(subPath)) {
-    for (const repo of fs.readdirSync(subPath, { withFileTypes: true })) {
-      if (repo.isDirectory()) {
-        repositories.push({ repo: repo.name });
-      }
-    }
-  }
-  return res.json(repositories);
-}
-
-/**
- * Create a new repository for the authenticated subject.
- * The repo name comes from the route parameter. The owner directory is
- * derived from the authenticated subject's hashed sub claim.
+ * Create a repository inside an authenticated organization.
  *
  * @param {object} req - Express request object
  * @param {object} res - Express response object
@@ -574,14 +536,12 @@ async function createRepo(req, res) {
   }
 
   try {
-    let repoPath;
-    if (req.organizationPath) {
-      fs.mkdirSync(req.organizationPath, { recursive: true });
-      repoPath = path.join(req.organizationPath, repo);
-      fs.mkdirSync(repoPath, { recursive: true });
-    } else {
-      repoPath = ensureRepoDir(getHashedSubjectDir(req), repo);
+    if (!req.organizationPath) {
+      return res.status(404).json({ error: "Organization not found" });
     }
+    fs.mkdirSync(req.organizationPath, { recursive: true });
+    const repoPath = path.join(req.organizationPath, repo);
+    fs.mkdirSync(repoPath, { recursive: true });
     const git = getGit(repoPath);
 
     if (!fs.existsSync(path.join(repoPath, ".git"))) {
@@ -600,7 +560,7 @@ async function createRepo(req, res) {
 
 /**
  * Get repository log.
- * Resolves the repo path from the authenticated subject's hashed directory.
+ * Resolves the repo path from the authenticated organization's directory.
  *
  * @param {object} req - Express request object
  * @param {object} res - Express response object
@@ -634,7 +594,7 @@ async function getRepoLog(req, res) {
 
 /**
  * List repository files/tree.
- * Resolves the repo path from the authenticated subject's hashed directory.
+ * Resolves the repo path from the authenticated organization's directory.
  *
  * @param {object} req - Express request object
  * @param {object} res - Express response object
@@ -666,7 +626,7 @@ async function getRepoTree(req, res) {
 
 /**
  * Read a repository file.
- * Resolves the repo path from the authenticated subject's hashed directory.
+ * Resolves the repo path from the authenticated organization's directory.
  *
  * @param {object} req - Express request object
  * @param {object} res - Express response object
@@ -740,7 +700,7 @@ function uploadRepoFile(req, res) {
 
 /**
  * List repository branches.
- * Resolves the repo path from the authenticated subject's hashed directory.
+ * Resolves the repo path from the authenticated organization's directory.
  *
  * @param {object} req - Express request object
  * @param {object} res - Express response object
@@ -771,7 +731,7 @@ async function getRepoBranches(req, res) {
 
 /**
  * List repository tags.
- * Resolves the repo path from the authenticated subject's hashed directory.
+ * Resolves the repo path from the authenticated organization's directory.
  *
  * @param {object} req - Express request object
  * @param {object} res - Express response object
@@ -799,7 +759,7 @@ async function getRepoTags(req, res) {
 
 /**
  * Get file history from a repository.
- * Resolves the repo path from the authenticated subject's hashed directory.
+ * Resolves the repo path from the authenticated organization's directory.
  *
  * @param {object} req - Express request object
  * @param {object} res - Express response object
@@ -840,8 +800,7 @@ async function getRepoHistory(req, res) {
   }
 }
 
-// Define API routes with :repo only (no owner parameter)
-// Old owner-based routes are intentionally omitted to reject spoofed paths
+// Internal repository handlers use :repo after the organization middleware resolves ownership.
 
 app.get("/api/v1/health", (req, res) => res.json({ status: "ok" }));
 app.get("/api", (req, res) => res.json(makeApiSpec()));
@@ -865,7 +824,7 @@ app.get("/ui/session", async (req, res) => {
     if (browserSession && isSameOriginRequest(req)) {
       return res.json({
         authenticated: true,
-        profile: { ...browserSession.profile, alias: aliases.get(browserSession.sub) },
+        profile: browserSession.profile,
       });
     }
     const authorization = req.headers.authorization || "";
@@ -880,8 +839,6 @@ app.get("/ui/session", async (req, res) => {
     let profile = {
       sub: claims.sub,
       name: claims.name,
-      preferred_username: claims.preferred_username,
-      username: claims.username,
     };
     try {
       const response = await fetch(new URL("/userinfo", issuer), {
@@ -900,7 +857,7 @@ app.get("/ui/session", async (req, res) => {
     } catch {
       // Validated introspection claims still identify the authenticated session.
     }
-    return res.json({ authenticated: true, profile: { ...profile, alias: aliases.get(claims.sub) } });
+    return res.json({ authenticated: true, profile: sanitizeUserProfile(profile, claims.sub) });
   } catch {
     return res.json({ authenticated: false, profile: null });
   }
@@ -988,11 +945,11 @@ const handleOidcCallback = async (req, res) => {
     if (!userInfoResponse.ok) {
       return res.status(401).send("OIDC sign-in could not verify the access-token profile.");
     }
-    const profile = await userInfoResponse.json();
-    if ((profile.sub || profile.id) !== idClaims.sub) {
+    const userInfo = await userInfoResponse.json();
+    if ((userInfo.sub || userInfo.id) !== idClaims.sub) {
       return res.status(401).send("OIDC sign-in subject did not match the access-token profile.");
     }
-    profile.sub = idClaims.sub;
+    const profile = sanitizeUserProfile(userInfo, idClaims.sub);
 
     const id = crypto.randomBytes(32).toString("base64url");
     const expiresIn = Number(tokenSet.expires_in * 1000 || idClaims.exp * 1000 - Date.now()) || 3600_000;
@@ -1055,26 +1012,26 @@ app.post("/ui/auth/logout", (req, res) => {
   return res.clearCookie(sessionCookieName, clearOptions).redirect(303, "/");
 });
 
-// List/create repositories - scoped to authenticated subject
+// List and create organizations for the authenticated subject.
 app.get("/api/v1/orgs", requireAuthentication, requireScope("repo:read"), (req, res) =>
-  res.json(organizations.listForSubject(req.user.sub)),
+  res.json({ orgs: organizations.listForSubject(req.user.sub) }),
 );
 app.post("/api/v1/orgs", requireAuthentication, requireScope("repo:write"), (req, res) => {
-  const result = organizations.create(req.user.sub, req.body?.slug || req.body?.name);
+  const result = organizations.create(req.user.sub, req.body?.slug);
   if (result === null) {
     return res.status(400).json({ error: "Invalid organization slug" });
   }
   if (result === false) {
     return res.status(409).json({ error: "Organization already exists" });
   }
-  return res.status(201).json(result);
+  return res.status(201).json({ org: result });
 });
 app.use("/api/v1/orgs/:org/repos", requireAuthentication, (req, res, next) => {
   if (!organizations.normalizeSlug(req.params.org)) {
     return res.status(400).json({ error: "Invalid organization slug" });
   }
   const organization = organizations.get(req.params.org);
-  if (!organization || organization.ownerHash !== getHashedSubjectDir(req)) {
+  if (!organization || organization.ownerHash !== getSubjectHash(req)) {
     return res.status(404).json({ error: "Organization not found" });
   }
   req.organizationPath = path.join(process.env.DATA_PATH, "orgs", organization.slug);
@@ -1086,22 +1043,32 @@ app.use("/api/v1/orgs/:org/repos", requireAuthentication, (req, res, next) => {
       return res.status(403).json({ error: "Forbidden: requires repo:read scope" });
     }
     const reposPath = req.organizationPath;
-    const repos = fs.existsSync(reposPath)
-      ? fs
-          .readdirSync(reposPath, { withFileTypes: true })
-          .filter((entry) => entry.isDirectory())
-          .map((entry) => ({ repo: entry.name }))
-      : [];
-    return res.json(repos);
+    let repos = [];
+    if (fs.existsSync(reposPath)) {
+      repos = fs
+        .readdirSync(reposPath, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => ({
+          repo: entry.name,
+        }));
+    }
+    return res.json({ repos });
   }
   const match = /^\/([^/]+)(\/.*)?$/.exec(req.path);
   if (!match) {
     return next();
   }
-  req.url = `/api/v1/repos/${match[1]}${match[2] || ""}`;
+  const queryIndex = req.url.indexOf("?");
+  const query = queryIndex >= 0 ? req.url.slice(queryIndex) : "";
+  req.url = `/api/v1/repos/${match[1]}${match[2] || ""}${query}`;
   return app.handle(req, res);
 });
-app.get("/api/v1/repos", requireAuthentication, requireScope("repo:read"), listOwnRepos);
+app.use("/api/v1/repos", (req, res, next) => {
+  if (!req.organizationPath) {
+    return res.status(404).json({ error: "Organization-scoped repository path required" });
+  }
+  return next();
+});
 app.post("/api/v1/repos/:repo", requireAuthentication, requireScope("repo:write"), createRepo);
 
 // Repository operations - all use :repo only, no owner in route
@@ -1263,47 +1230,8 @@ app.delete(
   },
 );
 
-app.get("/api/v1/profile/alias", requireAuthentication, (req, res) => res.json({ alias: aliases.get(req.user.sub) }));
-app.put("/api/v1/profile/alias", requireAuthentication, (req, res) => {
-  const supplied = typeof req.body === "string" ? req.body : req.body?.alias;
-  if (!aliases.validAlias(supplied)) {
-    return res.status(400).json({ error: "A valid compatibility alias is required" });
-  }
-  const existingAlias = aliases.get(req.user.sub);
-  if (existingAlias && existingAlias.toLowerCase() !== supplied.toLowerCase()) {
-    return res.status(409).json({ error: "The alias cannot be changed after it is registered" });
-  }
-  const result = aliases.assign(req.user.sub, supplied);
-  if (result === false) {
-    return res.status(409).json({ error: "Alias is already assigned" });
-  }
-  if (result === null) {
-    return res.status(409).json({ error: "Alias cannot be changed" });
-  }
-  return res.json({ alias: result.alias });
-});
-
-// Registered after direct routes: alias paths are normalized once and then
-// handled by the same scoped handlers, with no recursive alias dispatch.
-app.use("/api/v1/repos/:alias", (req, res, next) => {
-  if (req.aliasDispatch) {
-    return next();
-  }
-  return requireAuthentication(req, res, () => {
-    const owner = aliases.owner(req.params.alias);
-    if (!owner || owner !== getHashedSubjectDir(req)) {
-      return res.status(404).json({ error: "Repository not found" });
-    }
-    req.aliasRouteAuthenticated = true;
-    req.aliasDispatch = true;
-    req.url = `/api/v1/repos${req.url}`;
-    return app.handle(req, res);
-  });
-});
-
 /**
- * Generate the OpenAPI specification with updated routes (no owner parameter).
- * Rebuilds the apiSpec dynamically to reflect the new route structure.
+ * Generate the OpenAPI specification for organization-scoped API and Git routes.
  *
  * @returns {object} The OpenAPI specification object
  */
@@ -1320,7 +1248,7 @@ function makeApiSpec() {
   const notFound = { description: "Repository not found" };
   const operation = (summary, responses, body, parameters = pathParametersRepo) => {
     const protectedOperation =
-      parameters.some(({ name }) => name === "repo" || name === "alias") || summary.includes("authenticated subject");
+      parameters.some(({ name }) => name === "repo" || name === "org") || summary.includes("authenticated subject");
     const readOperation = /^(Fetch|Get file|List|Read)/.test(summary);
     const result = {
       summary,
@@ -1373,7 +1301,7 @@ function makeApiSpec() {
               401: unauthorized,
               403: { description: "Insufficient scope" },
             },
-            jsonBody({ slug: { type: "string" }, name: { type: "string" } }, []),
+            jsonBody({ slug: { type: "string", pattern: "^[a-z0-9](?:[a-z0-9._-]{0,61}[a-z0-9])?$" } }, ["slug"]),
             [],
           ),
           security: [{ bearerAuth: [] }],
@@ -1396,75 +1324,6 @@ function makeApiSpec() {
           security: [{ bearerAuth: [] }],
           "x-required-scope": "repo:read or repo:write",
         },
-      },
-      "/api/v1/repos": {
-        get: operation(
-          "List repositories owned by the authenticated subject",
-          { 200: { description: "Repository list" }, 401: unauthorized },
-          null,
-          [],
-        ),
-      },
-      "/api/v1/profile/alias": {
-        get: {
-          ...operation(
-            "Get the authenticated user's optional compatibility alias",
-            { 200: { description: "Alias or null" }, 401: unauthorized },
-            null,
-            [],
-          ),
-          security: [{ bearerAuth: [] }],
-        },
-        put: {
-          ...operation(
-            "Set an optional compatibility alias for the authenticated user",
-            {
-              200: { description: "Alias assigned" },
-              400: { description: "A valid alias is required" },
-              409: { description: "Alias is assigned or unavailable" },
-              401: unauthorized,
-            },
-            jsonBody({ alias: { type: "string" } }, ["alias"]),
-            [],
-          ),
-          security: [{ bearerAuth: [] }],
-        },
-      },
-      "/api/v1/repos/{alias}": {
-        get: operation(
-          "List repositories for the authenticated alias owner",
-          { 200: { description: "Repository list" }, 404: notFound },
-          null,
-          [
-            {
-              name: "alias",
-              in: "path",
-              required: true,
-              schema: { type: "string" },
-            },
-          ],
-        ),
-      },
-      "/api/v1/repos/{alias}/{repo}/log": {
-        get: operation(
-          "Fetch an alias-qualified repository log",
-          { 200: { description: "Commit array" }, 404: notFound },
-          null,
-          [
-            {
-              name: "alias",
-              in: "path",
-              required: true,
-              schema: { type: "string" },
-            },
-            {
-              name: "repo",
-              in: "path",
-              required: true,
-              schema: { type: "string" },
-            },
-          ],
-        ),
       },
       "/git/{repo}.git/info/refs": {
         get: {
@@ -1776,31 +1635,13 @@ function makeApiSpec() {
     }
   }
 
-  const aliasParameter = {
-    name: "alias",
+  const orgParameter = {
+    name: "org",
     in: "path",
     required: true,
     schema: { type: "string" },
   };
-  const orgParameter = { ...aliasParameter, name: "org" };
   for (const [route, methods] of Object.entries(apiSpec.paths)) {
-    const repoRoutePrefix = "/api/v1/repos/{repo}";
-    if (route === repoRoutePrefix || route.startsWith(`${repoRoutePrefix}/`)) {
-      const aliasRoute = route.replace(repoRoutePrefix, "/api/v1/repos/{alias}/{repo}");
-      apiSpec.paths[aliasRoute] = Object.fromEntries(
-        Object.entries(methods).map(([method, definition]) => [
-          method,
-          {
-            ...definition,
-            parameters: [aliasParameter, ...(definition.parameters || [])],
-            responses: {
-              404: notFound,
-              ...definition.responses,
-            },
-          },
-        ]),
-      );
-    }
     const gitRoutePrefix = "/git/{repo}.git";
     if (route.startsWith(`${gitRoutePrefix}/`)) {
       const orgRoute = route.replace(gitRoutePrefix, "/git/{org}/{repo}.git");
@@ -1813,6 +1654,12 @@ function makeApiSpec() {
           },
         ]),
       );
+    }
+  }
+
+  for (const route of Object.keys(apiSpec.paths)) {
+    if (route.startsWith("/api/v1/repos") || route.startsWith("/git/{repo}.git/")) {
+      delete apiSpec.paths[route];
     }
   }
 

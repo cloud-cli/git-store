@@ -4,9 +4,9 @@
 
 Git Store is a minimal HTTP API for managing multiple Git repositories on disk.
 Repositories are stored under the required `DATA_PATH` environment variable (the
-Docker image defaults it to `/home/app/data`). Each repository is isolated under a hashed subject directory
-derived from the OIDC `sub` claim, ensuring that user data is never exposed
-or stored in readable paths.
+Docker image defaults it to `/home/app/data`). Organizations are recorded in
+`DATA_PATH/organizations.json`; repositories live under `DATA_PATH/orgs/<slug>/<repo>`.
+Ownership metadata is the SHA-256 hash of the OIDC `sub`.
 
 ## Quick start (Docker)
 
@@ -59,36 +59,43 @@ curl http://localhost:3000/api/v1/health
 # Get the OpenAPI JSON description
 curl http://localhost:3000/api
 
-# List repositories (requires authentication)
-curl -H "Authorization: Bearer <access-token>" http://localhost:3000/api/v1/repos
+# Create an organization (requires authentication)
+curl -X POST http://localhost:3000/api/v1/orgs \
+  -H "Authorization: Bearer <access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"slug":"my-org"}'
+
+# List organizations and repositories
+curl -H "Authorization: Bearer <access-token>" http://localhost:3000/api/v1/orgs
+curl -H "Authorization: Bearer <access-token>" http://localhost:3000/api/v1/orgs/my-org/repos
 
 # Create a new repository (requires authentication)
-curl -X POST http://localhost:3000/api/v1/repos/myproject \
+curl -X POST http://localhost:3000/api/v1/orgs/my-org/repos/myproject \
   -H "Authorization: Bearer <access-token>"
 
 # View the commit log (requires authentication)
-curl -H "Authorization: Bearer <access-token>" http://localhost:3000/api/v1/repos/myproject/log
+curl -H "Authorization: Bearer <access-token>" http://localhost:3000/api/v1/orgs/my-org/repos/myproject/log
 
 # Stage files (protected – requires a valid OIDC access token)
-curl -X POST http://localhost:3000/api/v1/repos/myproject/stage \
+curl -X POST http://localhost:3000/api/v1/orgs/my-org/repos/myproject/stage \
   -H "Authorization: Bearer <access-token>" \
   -H "Content-Type: application/json" \
   -d '{"files":["README.md"]}'
 
 # Commit staged changes (protected)
-curl -X POST http://localhost:3000/api/v1/repos/myproject/commit \
+curl -X POST http://localhost:3000/api/v1/orgs/my-org/repos/myproject/commit \
   -H "Authorization: Bearer <access-token>" \
   -H "Content-Type: application/json" \
   -d '{"message":"initial commit"}'
 
 # Add a tag (protected)
-curl -X POST http://localhost:3000/api/v1/repos/myproject/tags \
+curl -X POST http://localhost:3000/api/v1/orgs/my-org/repos/myproject/tags \
   -H "Authorization: Bearer <access-token>" \
   -H "Content-Type: application/json" \
   -d '{"name":"v1.0"}'
 
 # Create a branch (protected)
-curl -X POST http://localhost:3000/api/v1/repos/myproject/branches \
+curl -X POST http://localhost:3000/api/v1/orgs/my-org/repos/myproject/branches \
   -H "Authorization: Bearer <access-token>" \
   -H "Content-Type: application/json" \
   -d '{"name":"dev"}'
@@ -127,14 +134,14 @@ The API's file upload endpoint accepts JSON:
 ```
 
 The browser encodes drag-and-drop or selected-file bytes as base64 and submits JSON to
-`POST /api/v1/repos/{repo}/files`. The endpoint returns **201 Created** on success, **400 Bad
+`POST /api/v1/orgs/{org}/repos/{repo}/files`. The endpoint returns **201 Created** on success, **400 Bad
 Request** for invalid paths (including traversal), **403** for insufficient scope, or
 **404** if the repository is not found. Empty content creates an empty file.
 
 ### Empty repository onboarding
 
-When creating a new repository for a subject via `POST /api/v1/repos/{repo}`, the initial state
-is empty. Use either:
+When creating a new repository in an organization via
+`POST /api/v1/orgs/{org}/repos/{repo}`, the initial state is empty. Use either:
 
 - Select a file in the empty-repository welcome screen; the UI uploads, stages, and
   commits the first file.
@@ -143,13 +150,11 @@ is empty. Use either:
 
 The system will not fail on uploading empty content—the file is created with no payload.
 
-## Storage migration
+## Storage
 
-New repositories are stored below `DATA_PATH/<sha256(sub)>/<repo>`. Previous
-`DATA_PATH/<nickname>/<repo>` directories are not automatically migrated because a
-nickname cannot safely establish ownership and may have changed or been reassigned.
-Back up the existing data before upgrading and migrate repositories only after
-independently verifying each repository's OIDC subject owner.
+Organization metadata is stored in `DATA_PATH/organizations.json`; repository data is
+stored in `DATA_PATH/orgs/<slug>/<repo>`. Ownership metadata is a SHA-256 hash of the
+OIDC `sub`. This MVP has no migration; use an empty data volume.
 
 ## Web UI
 
@@ -173,5 +178,4 @@ topbar/ui/session, repository navigation, selected-repository viewer, and branch
 panel. Each island declares initial JSON using `<script state>` and hydrates its own
 state in setup with refs, computed values, lifecycle hooks, and `on-*` bindings. The
 URL query string shares navigation state across islands and preserves it on refresh.
-Only the repository name (`repo`) is used in URL paths; owner paths have been
-removed in favor of subject-hashed isolation.
+The UI selects an organization and repository; repository API and Git paths always include both slugs.

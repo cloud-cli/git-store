@@ -4,6 +4,7 @@ All URLs are relative to the server base URL (`http://localhost:3000` by default
 
 ## Path parameters
 
+- `{org}` – string, the organization slug (e.g. `my-org`).
 - `{repo}` – string, the repository name (e.g. `myproject`).
 - `{name}` – string, the tag or branch name.
 
@@ -13,26 +14,23 @@ API clients send an active OIDC bearer token. The server validates it through th
 configured issuer's introspection endpoint and derives ownership only from its `sub`
 claim. Tokens need scopes as follows:
 
-- Reads (`GET /api/v1/repos` and repository `GET` operations): `repo:read` or `repo:write`.
-- Repository creation and all mutations (`POST`, `DELETE`): `repo:write`.
+- Reads (`GET /api/v1/orgs/{org}/repos` and repository `GET` operations): `repo:read` or `repo:write`.
+- Organization creation, repository creation, and all mutations (`POST`, `DELETE`): `repo:write`.
 - `repo:write` includes read access. `repo:read` never grants write access.
 - A valid token without the required scope returns **403 Forbidden**. Missing or
   invalid authentication returns **401 Unauthorized**.
 
 ## Organization/repository namespace
 
-OIDC usernames are optional profile data and are not used to name organizations or
-repositories. Sign-in and authorization continue to identify the account by its
-validated OIDC `sub`. Organizations have independently chosen slugs, and ownership is
-checked against the authenticated subject.
-
-Use `/api/v1/orgs/{org}/repos/{repo}/...` for organization repositories and
-`/git/{org}/{repo}.git` for Git Smart HTTP. Legacy subject-owned repository routes and
-alias-qualified paths remain available for compatibility; they are not required for
-the organization/repository workflow. The legacy `/api/v1/profile/alias` endpoints
-manage optional compatibility aliases, explicitly chosen by the caller and not derived
-from or checked against OIDC usernames. Sign-in and organization/repository paths do not
-require an alias.
+The authenticated account is identified by the validated OIDC `sub` claim. Username
+claims do not participate in authentication or naming and are omitted from the UI profile.
+Organizations use globally unique, case-insensitive lowercase slugs. Each organization is
+owned by the subject that created it; ownership metadata is the SHA-256 hash of that
+subject. All repository API operations use `/api/v1/orgs/{org}/repos/{repo}/...`, and Git
+Smart HTTP uses `/git/{org}/{repo}.git`. Subject-scoped `/api/v1/repos` routes, alias
+endpoints, and short Git paths are not supported.
+Organization slugs cannot be renamed, and repositories cannot be moved between
+organizations in this MVP.
 
 The browser UI signs in through `/ui/auth/login` using authorization code + PKCE. The callback
 validates state, ID-token claims, and the token's userinfo subject before issuing a signed
@@ -41,7 +39,7 @@ from `OIDC_BROWSER_SCOPES`; cookie-authenticated repository writes require same-
 requests. Profile nicknames and display names never determine repository ownership. Other
 applications can use scoped opaque bearer tokens validated through OIDC introspection.
 
-Git Smart HTTP uses HTTP Basic authentication at `/git/{repo}.git`. The username is
+Git Smart HTTP uses HTTP Basic authentication at `/git/{org}/{repo}.git`. The username is
 ignored; the password must be an active OIDC access token with a non-empty subject.
 Git fetch (`git-upload-pack`) requires `repo:read` or `repo:write`; Git push
 (`git-receive-pack`) requires `repo:write`. Git transport does not accept browser
@@ -135,21 +133,57 @@ requests through Git's `http-backend`; organization ownership is checked against
 token's validated OIDC `sub`. Git Smart HTTP is also listed in the OpenAPI document at
 `/api`.
 
-### GET /api/v1/repos
+### GET /api/v1/orgs
 
-List only repositories belonging to the authenticated subject. The response contains
-repository names and does not expose an owner or nickname. If no repositories exist,
-returns an empty array `[ ]`.
+List organizations owned by the authenticated subject.
 
 ```http
-GET /api/v1/repos
+GET /api/v1/orgs
 ```
 
-**Response (200)** – JSON array of objects containing only the repository name, for
-example `[{ "repo": "my-repo" }]`. Returns `[]` when the authenticated subject has
-no repositories. Guest identity returns `401`.
+**Response (200)**
 
-### POST /api/v1/repos/{repo}
+```json
+{ "orgs": [{ "slug": "my-org" }] }
+```
+
+### POST /api/v1/orgs
+
+Create an organization. Slugs are normalized to lowercase and must be globally unique.
+
+```http
+POST /api/v1/orgs
+Content-Type: application/json
+
+{ "slug": "my-org" }
+```
+
+**Response (201)**
+
+```json
+{ "org": { "slug": "my-org" } }
+```
+
+Invalid slugs return **400**; an existing slug returns **409**.
+
+### GET /api/v1/orgs/{org}/repos
+
+List repositories in an organization owned by the authenticated subject.
+
+```http
+GET /api/v1/orgs/my-org/repos
+```
+
+**Response (200)**
+
+```json
+{ "repos": [{ "repo": "my-repo" }] }
+```
+
+An organization with no repositories returns `{ "repos": [] }`. An organization not
+owned by the authenticated subject returns **404**.
+
+### POST /api/v1/orgs/{org}/repos/{repo}
 
 Create or initialize a repository for the authenticated subject. The endpoint returns
 `201 Created` whether the Git directory was newly initialized or was already present.
@@ -162,7 +196,7 @@ If the repository name is invalid, returns `400 Bad Request`. A token requires
 `403`.
 
 ```http
-POST /api/v1/repos/{repo}
+POST /api/v1/orgs/{org}/repos/{repo}
 ```
 
 **Response (201)** – Repository is ready.
@@ -172,24 +206,24 @@ POST /api/v1/repos/{repo}
 { "message": "Repository {repo} is ready", "repo": "{repo}" }
 ```
 
-### GET /api/v1/repos/{repo}/log
+### GET /api/v1/orgs/{org}/repos/{repo}/log
 
 Fetch the repository log.
 
 ```http
-GET /api/v1/repos/{repo}/log
+GET /api/v1/orgs/{org}/repos/{repo}/log
 ```
 
 **Response (200)** – JSON array of commit objects (may be empty).
 
 **Response (404)** – repository not found.
 
-### GET /api/v1/repos/{repo}/tree
+### GET /api/v1/orgs/{org}/repos/{repo}/tree
 
 List repository files/tree.
 
 ```http
-GET /api/v1/repos/{repo}/tree
+GET /api/v1/orgs/{org}/repos/{repo}/tree
 ```
 
 **Response (200)** – JSON array of file/directory entries.
@@ -200,12 +234,12 @@ GET /api/v1/repos/{repo}/tree
 
 - `path` – optional relative path within the repository to list entries from.
 
-### GET /api/v1/repos/{repo}/file
+### GET /api/v1/orgs/{org}/repos/{repo}/file
 
 Read a repository file.
 
 ```http
-GET /api/v1/repos/{repo}/file
+GET /api/v1/orgs/{org}/repos/{repo}/file
 ```
 
 **Query parameters**
@@ -218,13 +252,13 @@ GET /api/v1/repos/{repo}/file
 
 **Response (404)** – file not found.
 
-### POST /api/v1/repos/{repo}/files
+### POST /api/v1/orgs/{org}/repos/{repo}/files
 
 Upload one file without staging it. The browser uses the JSON API and encodes the file
 bytes as base64. Send an empty string as `content` to create an empty file.
 
 ```http
-POST /api/v1/repos/{repo}/files
+POST /api/v1/orgs/{org}/repos/{repo}/files
 Content-Type: application/json
 
 {"path":"README.md","content":"IyBIZWxsbyBXb3JsZAo="}
@@ -240,12 +274,12 @@ Content-Type: application/json
 
 **Response (404)** – repository not found.
 
-### POST /api/v1/repos/{repo}/stage
+### POST /api/v1/orgs/{org}/repos/{repo}/stage
 
 Stage one or more files.
 
 ```http
-POST /api/v1/repos/{repo}/stage
+POST /api/v1/orgs/{org}/repos/{repo}/stage
 ```
 
 **Request Body:**
@@ -262,12 +296,12 @@ POST /api/v1/repos/{repo}/stage
 
 **Response (500)** – Git error.
 
-### POST /api/v1/repos/{repo}/unstage
+### POST /api/v1/orgs/{org}/repos/{repo}/unstage
 
 Unstage (reset) one or more files.
 
 ```http
-POST /api/v1/repos/{repo}/unstage
+POST /api/v1/orgs/{org}/repos/{repo}/unstage
 ```
 
 **Request Body:**
@@ -284,12 +318,12 @@ POST /api/v1/repos/{repo}/unstage
 
 **Response (500)** – Git error.
 
-### POST /api/v1/repos/{repo}/commit
+### POST /api/v1/orgs/{org}/repos/{repo}/commit
 
 Commit staged changes with an optional message (default `"autocommit"`).
 
 ```http
-POST /api/v1/repos/{repo}/commit
+POST /api/v1/orgs/{org}/repos/{repo}/commit
 ```
 
 **Request Body (optional):**
@@ -306,14 +340,14 @@ POST /api/v1/repos/{repo}/commit
 
 **Response (500)** – Git error.
 
-### POST /api/v1/repos/{repo}/tags
+### POST /api/v1/orgs/{org}/repos/{repo}/tags
 
 Add a lightweight Git tag referencing the current HEAD at commit `HEAD`. Tag endpoints
 are the existing release/version marker model; the API does not define a separate release
 resource. Git returns an error if no commit exists yet.
 
 ```http
-POST /api/v1/repos/{repo}/tags
+POST /api/v1/orgs/{org}/repos/{repo}/tags
 ```
 
 **Request Body:**
@@ -328,12 +362,12 @@ POST /api/v1/repos/{repo}/tags
 
 **Response (404)** – repository not found.
 
-### DELETE /api/v1/repos/{repo}/tags/{name}
+### DELETE /api/v1/orgs/{org}/repos/{repo}/tags/{name}
 
 Delete a tag.
 
 ```http
-DELETE /api/v1/repos/{repo}/tags/{name}
+DELETE /api/v1/orgs/{org}/repos/{repo}/tags/{name}
 ```
 
 **Response (200)** – `{ "message": "Tag {name} removed" }`.
@@ -342,12 +376,12 @@ DELETE /api/v1/repos/{repo}/tags/{name}
 
 **Response (404)** – repository not found.
 
-### POST /api/v1/repos/{repo}/branches
+### POST /api/v1/orgs/{org}/repos/{repo}/branches
 
 Create a new branch.
 
 ```http
-POST /api/v1/repos/{repo}/branches
+POST /api/v1/orgs/{org}/repos/{repo}/branches
 ```
 
 **Request Body:**
@@ -364,13 +398,13 @@ POST /api/v1/repos/{repo}/branches
 
 **Response (404)** – repository not found.
 
-### DELETE /api/v1/repos/{repo}/branches/{name}
+### DELETE /api/v1/orgs/{org}/repos/{repo}/branches/{name}
 
 Delete a branch. Git returns an error when the branch does not exist or cannot be deleted.
 Branch/tag empty states in the UI show create actions that open HTML popover forms.
 
 ```http
-DELETE /api/v1/repos/{repo}/branches/{name}
+DELETE /api/v1/orgs/{org}/repos/{repo}/branches/{name}
 ```
 
 **Response (200)** – `{ "message": "Branch {name} removed" }`.

@@ -2,23 +2,23 @@
 
 ## Completed
 
-- [x] Store repositories under a hashed stable OIDC `sub` directory and short repo name.
+- [x] Store repositories under organization slugs and record ownership using a SHA-256 hash of OIDC `sub`.
 - [x] Provide repository creation, log, stage, unstage, commit, tag, and branch routes.
 - [x] Serve an OpenAPI JSON document from `GET /api` covering all API and Git routes.
 - [x] Require authenticated OIDC identity for repository listing, creation, reads, and mutations.
 - [x] Use `/home/app` as the Docker application directory.
 - [x] Add Node-only integration checks for subject isolation and unauthorized behavior.
 - [x] Add Diátaxis tutorial, how-to/getting-started, and reference documentation.
-- [x] Migrate repository storage to hashed subject directories (`sub` hashed).
-- [x] Keep subject-scoped short repository routes and add immutable alias-qualified API/Git paths.
+- [x] Store organizations in `DATA_PATH/organizations.json` and repositories under `DATA_PATH/orgs/<slug>/<repo>`.
+- [x] Scope repository API and Git routes under organization/repository slugs.
 - [x] Add repository name validation.
 - [x] Implement identity isolation across two injected subjects.
-- [x] Prevent spoofed alias-qualified routes from crossing OIDC subject ownership.
+- [x] Enforce organization ownership against the authenticated OIDC subject.
 - [x] Path traversal rejected.
 - [x] Require `repo:read` for reads and `repo:write` for repository creation and mutations; write scope includes read access.
 - [x] Verify read-only and unscoped API tokens cannot create or mutate repositories.
 - [x] Add native anchored popovers, empty branch/tag states, empty-repository onboarding, file input, and existing-repo drag/drop.
-- [x] Keep repository authority keyed by OIDC subject; expose a one-time immutable URL alias for integrators.
+- [x] Keep organization ownership metadata keyed to the authenticated OIDC subject.
 - [x] Default the UI theme to the system preference and improve dark-mode text contrast.
 - [x] Preserve repo query state when redirecting `/` to `/ui/`.
 - [x] Start browser login through OIDC authorization code + PKCE, validate state and ID-token claims, and keep access tokens server-side.

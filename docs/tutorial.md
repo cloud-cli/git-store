@@ -9,10 +9,27 @@ The browser UI uses a same-origin session cookie only after the configured issue
 `/profile` endpoint confirms a non-empty `sub`. API clients without the required scope
 receive 403; unauthenticated requests receive 401.
 
-## 1. Create a repository (empty onboarding)
+## 1. Create an organization
+
+Organization slugs are globally unique, lowercase, and case-insensitive on input.
 
 ```bash
-curl -X POST http://localhost:3000/api/v1/repos/myproject \
+curl -X POST http://localhost:3000/api/v1/orgs \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"slug":"my-org"}'
+```
+
+Response (201):
+
+```json
+{ "org": { "slug": "my-org" } }
+```
+
+## 2. Create a repository (empty onboarding)
+
+```bash
+curl -X POST http://localhost:3000/api/v1/orgs/my-org/repos/myproject \
   -H "Authorization: Bearer <TOKEN>"
 ```
 
@@ -26,10 +43,10 @@ The new repository starts empty. The UI presents a welcome screen with a file in
 uploading the first file stages and commits it. API clients can add content with the JSON
 upload endpoint and then stage and commit it.
 
-## 2. Verify the repo is empty
+## 3. Verify the repo is empty
 
 ```bash
-curl -H "Authorization: Bearer <TOKEN>" http://localhost:3000/api/v1/repos/myproject/log
+curl -H "Authorization: Bearer <TOKEN>" http://localhost:3000/api/v1/orgs/my-org/repos/myproject/log
 ```
 
 Response (empty array for new repository):
@@ -44,7 +61,7 @@ The API accepts base64-encoded bytes in a JSON body:
 
 ```bash
 # Encode a file and send the required JSON body
-curl -X POST http://localhost:3000/api/v1/repos/myproject/files \
+curl -X POST http://localhost:3000/api/v1/orgs/my-org/repos/myproject/files \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d "{\"path\":\"README.md\",\"content\":\"$(base64 -w0 myfile.txt)\"}"
@@ -53,12 +70,12 @@ curl -X POST http://localhost:3000/api/v1/repos/myproject/files \
 The endpoint writes the file unstaged and returns **201 Created**. Use an empty
 `"content"` string to create an empty file.
 
-## 3. Add a file and stage it
+## 4. Add a file and stage it
 
 Stage the existing README.md (or any file you added earlier):
 
 ```bash
-curl -X POST http://localhost:3000/api/v1/repos/myproject/stage \
+curl -X POST http://localhost:3000/api/v1/orgs/my-org/repos/myproject/stage \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"files":["README.md"]}'
@@ -79,10 +96,10 @@ welcome screen's file input instead uploads and commits the selected file.
 For existing repositories, dropping files on the file list or selecting files from the
 upload button writes them unstaged. Use the commit form to stage and commit changes.
 
-## 4. Autocommit the staged changes
+## 5. Autocommit the staged changes
 
 ```bash
-curl -X POST http://localhost:3000/api/v1/repos/myproject/commit \
+curl -X POST http://localhost:3000/api/v1/orgs/my-org/repos/myproject/commit \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"message":"initial commit"}'
@@ -94,10 +111,10 @@ Response:
 { "message": "Changes committed successfully", "commit": "initial commit" }
 ```
 
-## 5. Add a tag
+## 6. Add a tag
 
 ```bash
-curl -X POST http://localhost:3000/api/v1/repos/myproject/tags \
+curl -X POST http://localhost:3000/api/v1/orgs/my-org/repos/myproject/tags \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"name":"v1.0"}'
@@ -109,10 +126,10 @@ Response:
 { "message": "Tag v1.0 added" }
 ```
 
-## 6. Create a branch (after an initial commit)
+## 7. Create a branch (after an initial commit)
 
 ```bash
-curl -X POST http://localhost:3000/api/v1/repos/myproject/branches \
+curl -X POST http://localhost:3000/api/v1/orgs/my-org/repos/myproject/branches \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"name":"dev"}'
@@ -127,10 +144,10 @@ Response (200):
 An empty repository has no branches or tags until it has a commit. The UI still displays
 “No branches. Create one” and “No tags. Create one” actions, with a popover form for each.
 
-## 7. Delete the branch (cleanup)
+## 8. Delete the branch (cleanup)
 
 ```bash
-curl -X DELETE http://localhost:3000/api/v1/repos/myproject/branches/dev \
+curl -X DELETE http://localhost:3000/api/v1/orgs/my-org/repos/myproject/branches/dev \
   -H "Authorization: Bearer <TOKEN>"
 ```
 
@@ -140,10 +157,10 @@ Response:
 { "message": "Branch dev removed" }
 ```
 
-## 8. Remove the tag (optional)
+## 9. Remove the tag (optional)
 
 ```bash
-curl -X DELETE http://localhost:3000/api/v1/repos/myproject/tags/v1.0 \
+curl -X DELETE http://localhost:3000/api/v1/orgs/my-org/repos/myproject/tags/v1.0 \
   -H "Authorization: Bearer <TOKEN>"
 ```
 
@@ -153,22 +170,23 @@ Response:
 { "message": "Tag v1.0 removed" }
 ```
 
-## 9. (Optional) View the full log after commits
+## 10. (Optional) View the full log after commits
 
 ```bash
-curl -H "Authorization: Bearer <TOKEN>" http://localhost:3000/api/v1/repos/myproject/log
+curl -H "Authorization: Bearer <TOKEN>" http://localhost:3000/api/v1/orgs/my-org/repos/myproject/log
 ```
 
 You should now see at least one commit object containing `oid`, `message`, `author`, `date`, etc.
 
 ## Summary of flow
 
-1. `POST /api/v1/repos/{repo}` – create a repository for the authenticated subject (empty by default)
-2. **(Optional) JSON upload** to add initial content, or use the browser's empty-repository file input
-3. `POST /api/v1/repos/{repo}/stage` – tell Git to stage selected files
-4. `POST /api/v1/repos/{repo}/commit` – create a commit with a message
-5. `POST /api/v1/repos/{repo}/tags` / `DELETE /api/v1/repos/{repo}/tags/{name}` – version marking (release/tag model)
-6. `POST /api/v1/repos/{repo}/branches` / `DELETE /api/v1/repos/{repo}/branches/{name}` – line‑of‑development isolation
+1. `POST /api/v1/orgs` – create an organization owned by the authenticated subject
+2. `POST /api/v1/orgs/{org}/repos/{repo}` – create a repository in that organization (empty by default)
+3. **(Optional) JSON upload** to add initial content, or use the browser's empty-repository file input
+4. `POST /api/v1/orgs/{org}/repos/{repo}/stage` – tell Git to stage selected files
+5. `POST /api/v1/orgs/{org}/repos/{repo}/commit` – create a commit with a message
+6. `POST /api/v1/orgs/{org}/repos/{repo}/tags` / `DELETE /api/v1/orgs/{org}/repos/{repo}/tags/{name}` – version marking (release/tag model)
+7. `POST /api/v1/orgs/{org}/repos/{repo}/branches` / `DELETE /api/v1/orgs/{org}/repos/{repo}/branches/{name}` – line‑of‑development isolation
 
 **Form and UI behavior notes:**
 
