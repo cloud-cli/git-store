@@ -762,7 +762,7 @@ async function run() {
     };
     const login = await request(port, "GET", "/ui/auth/login?returnTo=%2F%3Frepo%3Dresume");
     assert.strictEqual(login.status, 302);
-    assert.ok(authorizationOptions.scope.includes("repo:read repo:write"));
+    assert.strictEqual(authorizationOptions.scope, "openid profile email");
     const authorizationUrl = new URL(login.headers.location);
     const loginCookies = login.headers["set-cookie"].map((cookie) => cookie.split(";")[0]).join("; ");
     const callback = await request(
@@ -782,6 +782,19 @@ async function run() {
       !sessionCookie.includes("browser-session-token"),
       "the access token must not be stored in the browser cookie",
     );
+    const cancelledLogin = await request(port, "GET", "/ui/auth/login");
+    const cancelledAuthorization = new URL(cancelledLogin.headers.location);
+    const cancelledCookies = cancelledLogin.headers["set-cookie"].map((cookie) => cookie.split(";")[0]).join("; ");
+    const cancelledCallback = await request(
+      port,
+      "GET",
+      `/ui/auth/callback?error=invalid_scope&state=${encodeURIComponent(cancelledAuthorization.searchParams.get("state"))}`,
+      undefined,
+      undefined,
+      { Cookie: cancelledCookies },
+    );
+    assert.strictEqual(cancelledCallback.status, 401);
+    assert.ok(cancelledCallback.body.includes("could not be completed"));
     oidcUserInfo = { id: "browser-subject", name: "Signed In" };
     const missingUsernameLogin = await request(port, "GET", "/ui/auth/login");
     const missingUsernameAuthorization = new URL(missingUsernameLogin.headers.location);

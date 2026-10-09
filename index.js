@@ -950,7 +950,7 @@ app.get("/ui/auth/login", (req, res) => {
     const authorizationUrl = client.authorizationUrl({
       response_type: "code",
       redirect_uri: redirectUri,
-      scope: "openid profile email repo:read repo:write",
+      scope: "openid profile email",
       state,
       code_challenge: codeChallenge,
       code_challenge_method: "S256",
@@ -981,7 +981,13 @@ const handleOidcCallback = async (req, res) => {
   const codeVerifier = cookies.git_oidc_verifier;
   const returnTo = safeReturnPath(cookies.git_oidc_return);
   clearLoginCookies(res, options);
-  if (!state || !codeVerifier || req.query.state !== state || typeof req.query.code !== "string") {
+  if (!state || !codeVerifier || req.query.state !== state) {
+    return res.status(400).send("OIDC sign-in response was invalid. Please try again.");
+  }
+  if (typeof req.query.error === "string") {
+    return res.status(401).send("OIDC sign-in was cancelled or could not be completed. Please try again.");
+  }
+  if (typeof req.query.code !== "string") {
     return res.status(400).send("OIDC sign-in response was invalid. Please try again.");
   }
 
