@@ -241,23 +241,6 @@ function getTokenScopes(claims) {
   return new Set();
 }
 
-function getOidcUsername(claims) {
-  for (const claim of [claims?.preferred_username, claims?.username]) {
-    if (typeof claim === "string" && claim.length > 0) {
-      return claim;
-    }
-  }
-  return null;
-}
-
-function getOidcProfileUrl() {
-  try {
-    return new URL("/me", process.env.OIDC_ISSUER).href;
-  } catch {
-    return null;
-  }
-}
-
 function requireScope(scope) {
   return (req, res, next) => {
     const scopes = getTokenScopes(req.user);
@@ -1283,21 +1266,14 @@ app.delete(
 app.get("/api/v1/profile/alias", requireAuthentication, (req, res) => res.json({ alias: aliases.get(req.user.sub) }));
 app.put("/api/v1/profile/alias", requireAuthentication, (req, res) => {
   const supplied = typeof req.body === "string" ? req.body : req.body?.alias;
-  const username = getOidcUsername(req.user);
-  if (!username || !aliases.validAlias(username)) {
-    return res.status(428).json({
-      error: "Set a valid username in your OIDC profile before registering a Git Store URL.",
-      profileUrl: getOidcProfileUrl(),
-    });
-  }
-  if (supplied !== undefined && supplied !== username) {
-    return res.status(400).json({ error: "The alias must exactly match your immutable OIDC username" });
+  if (!aliases.validAlias(supplied)) {
+    return res.status(400).json({ error: "A valid compatibility alias is required" });
   }
   const existingAlias = aliases.get(req.user.sub);
-  if (existingAlias && existingAlias !== username) {
-    return res.status(409).json({ error: "The OIDC username differs from the immutable registered username" });
+  if (existingAlias && existingAlias.toLowerCase() !== supplied.toLowerCase()) {
+    return res.status(409).json({ error: "The alias cannot be changed after it is registered" });
   }
-  const result = aliases.assign(req.user.sub, username);
+  const result = aliases.assign(req.user.sub, supplied);
   if (result === false) {
     return res.status(409).json({ error: "Alias is already assigned" });
   }
@@ -1432,7 +1408,7 @@ function makeApiSpec() {
       "/api/v1/profile/alias": {
         get: {
           ...operation(
-            "Get the authenticated user's immutable alias",
+            "Get the authenticated user's optional compatibility alias",
             { 200: { description: "Alias or null" }, 401: unauthorized },
             null,
             [],
@@ -1441,15 +1417,14 @@ function makeApiSpec() {
         },
         put: {
           ...operation(
-            "Set the authenticated user's immutable alias",
+            "Set an optional compatibility alias for the authenticated user",
             {
               200: { description: "Alias assigned" },
-              400: { description: "Submitted alias differs from the OIDC username" },
+              400: { description: "A valid alias is required" },
               409: { description: "Alias is assigned or unavailable" },
-              428: { description: "A valid OIDC username must be set first" },
               401: unauthorized,
             },
-            jsonBody({ alias: { type: "string" } }, []),
+            jsonBody({ alias: { type: "string" } }, ["alias"]),
             [],
           ),
           security: [{ bearerAuth: [] }],

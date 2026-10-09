@@ -30,7 +30,9 @@ Use `/api/v1/orgs/{org}/repos/{repo}/...` for organization repositories and
 `/git/{org}/{repo}.git` for Git Smart HTTP. Legacy subject-owned repository routes and
 alias-qualified paths remain available for compatibility; they are not required for
 the organization/repository workflow. The legacy `/api/v1/profile/alias` endpoints
-only manage compatibility aliases and are not used by sign-in or organization paths.
+manage optional compatibility aliases, explicitly chosen by the caller and not derived
+from or checked against OIDC usernames. Sign-in and organization/repository paths do not
+require an alias.
 
 The browser UI signs in through `/ui/auth/login` using authorization code + PKCE. The callback
 validates state, ID-token claims, and the token's userinfo subject before issuing a signed

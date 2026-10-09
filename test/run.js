@@ -513,7 +513,7 @@ async function run() {
     const rootRedirect = await request(port, "GET", "/?repo=shared-repo&file=private.txt");
     assert.strictEqual(rootRedirect.status, 302);
     assert.strictEqual(rootRedirect.headers.location, "/ui/?repo=shared-repo&file=private.txt");
-    const aliasDefault = await request(port, "PUT", "/api/v1/profile/alias", {}, "token-a");
+    const aliasDefault = await request(port, "PUT", "/api/v1/profile/alias", { alias: "same-nickname" }, "token-a");
     assert.strictEqual(aliasDefault.status, 200);
     assert.deepStrictEqual(JSON.parse(aliasDefault.body), {
       alias: "same-nickname",
@@ -524,12 +524,12 @@ async function run() {
     );
     assert.strictEqual(
       (await request(port, "PUT", "/api/v1/profile/alias", { alias: "SAME-NICKNAME" }, "token-a")).status,
-      400,
-      "username spelling must exactly match the immutable provider value",
+      200,
+      "aliases are case-insensitive and independent of the provider username",
     );
     assert.strictEqual(
       (await request(port, "PUT", "/api/v1/profile/alias", { alias: "renamed" }, "token-a")).status,
-      400,
+      409,
     );
     const originalTokenClaims = tokenSubjects.get("token-a");
     tokenSubjects.set("token-a", {
@@ -539,27 +539,35 @@ async function run() {
     assert.deepStrictEqual(
       JSON.parse((await request(port, "GET", "/api/v1/profile/alias", undefined, "token-a")).body),
       { alias: "same-nickname" },
-      "later OIDC username changes do not rename the immutable alias",
+      "provider username changes do not rename the independent alias",
     );
     tokenSubjects.set("token-a", originalTokenClaims);
     assert.strictEqual(
       (await request(port, "PUT", "/api/v1/profile/alias", { alias: "same-nickname" }, "token-b")).status,
       409,
     );
-    const missingUsernameAlias = await request(port, "PUT", "/api/v1/profile/alias", {}, "unscoped");
-    assert.strictEqual(missingUsernameAlias.status, 428);
-    assert.deepStrictEqual(JSON.parse(missingUsernameAlias.body), {
-      error: "Set a valid username in your OIDC profile before registering a Git Store URL.",
-      profileUrl: null,
-    });
+    const missingAlias = await request(port, "PUT", "/api/v1/profile/alias", {}, "unscoped");
+    assert.strictEqual(
+      missingAlias.status,
+      400,
+      "only the compatibility alias itself is required by this legacy endpoint",
+    );
+    const usernameFreeAlias = await request(
+      port,
+      "PUT",
+      "/api/v1/profile/alias",
+      { alias: "username-free" },
+      "unscoped",
+    );
+    assert.strictEqual(usernameFreeAlias.status, 200, "a token without a username can create a compatibility alias");
     assert.strictEqual(
       (await request(port, "PUT", "/api/v1/profile/alias", { alias: "../bad" }, "token-b")).status,
       400,
     );
     assert.strictEqual(
       (await request(port, "PUT", "/api/v1/profile/alias", { alias: "another-name" }, "token-b")).status,
-      400,
-      "users cannot create local aliases that differ from their immutable OIDC username",
+      200,
+      "custom compatibility aliases do not need to match an OIDC username",
     );
     const aliasesModulePath = require.resolve("../aliases");
     delete require.cache[aliasesModulePath];
