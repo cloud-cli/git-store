@@ -56,8 +56,8 @@ npm start
 # Health check (no authentication required)
 curl http://localhost:3000/api/v1/health
 
-# List OpenAPI description
-curl http://localhost:3000/api/v1/openapi.json
+# Get the OpenAPI JSON description
+curl http://localhost:3000/api
 
 # List repositories (requires authentication)
 curl -H "Authorization: Bearer <access-token>" http://localhost:3000/api/v1/repos

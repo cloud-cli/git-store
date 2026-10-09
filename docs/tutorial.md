@@ -177,4 +177,4 @@ You should now see at least one commit object containing `oid`, `message`, `auth
 - **Drag-drop/file-input upload**: sends base64-encoded file bytes as JSON; existing-repository uploads remain unstaged.
 - **Empty repo onboarding**: the first UI file upload is staged and committed automatically.
 
-All repository endpoints require authentication. `/api/v1/health`, `/api/v1/openapi.json`, `/ui/config`, and `/ui/session` are public. Tags/branches empty states use HTML popovers only—no additional routes required.
+All repository endpoints require authentication. `/api`, `/api/v1/health`, `/ui/config`, and `/ui/session` are public. Tags/branches empty states use HTML popovers only—no additional routes required.

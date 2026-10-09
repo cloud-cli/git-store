@@ -380,7 +380,7 @@
                 });
                 if (!response.ok) throw new Error("Organization creation failed.");
                 const result = await response.json();
-                window.location.assign(`/?org=${encodeURIComponent(result.slug)}`);
+                window.location.assign(`/ui/?org=${encodeURIComponent(result.slug)}`);
               } catch (error) {
                 orgError.value = error.message || "Organization creation failed.";
               }
@@ -841,6 +841,19 @@
               const errorMessage = ref("");
               const hasUncommitted = computed(() => entries.value.some((entry) => entry.uncommitted));
               const url = () => new URL(window.location.href);
+              const showOrganization = (slug) => {
+                const next = url();
+                next.searchParams.set("org", slug);
+                next.searchParams.delete("repo");
+                next.searchParams.delete("path");
+                next.searchParams.delete("dir");
+                history.replaceState(null, "", `${next.pathname}${next.search}${next.hash}`);
+                org.value = slug;
+                repo.value = null;
+                entries.value = [];
+                commits.value = [];
+                errorMessage.value = "";
+              };
               const base = () =>
                 `/api/v1/orgs/${encodeURIComponent(new URL(window.location.href).searchParams.get("org"))}/repos/${encodeURIComponent(repo.value.repo)}`;
               const rootHref = computed(
@@ -876,7 +889,7 @@
                     );
                   }
                   const result = await response.json();
-                  window.location.assign(`/?org=${encodeURIComponent(result.slug)}`);
+                  showOrganization(result.slug);
                 } catch (error) {
                   orgError.value = error.message || "Organization creation failed.";
                 }

@@ -19,43 +19,18 @@ claim. Tokens need scopes as follows:
 - A valid token without the required scope returns **403 Forbidden**. Missing or
   invalid authentication returns **401 Unauthorized**.
 
-## Immutable user aliases
+## Organization/repository namespace
 
-`GET /api/v1/profile/alias` returns `{ "alias": string|null }`. The first successful
-OIDC sign-in snapshots the validated `preferred_username` claim (or the provider's
-`username` claim when `preferred_username` is absent) as the account's permanent URL
-alias. The username must be present, URL-safe, and consistent between the ID token
-and UserInfo response when both include it. A later change or removal blocks sign-in
-and automatically directs the user to `${OIDC_ISSUER}/me` to restore the original
-username. Git Store never renames a saved alias. Aliases are globally unique
-case-insensitively and the registry stores only SHA-256 subject hashes, never raw
-OIDC subjects.
+OIDC usernames are optional profile data and are not used to name organizations or
+repositories. Sign-in and authorization continue to identify the account by its
+validated OIDC `sub`. Organizations have independently chosen slugs, and ownership is
+checked against the authenticated subject.
 
-`PUT /api/v1/profile/alias` captures the authenticated OIDC username for API clients.
-The optional body may repeat that exact username; a different local alias is rejected.
-If the token has no valid username, the endpoint returns **428** with the provider
-profile URL. Set the username at the OIDC provider before using Git Store.
-
-```http
-PUT /api/v1/profile/alias
-Content-Type: application/json
-
-{"alias":"my-oidc-username"}
-```
-
-Omit `alias` (send `{}`) to snapshot the validated `preferred_username` or
-`username` claim. The first assignment returns **200**; a value different from the
-OIDC username returns **400**, and a username already owned by another subject or a
-saved alias that no longer matches the provider returns **409**. Repeating the same
-username is idempotent.
-
-Alias-qualified repository routes use `/api/v1/repos/{alias}/{repo}/...` and
-`/git/{alias}/{repo}.git/...`. They require normal repo scopes and verify that the
-resolved alias belongs to the authenticated subject; foreign aliases return 404.
-The original `/api/v1/repos/{repo}/...` and `/git/{repo}.git/...` paths remain valid.
-For example, use `POST /api/v1/repos/{alias}/{repo}` to create a repository or
-`GET /api/v1/repos/{alias}/{repo}/log` to read its history. All other repository API
-operations are available under the same alias-qualified prefix.
+Use `/api/v1/orgs/{org}/repos/{repo}/...` for organization repositories and
+`/git/{org}/{repo}.git` for Git Smart HTTP. Legacy subject-owned repository routes and
+alias-qualified paths remain available for compatibility; they are not required for
+the organization/repository workflow. The legacy `/api/v1/profile/alias` endpoints
+only manage compatibility aliases and are not used by sign-in or organization paths.
 
 The browser UI signs in through `/ui/auth/login` using authorization code + PKCE. The callback
 validates state, ID-token claims, and the token's userinfo subject before issuing a signed
@@ -71,7 +46,7 @@ Git fetch (`git-upload-pack`) requires `repo:read` or `repo:write`; Git push
 session cookies. Use HTTPS so the Basic credential is encrypted in transit. This
 version accepts OIDC access tokens as the Basic password; it does not yet issue PATs.
 
-Public endpoints (`/api/v1/health`, `/api/v1/openapi.json`, `/ui/config`, `/ui/session`) do not require authentication.
+Public endpoints (`/api`, `/api/v1/health`, `/ui/config`, `/ui/session`) do not require authentication.
 
 ## Endpoints
 
@@ -89,13 +64,13 @@ GET /api/v1/health
 { "status": "ok" }
 ```
 
-### GET /api/v1/openapi.json
+### GET /api
 
 Return the OpenAPI 3.0.3 specification for `/api/v1/*` application APIs and Git Smart HTTP.
 UI-only routes under `/ui/*` are intentionally excluded.
 
 ```http
-GET /api/v1/openapi.json
+GET /api
 ```
 
 **Response (200)** – JSON body is the spec.
@@ -141,22 +116,22 @@ Clear the local browser session and redirect to `/`.
 
 ### Git Smart HTTP
 
-Use the HTTPS clone URL `https://<host>/git/{repo}.git`. When Git prompts for Basic
+Use the HTTPS clone URL `https://<host>/git/{org}/{repo}.git`. When Git prompts for Basic
 credentials, the username is arbitrary and the password is an active OIDC access token
 with the required repository scope. Do not put tokens in clone URLs, where they may be
 saved in shell history or Git configuration. For example:
 
 ```sh
-git clone https://git.example.com/git/myproject.git
+git clone https://git.example.com/git/my-org/myproject.git
 git -C myproject push origin HEAD
 ```
 
-The Git client uses `GET /git/{repo}.git/info/refs?service=git-upload-pack` followed by
-`POST /git/{repo}.git/git-upload-pack` to fetch. Push uses the corresponding
-`git-receive-pack` GET and POST endpoints. The service streams these requests through
-Git's `http-backend`; repository ownership is derived from the token's validated OIDC
-`sub` claim. Git Smart HTTP is also listed in the OpenAPI document at
-`/api/v1/openapi.json`.
+The Git client uses `GET /git/{org}/{repo}.git/info/refs?service=git-upload-pack`
+followed by `POST /git/{org}/{repo}.git/git-upload-pack` to fetch. Push uses the
+corresponding `git-receive-pack` GET and POST endpoints. The service streams these
+requests through Git's `http-backend`; organization ownership is checked against the
+token's validated OIDC `sub`. Git Smart HTTP is also listed in the OpenAPI document at
+`/api`.
 
 ### GET /api/v1/repos
 

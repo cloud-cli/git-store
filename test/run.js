@@ -119,6 +119,60 @@ async function run() {
       (await request(port, "POST", "/api/v1/orgs/team-one/repos/outside", undefined, "token-b")).status,
       404,
     );
+    const orgRepoPath = path.join(dataPath, "orgs", "team-one", "inside");
+    fs.writeFileSync(path.join(orgRepoPath, "org.txt"), "organization repository\n");
+    await git(["-C", orgRepoPath, "add", "org.txt"]);
+    await git([
+      "-C",
+      orgRepoPath,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.test",
+      "commit",
+      "-m",
+      "initial organization commit",
+    ]);
+    const orgClonePath = path.join(dataPath, "clone-org");
+    const orgAuthHeader = `Authorization: Basic ${Buffer.from("arbitrary-user:token-a").toString("base64")}`;
+    const orgGitUrl = `http://127.0.0.1:${port}/git/team-one/inside.git`;
+    await git(["-c", `http.extraheader=${orgAuthHeader}`, "clone", orgGitUrl, orgClonePath]);
+    assert.strictEqual(fs.readFileSync(path.join(orgClonePath, "org.txt"), "utf8"), "organization repository\n");
+    fs.writeFileSync(path.join(orgClonePath, "pushed.txt"), "organization push\n");
+    await git(["-C", orgClonePath, "add", "pushed.txt"]);
+    await git([
+      "-C",
+      orgClonePath,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.test",
+      "commit",
+      "-m",
+      "organization push",
+    ]);
+    await git([
+      "-c",
+      `http.extraheader=${orgAuthHeader}`,
+      "-C",
+      orgClonePath,
+      "push",
+      "origin",
+      "HEAD:refs/heads/from-org-http",
+    ]);
+    assert.strictEqual(
+      (await git(["--git-dir", path.join(orgRepoPath, ".git"), "show", "from-org-http:pushed.txt"])).stdout,
+      "organization push\n",
+    );
+    const foreignOrgGit = await request(
+      port,
+      "GET",
+      "/git/team-one/inside.git/info/refs?service=git-upload-pack",
+      undefined,
+      undefined,
+      { Authorization: `Basic ${Buffer.from("user:token-b").toString("base64")}` },
+    );
+    assert.strictEqual(foreignOrgGit.status, 404, "organization Git transport is limited to its owning subject");
     const createA = await request(port, "POST", "/api/v1/repos/shared-repo", undefined, "token-a");
     const createB = await request(port, "POST", "/api/v1/repos/shared-repo", undefined, "token-b");
     assert.strictEqual(createA.status, 201);
@@ -635,7 +689,7 @@ async function run() {
     assert.strictEqual(discoverySpec.openapi, "3.0.3");
     assert.ok(discoverySpec.paths["/api/v1/orgs"]);
     assert.ok(discoverySpec.paths["/api/v1/orgs/{org}/repos/{repo}/tree"]);
-    assert.ok(discoverySpec.paths["/git/{alias}/{repo}.git/git-upload-pack"]);
+    assert.ok(discoverySpec.paths["/git/{org}/{repo}.git/git-upload-pack"]);
     assert.ok(!Object.keys(discoverySpec.paths).some((route) => route.startsWith("/ui/") || route.includes("static")));
     assert.strictEqual((await request(port, "GET", "/api/v1/openapi.json")).status, 404);
     const spec = discoverySpec;
@@ -682,7 +736,7 @@ async function run() {
       if (route.startsWith("/api/v1/repos/{repo}")) {
         expectedMethods[route.replace("/api/v1/repos/{repo}", "/api/v1/repos/{alias}/{repo}")] = [...methods];
       } else if (route.startsWith("/git/{repo}.git/")) {
-        expectedMethods[route.replace("/git/{repo}.git", "/git/{alias}/{repo}.git")] = [...methods];
+        expectedMethods[route.replace("/git/{repo}.git", "/git/{org}/{repo}.git")] = [...methods];
       }
     }
     assert.deepStrictEqual(Object.keys(spec.paths).sort(), Object.keys(expectedMethods).sort());
@@ -809,14 +863,28 @@ async function run() {
       undefined,
       { Cookie: missingUsernameCookies },
     );
-    assert.strictEqual(missingUsernameCallback.status, 403);
-    assert.ok(missingUsernameCallback.body.includes("OIDC username required"));
-    assert.ok(missingUsernameCallback.body.includes("url=https://issuer.example.test/me"));
-    assert.ok(missingUsernameCallback.body.includes("Continue to your OIDC profile"));
+    assert.strictEqual(missingUsernameCallback.status, 303, "sign-in does not require an OIDC username");
     assert.ok(
-      !missingUsernameCallback.headers["set-cookie"]?.some((cookie) => cookie.startsWith("git_store_session=")),
-      "accounts without a provider username must not receive an application session",
+      missingUsernameCallback.headers["set-cookie"]?.some((cookie) => cookie.startsWith("git_store_session=")),
+      "accounts without a provider username receive a normal application session",
     );
+    const usernameFreeSessionCookie = missingUsernameCallback.headers["set-cookie"]
+      .find((cookie) => cookie.startsWith("git_store_session="))
+      .split(";")[0];
+    const usernameFreeOrg = await request(port, "POST", "/api/v1/orgs", { slug: "username-free-org" }, undefined, {
+      Cookie: usernameFreeSessionCookie,
+      Origin: `http://127.0.0.1:${port}`,
+    });
+    assert.strictEqual(usernameFreeOrg.status, 201, "a username-free OIDC subject can create an organization");
+    const usernameFreeRepo = await request(
+      port,
+      "POST",
+      "/api/v1/orgs/username-free-org/repos/project",
+      undefined,
+      undefined,
+      { Cookie: usernameFreeSessionCookie, Origin: `http://127.0.0.1:${port}` },
+    );
+    assert.strictEqual(usernameFreeRepo.status, 201, "organization/repository creation does not depend on username");
     oidcUserInfo = { id: "browser-subject", name: "Signed In", preferred_username: "browser-user" };
     oidcIdClaims = { sub: "browser-subject", preferred_username: "different-username" };
     const inconsistentUsernameLogin = await request(port, "GET", "/ui/auth/login");
@@ -832,7 +900,7 @@ async function run() {
       undefined,
       { Cookie: inconsistentUsernameCookies },
     );
-    assert.strictEqual(inconsistentUsernameCallback.status, 403);
+    assert.strictEqual(inconsistentUsernameCallback.status, 303, "OIDC usernames do not determine repository identity");
     oidcUserInfo = { id: "browser-subject", name: "Signed In", preferred_username: "changed-provider-user" };
     oidcIdClaims = { sub: "browser-subject", preferred_username: "changed-provider-user" };
     const changedUsernameLogin = await request(port, "GET", "/ui/auth/login");
@@ -848,8 +916,12 @@ async function run() {
       undefined,
       { Cookie: changedUsernameCookies },
     );
-    assert.strictEqual(changedUsernameCallback.status, 403);
-    assert.ok(changedUsernameCallback.body.includes("immutable username already registered"));
+    assert.strictEqual(changedUsernameCallback.status, 303, "provider username changes do not block sign-in");
+    assert.strictEqual(
+      require("../aliases").get("browser-subject"),
+      null,
+      "sign-in does not register a username alias",
+    );
 
     oidcUserInfo = { id: "id-only-subject", name: "Signed In" };
     oidcIdClaims = { sub: "id-only-subject", preferred_username: "id-only-user" };
@@ -869,9 +941,13 @@ async function run() {
     assert.strictEqual(
       idTokenUsernameCallback.status,
       303,
-      "a verified ID-token username may fill a missing UserInfo claim",
+      "sign-in succeeds using the subject without username coupling",
     );
-    assert.strictEqual(require("../aliases").get("id-only-subject"), "id-only-user");
+    assert.strictEqual(
+      require("../aliases").get("id-only-subject"),
+      null,
+      "OIDC usernames are not registered as aliases",
+    );
 
     oidcUserInfo = { id: "browser-subject", name: "Signed In", preferred_username: "browser-user" };
     oidcIdClaims = { sub: "browser-subject" };
@@ -908,7 +984,7 @@ async function run() {
         sub: "browser-subject",
         name: "Signed In",
         preferred_username: "browser-user",
-        alias: "browser-user",
+        alias: null,
       },
     });
     const tokenVerifier = app.locals.verifyToken;
@@ -983,6 +1059,9 @@ async function run() {
     assert.ok(uiResponse.body.includes('<template if="showWorkspace">'));
     assert.ok(uiResponse.body.includes("Create an organization"));
     assert.ok(uiResponse.body.includes("Step 2 of 2"));
+    assert.ok(uiResponse.body.includes("const showOrganization = (slug) =>"));
+    assert.ok(uiResponse.body.includes('history.replaceState(null, "", `${next.pathname}${next.search}${next.hash}`)'));
+    assert.ok(uiResponse.body.includes("window.location.assign(`/ui/?org=${encodeURIComponent(result.slug)}`)"));
     assert.ok(uiResponse.body.includes('document.documentElement.classList.toggle("dark", darkMode.value)'));
     assert.ok(uiResponse.body.includes('themeMedia.addEventListener("change"'));
     assert.ok(!uiResponse.body.includes('localStorage.getItem("theme")'));
@@ -1002,8 +1081,8 @@ async function run() {
       "the page should initialize its theme from the system preference",
     );
     assert.ok(
-      uiResponse.body.includes("profile.value?.alias"),
-      "the immutable account alias should be preferred in the signed-in UI",
+      uiResponse.body.includes('profile.value?.alias || "Signed in"'),
+      "legacy aliases are optional and not required for the signed-in UI",
     );
     const mainStart = uiResponse.body.indexOf("<main ");
     const viewerSetupStart = uiResponse.body.indexOf("<script setup>", mainStart);

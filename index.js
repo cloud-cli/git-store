@@ -258,22 +258,6 @@ function getOidcProfileUrl() {
   }
 }
 
-function usernameRequiredResponse(res, message) {
-  const profileUrl = getOidcProfileUrl();
-  const safeProfileUrl = (profileUrl || "#")
-    .replaceAll("&", "&amp;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
-  res.set("Cache-Control", "no-store");
-  return res
-    .status(403)
-    .type("html")
-    .send(
-      `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="refresh" content="5;url=${safeProfileUrl}"><title>OIDC username required</title></head><body><main><h1>OIDC username required</h1><p>${message}</p><p>Opening your OIDC profile to set or restore your username. <a href="${safeProfileUrl}">Continue to your OIDC profile</a>.</p></main></body></html>`,
-    );
-}
-
 function requireScope(scope) {
   return (req, res, next) => {
     const scopes = getTokenScopes(req.user);
@@ -322,24 +306,31 @@ function requireGitBasicAuth(req, res, next) {
 
 function gitSmartHttp(req, res) {
   const match =
-    /^\/git\/(?:([A-Za-z0-9][A-Za-z0-9_-]{0,62})\/)?([A-Za-z0-9][A-Za-z0-9._-]{0,99})\.git\/(info\/refs|git-upload-pack|git-receive-pack)$/.exec(
+    /^\/git\/(?:([A-Za-z0-9][A-Za-z0-9._-]{0,62})\/)?([A-Za-z0-9][A-Za-z0-9._-]{0,99})\.git\/(info\/refs|git-upload-pack|git-receive-pack)$/.exec(
       req.path,
     );
-  if (
-    !match ||
-    (match[1] && !aliases.validAlias(match[1])) ||
-    !validateRepoName(match[2]) ||
-    Object.keys(req.query).some((key) => key !== "service")
-  ) {
+  if (!match || !validateRepoName(match[2]) || Object.keys(req.query).some((key) => key !== "service")) {
     return res.status(400).send("Malformed Git request");
   }
-  const alias = match[1];
+  const orgOrAlias = match[1];
   const repo = match[2];
   const operation = match[3];
-  const owner = alias ? aliases.owner(alias) : null;
   const subjectHash = getHashedSubjectDir(req);
-  if (alias && (!owner || owner !== subjectHash)) {
-    return res.status(404).send("Repository not found");
+  let repoRoot = path.join(process.env.DATA_PATH, subjectHash);
+  if (orgOrAlias) {
+    const organization = organizations.get(orgOrAlias);
+    if (organization) {
+      if (organization.ownerHash !== subjectHash) {
+        return res.status(404).send("Repository not found");
+      }
+      repoRoot = path.join(process.env.DATA_PATH, "orgs", organization.slug);
+    } else {
+      const aliasOwner = aliases.validAlias(orgOrAlias) ? aliases.owner(orgOrAlias) : null;
+      if (!aliasOwner || aliasOwner !== subjectHash) {
+        return res.status(404).send("Repository not found");
+      }
+      repoRoot = path.join(process.env.DATA_PATH, aliasOwner);
+    }
   }
   const service = req.query.service;
   let write;
@@ -359,14 +350,14 @@ function gitSmartHttp(req, res) {
   if (write ? !scopes.has("repo:write") : !scopes.has("repo:read") && !scopes.has("repo:write")) {
     return res.status(403).send("Insufficient scope");
   }
-  const repoPath = getSafeRepoPath(repo, req);
+  const repoPath = path.join(repoRoot, repo);
   if (!repoPath || !fs.existsSync(path.join(repoPath, ".git"))) {
     return res.status(404).send("Repository not found");
   }
   const queryService = operation === "info/refs" ? service : undefined;
   const env = {
     ...process.env,
-    GIT_PROJECT_ROOT: path.resolve(process.env.DATA_PATH, alias ? owner : subjectHash),
+    GIT_PROJECT_ROOT: path.resolve(repoRoot),
     GIT_HTTP_EXPORT_ALL: "1",
     GIT_PROTOCOL: req.get("git-protocol") || "",
     PATH_INFO: `/${repo}/.git/${operation}`,
@@ -1019,36 +1010,6 @@ const handleOidcCallback = async (req, res) => {
       return res.status(401).send("OIDC sign-in subject did not match the access-token profile.");
     }
     profile.sub = idClaims.sub;
-    const profileUsername = getOidcUsername(profile);
-    const tokenUsername = getOidcUsername(idClaims);
-    const username = profileUsername || tokenUsername;
-    if (
-      !username ||
-      !aliases.validAlias(username) ||
-      (profileUsername && tokenUsername && tokenUsername !== profileUsername)
-    ) {
-      return usernameRequiredResponse(
-        res,
-        "A valid OIDC username must be present in the sign-in response. The ID token and UserInfo response must agree when both include it.",
-      );
-    }
-    const existingAlias = aliases.get(idClaims.sub);
-    if (existingAlias && existingAlias !== username) {
-      return usernameRequiredResponse(
-        res,
-        "Your OIDC username does not match the immutable username already registered for this account. Restore the original username to continue.",
-      );
-    }
-    if (!existingAlias) {
-      const aliasAssignment = aliases.assign(idClaims.sub, username);
-      if (aliasAssignment === false) {
-        return usernameRequiredResponse(
-          res,
-          "Your OIDC username conflicts with an existing account URL. Set a unique username in your OIDC profile before signing in.",
-        );
-      }
-    }
-    profile.preferred_username = username;
 
     const id = crypto.randomBytes(32).toString("base64url");
     const expiresIn = Number(tokenSet.expires_in * 1000 || idClaims.exp * 1000 - Date.now()) || 3600_000;
@@ -1846,6 +1807,7 @@ function makeApiSpec() {
     required: true,
     schema: { type: "string" },
   };
+  const orgParameter = { ...aliasParameter, name: "org" };
   for (const [route, methods] of Object.entries(apiSpec.paths)) {
     const repoRoutePrefix = "/api/v1/repos/{repo}";
     if (route === repoRoutePrefix || route.startsWith(`${repoRoutePrefix}/`)) {
@@ -1866,13 +1828,13 @@ function makeApiSpec() {
     }
     const gitRoutePrefix = "/git/{repo}.git";
     if (route.startsWith(`${gitRoutePrefix}/`)) {
-      const aliasRoute = route.replace(gitRoutePrefix, "/git/{alias}/{repo}.git");
-      apiSpec.paths[aliasRoute] = Object.fromEntries(
+      const orgRoute = route.replace(gitRoutePrefix, "/git/{org}/{repo}.git");
+      apiSpec.paths[orgRoute] = Object.fromEntries(
         Object.entries(methods).map(([method, definition]) => [
           method,
           {
             ...definition,
-            parameters: [aliasParameter, ...(definition.parameters || [])],
+            parameters: [orgParameter, ...(definition.parameters || [])],
           },
         ]),
       );

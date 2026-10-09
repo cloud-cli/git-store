@@ -1,13 +1,13 @@
 # Git Store
 
 Git Store is a single-container HTTP service for managing Git repositories.
-Repositories are owned by authenticated OIDC subjects and accessible via
-short repo names only — no owner segment in the URL.
+Organization/repository pairs are the primary namespace; OIDC usernames do not
+participate in organization or repository naming.
 
 ## Current status
 
 - Docker deployment uses `ghcr.io/cloud-cli/image-node:latest` and `/home/app`.
-- `GET /api/v1/openapi.json` serves an OpenAPI 3.0.3 document for the versioned API
+- `GET /api` serves an OpenAPI 3.0.3 document for the versioned API
   and Git Smart HTTP endpoints; UI-only routes are excluded.
 - Repository listing and creation are scoped to the authenticated OIDC subject.
 - All repository operations require an authenticated OIDC subject. API bearer tokens
@@ -19,15 +19,16 @@ short repo names only — no owner segment in the URL.
   falls back to browser sessions. Use HTTPS in deployment; plain HTTP is suitable
   only for local testing. PATs are not issued by this version; use an OIDC access
   token until PAT management is added.
-- Browser sign-in requires a valid OIDC `preferred_username` (or `username`). The first
-  sign-in snapshots it as the account's permanent URL alias; later username changes
-  or removals block sign-in and direct the user to `${OIDC_ISSUER}/me` to restore it.
-  Aliases are globally unique ignoring case and stored against a SHA-256 subject
-  hash. Alias-qualified API and Git paths still require the authenticated subject to
-  own the alias. API clients can capture their OIDC username with
-  `PUT /api/v1/profile/alias`; custom local aliases are not accepted.
-- Repository names are short paths-only identifiers; the authenticated subject's
-  stable hashed `sub` claim derives the filesystem directory.
+- Browser sign-in identifies an account by the stable OIDC `sub` claim; a provider
+  username is optional and does not determine organization or repository names.
+  Organization and repository slugs are chosen in Git Store and routed as
+  `/api/v1/orgs/<org>/repos/<repo>` and `/git/<org>/<repo>.git`. Organization
+  ownership is still enforced against the authenticated subject, not its OIDC
+  username. Legacy subject-owned repositories and alias-qualified routes remain
+  available for compatibility.
+- Organization and repository names are short path-only identifiers. The
+  authenticated subject's stable hashed `sub` claim is used for ownership metadata,
+  independently of the names shown in organization/repository paths.
 - `npm test` runs a Node-built-in integration suite covering subject isolation,
   unauthorized access, route inventory, traversal rejection, and UI wiring.
 
@@ -61,43 +62,54 @@ DATA_PATH="$PWD/data" npm start
 
 ## Endpoints
 
-| Method | Path                                                       | Auth        |
-| ------ | ---------------------------------------------------------- | ----------- |
-| GET    | `/api/v1/health`                                           | public      |
-| GET    | `/api/v1/openapi.json`                                     | public      |
-| GET    | `/ui/config`                                               | public      |
-| GET    | `/ui/session`                                              | public      |
-| GET    | `/ui/auth/login`                                           | public      |
-| GET    | `/ui/auth/callback`                                        | OIDC        |
-| POST   | `/ui/auth/logout`                                          | OIDC        |
-| GET    | `/api/v1/repos`                                            | OIDC        |
-| GET    | `/api/v1/profile/alias`                                    | OIDC        |
-| PUT    | `/api/v1/profile/alias`                                    | OIDC        |
-| GET    | `/api/v1/repos/:alias`                                     | OIDC        |
-| POST   | `/api/v1/repos/:alias/:repo`                               | OIDC        |
-| GET    | `/api/v1/repos/:alias/:repo/log`                           | OIDC        |
-| POST   | `/api/v1/repos/:repo`                                      | OIDC        |
-| GET    | `/api/v1/repos/:repo/log`                                  | OIDC        |
-| GET    | `/api/v1/repos/:repo/tree`                                 | OIDC        |
-| GET    | `/api/v1/repos/:repo/file`                                 | OIDC        |
-| GET    | `/api/v1/repos/:repo/branches`                             | OIDC        |
-| GET    | `/api/v1/repos/:repo/tags`                                 | OIDC        |
-| GET    | `/git/:repo.git/info/refs?service=git-upload-pack`         | Basic token |
-| POST   | `/git/:repo.git/git-upload-pack`                           | Basic token |
-| GET    | `/git/:repo.git/info/refs?service=git-receive-pack`        | Basic token |
-| POST   | `/git/:repo.git/git-receive-pack`                          | Basic token |
-| GET    | `/git/:alias/:repo.git/info/refs?service=git-upload-pack`  | Basic token |
-| POST   | `/git/:alias/:repo.git/git-upload-pack`                    | Basic token |
-| GET    | `/git/:alias/:repo.git/info/refs?service=git-receive-pack` | Basic token |
-| POST   | `/git/:alias/:repo.git/git-receive-pack`                   | Basic token |
-| GET    | `/api/v1/repos/:repo/history`                              | OIDC        |
-| POST   | `/api/v1/repos/:repo/stage`                                | OIDC        |
-| POST   | `/api/v1/repos/:repo/unstage`                              | OIDC        |
-| POST   | `/api/v1/repos/:repo/commit`                               | OIDC        |
-| POST   | `/api/v1/repos/:repo/tags`                                 | OIDC        |
-| DELETE | `/api/v1/repos/:repo/tags/:name`                           | OIDC        |
-| POST   | `/api/v1/repos/:repo/branches`                             | OIDC        |
-| DELETE | `/api/v1/repos/:repo/branches/:name`                       | OIDC        |
+| Method | Path                                                     | Auth        |
+| ------ | -------------------------------------------------------- | ----------- |
+| GET    | `/api`                                                   | public      |
+| GET    | `/api/v1/health`                                         | public      |
+| GET    | `/ui/config`                                             | public      |
+| GET    | `/ui/session`                                            | public      |
+| GET    | `/ui/auth/login`                                         | public      |
+| GET    | `/ui/auth/callback`                                      | OIDC        |
+| POST   | `/ui/auth/logout`                                        | OIDC        |
+| GET    | `/api/v1/orgs`                                           | OIDC        |
+| POST   | `/api/v1/orgs`                                           | OIDC        |
+| GET    | `/api/v1/orgs/:org/repos`                                | OIDC        |
+| POST   | `/api/v1/orgs/:org/repos/:repo`                          | OIDC        |
+| GET    | `/git/:org/:repo.git/info/refs?service=git-upload-pack`  | Basic token |
+| POST   | `/git/:org/:repo.git/git-upload-pack`                    | Basic token |
+| GET    | `/git/:org/:repo.git/info/refs?service=git-receive-pack` | Basic token |
+| POST   | `/git/:org/:repo.git/git-receive-pack`                   | Basic token |
+| GET    | `/api/v1/repos`                                          | OIDC        |
+| GET    | `/api/v1/profile/alias`                                  | OIDC        |
+| PUT    | `/api/v1/profile/alias`                                  | OIDC        |
+| GET    | `/api/v1/repos/:alias`                                   | OIDC        |
+| POST   | `/api/v1/repos/:alias/:repo`                             | OIDC        |
+| GET    | `/api/v1/repos/:alias/:repo/log`                         | OIDC        |
+| POST   | `/api/v1/repos/:repo`                                    | OIDC        |
+| GET    | `/api/v1/repos/:repo/log`                                | OIDC        |
+| GET    | `/api/v1/repos/:repo/tree`                               | OIDC        |
+| GET    | `/api/v1/repos/:repo/file`                               | OIDC        |
+| GET    | `/api/v1/repos/:repo/branches`                           | OIDC        |
+| GET    | `/api/v1/repos/:repo/tags`                               | OIDC        |
+| GET    | `/git/:repo.git/info/refs?service=git-upload-pack`       | Basic token |
+| POST   | `/git/:repo.git/git-upload-pack`                         | Basic token |
+| GET    | `/git/:repo.git/info/refs?service=git-receive-pack`      | Basic token |
+| POST   | `/git/:repo.git/git-receive-pack`                        | Basic token |
+
+Subject-owned short-repository and alias-qualified routes listed below are retained
+for compatibility; organization/repository pairs are the primary namespace.
+| GET | `/git/:alias/:repo.git/info/refs?service=git-upload-pack` | Basic token |
+| POST | `/git/:alias/:repo.git/git-upload-pack` | Basic token |
+| GET | `/git/:alias/:repo.git/info/refs?service=git-receive-pack` | Basic token |
+| POST | `/git/:alias/:repo.git/git-receive-pack` | Basic token |
+| GET | `/api/v1/repos/:repo/history` | OIDC |
+| POST | `/api/v1/repos/:repo/stage` | OIDC |
+| POST | `/api/v1/repos/:repo/unstage` | OIDC |
+| POST | `/api/v1/repos/:repo/commit` | OIDC |
+| POST | `/api/v1/repos/:repo/tags` | OIDC |
+| DELETE | `/api/v1/repos/:repo/tags/:name` | OIDC |
+| POST | `/api/v1/repos/:repo/branches` | OIDC |
+| DELETE | `/api/v1/repos/:repo/branches/:name` | OIDC |
 
 The canonical request and response documentation is in [`docs/api-reference.md`](docs/api-reference.md).
 
