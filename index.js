@@ -6,6 +6,7 @@ const crypto = require("crypto");
 const { spawn } = require("child_process");
 const { getRepoPath, ensureRepoDir, validateRepoName, getHashedSubjectDir } = require("./storage");
 const aliases = require("./aliases");
+const organizations = require("./organizations");
 
 const getGit = (repoPath) => simpleGit.simpleGit(repoPath);
 
@@ -474,6 +475,9 @@ function getSafeRepoPath(repo, req) {
     return false;
   }
   const hashedSub = getHashedSubjectDir(req);
+  if (req.organizationPath) {
+    return path.join(req.organizationPath, repo);
+  }
   return getRepoPath(hashedSub, repo);
 }
 
@@ -596,7 +600,14 @@ async function createRepo(req, res) {
   }
 
   try {
-    const repoPath = ensureRepoDir(getHashedSubjectDir(req), repo);
+    let repoPath;
+    if (req.organizationPath) {
+      fs.mkdirSync(req.organizationPath, { recursive: true });
+      repoPath = path.join(req.organizationPath, repo);
+      fs.mkdirSync(repoPath, { recursive: true });
+    } else {
+      repoPath = ensureRepoDir(getHashedSubjectDir(req), repo);
+    }
     const git = getGit(repoPath);
 
     if (!fs.existsSync(path.join(repoPath, ".git"))) {
@@ -1095,6 +1106,51 @@ app.post("/ui/auth/logout", (req, res) => {
 });
 
 // List/create repositories - scoped to authenticated subject
+app.get("/api/v1/orgs", requireAuthentication, requireScope("repo:read"), (req, res) =>
+  res.json(organizations.listForSubject(req.user.sub)),
+);
+app.post("/api/v1/orgs", requireAuthentication, requireScope("repo:write"), (req, res) => {
+  const result = organizations.create(req.user.sub, req.body?.slug || req.body?.name);
+  if (result === null) {
+    return res.status(400).json({ error: "Invalid organization slug" });
+  }
+  if (result === false) {
+    return res.status(409).json({ error: "Organization already exists" });
+  }
+  return res.status(201).json(result);
+});
+app.use("/api/v1/orgs/:org/repos", requireAuthentication, (req, res, next) => {
+  if (!organizations.normalizeSlug(req.params.org)) {
+    return res.status(400).json({ error: "Invalid organization slug" });
+  }
+  const organization = organizations.get(req.params.org);
+  if (!organization || organization.ownerHash !== getHashedSubjectDir(req)) {
+    return res.status(404).json({ error: "Organization not found" });
+  }
+  req.organizationPath = path.join(process.env.DATA_PATH, "orgs", organization.slug);
+  if (req.path === "/" || req.path === "") {
+    if (req.method !== "GET") {
+      return next();
+    }
+    if (!getTokenScopes(req.user).has("repo:read") && !getTokenScopes(req.user).has("repo:write")) {
+      return res.status(403).json({ error: "Forbidden: requires repo:read scope" });
+    }
+    const reposPath = req.organizationPath;
+    const repos = fs.existsSync(reposPath)
+      ? fs
+          .readdirSync(reposPath, { withFileTypes: true })
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => ({ repo: entry.name }))
+      : [];
+    return res.json(repos);
+  }
+  const match = /^\/([^/]+)(\/.*)?$/.exec(req.path);
+  if (!match) {
+    return next();
+  }
+  req.url = `/api/v1/repos/${match[1]}${match[2] || ""}`;
+  return app.handle(req, res);
+});
 app.get("/api/v1/repos", requireAuthentication, requireScope("repo:read"), listOwnRepos);
 app.post("/api/v1/repos/:repo", requireAuthentication, requireScope("repo:write"), createRepo);
 

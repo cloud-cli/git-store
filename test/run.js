@@ -91,6 +91,34 @@ async function run() {
   const port = server.address().port;
 
   try {
+    assert.strictEqual((await request(port, "GET", "/api/v1/orgs", undefined, "unscoped")).status, 403);
+    assert.strictEqual((await request(port, "POST", "/api/v1/orgs", { slug: "blocked" }, "unscoped")).status, 403);
+    assert.strictEqual((await request(port, "POST", "/api/v1/orgs", { slug: "bad slug" }, "token-a")).status, 400);
+    const orgCreated = await request(port, "POST", "/api/v1/orgs", { slug: "Team-One" }, "token-a");
+    assert.strictEqual(orgCreated.status, 201);
+    assert.deepStrictEqual(JSON.parse(orgCreated.body), { slug: "team-one" });
+    assert.strictEqual((await request(port, "POST", "/api/v1/orgs", { slug: "team-one" }, "token-a")).status, 409);
+    assert.deepStrictEqual(JSON.parse((await request(port, "GET", "/api/v1/orgs", undefined, "token-a")).body), [
+      { slug: "team-one" },
+    ]);
+    assert.deepStrictEqual(JSON.parse((await request(port, "GET", "/api/v1/orgs", undefined, "token-b")).body), []);
+    assert.strictEqual(
+      (await request(port, "POST", "/api/v1/orgs/team-one/repos/inside", undefined, "token-a")).status,
+      201,
+    );
+    assert.strictEqual((await request(port, "GET", "/api/v1/orgs/team-one/repos", undefined, "token-a")).status, 200);
+    assert.strictEqual(
+      (await request(port, "GET", "/api/v1/orgs/team-one/repos/inside/tree", undefined, "token-a")).status,
+      200,
+    );
+    assert.strictEqual(
+      (await request(port, "GET", "/api/v1/orgs/team-one/repos/inside/tree", undefined, "token-b")).status,
+      404,
+    );
+    assert.strictEqual(
+      (await request(port, "POST", "/api/v1/orgs/team-one/repos/outside", undefined, "token-b")).status,
+      404,
+    );
     const createA = await request(port, "POST", "/api/v1/repos/shared-repo", undefined, "token-a");
     const createB = await request(port, "POST", "/api/v1/repos/shared-repo", undefined, "token-b");
     assert.strictEqual(createA.status, 201);
@@ -895,7 +923,9 @@ async function run() {
 
     const uiResponse = await request(port, "GET", "/ui/");
     assert.strictEqual(uiResponse.status, 200);
-    assert.strictEqual((await request(port, "GET", "/ui/welcome.svg")).status, 200);
+    const welcomeResponse = await request(port, "GET", "/ui/welcome.svg");
+    assert.strictEqual(welcomeResponse.status, 200);
+    assert.ok(welcomeResponse.body.includes("Build your workspace"));
     assert.strictEqual((await request(port, "GET", "/welcome.svg")).status, 404);
     assert.ok(uiResponse.body.includes("{{ repo.repo }}"));
     assert.ok(uiResponse.body.includes("repo=${encodeURIComponent(repo.repo)}"));
@@ -910,6 +940,10 @@ async function run() {
     assert.ok(uiResponse.body.includes('<style type="text/tailwindcss">'));
     assert.ok(uiResponse.body.includes("@custom-variant dark (&:where(.dark, .dark *));"));
     assert.ok(uiResponse.body.includes("<span>Sign in</span>"));
+    assert.ok(uiResponse.body.includes('<template if="showWorkspace">'));
+    assert.ok(uiResponse.body.includes("Create an organization"));
+    assert.ok(uiResponse.body.includes("Step 2 of 2"));
+    assert.ok(uiResponse.body.includes('document.documentElement.classList.toggle("dark", darkMode.value)'));
     assert.strictEqual((uiResponse.body.match(/window\.addEventListener\("git-api-theme"/g) || []).length, 4);
     assert.ok(
       uiResponse.body.includes('<template if="dragging"'),
