@@ -110,6 +110,29 @@ async function git(args, options = {}) {
 }
 
 async function run() {
+  const ui = fs.readFileSync(path.join(__dirname, "../public/index.html"), "utf8");
+  assert.ok(ui.includes("showWorkspace && repositories.length > 0"), "repository sidebar waits for repositories");
+  assert.ok(ui.includes('on-click="openSettings()"'), "user card opens in-app settings");
+  assert.ok(ui.includes("`/?org=${encodeURIComponent(org.value)}&repo=${encodeURIComponent(repo.value)}`"));
+  assert.ok(ui.includes('href="/?settings=organizations"'), "settings sidebar has an Organizations page");
+  assert.ok(ui.includes("await refreshOrganizations()"), "creating an org refreshes the settings list in place");
+  assert.ok(ui.includes('on-click="retryOrganizationLoad()"'), "organization list errors can be retried");
+  assert.ok(ui.includes('current.searchParams.delete("repo")'), "changing organizations clears dependent repo state");
+  assert.ok(
+    ui.includes('template if="!org && organizationsLoaded && orgs.length > 0"'),
+    "homepage lists existing organizations after loading",
+  );
+  assert.ok(
+    ui.includes('template if="org && orgRepositoriesLoaded && orgRepositories.length > 0"'),
+    "organization page lists repositories after loading",
+  );
+  assert.ok(
+    ui.includes('template if="org && orgRepositoriesLoaded && orgRepositories.length === 0"'),
+    "empty org shows first-repo onboarding after loading",
+  );
+  assert.ok(ui.includes('get("settings") === "organizations"'), "settings route is selected in-app");
+  assert.ok(ui.includes("Your organizations"), "authenticated homepage lists organizations");
+  assert.ok(ui.includes("showWorkspace.value = Boolean(selectedOrg.value && repositories.value.length > 0)"));
   const server = app.listen(0);
   await new Promise((resolve) => server.once("listening", resolve));
   const port = server.address().port;
@@ -1098,11 +1121,11 @@ async function run() {
     assert.ok(uiResponse.body.includes("<span>Sign in</span>"));
     assert.ok(uiResponse.body.includes("Sign in to get started"));
     assert.ok(uiResponse.body.includes("authStatus === 'anonymous'"));
-    assert.ok(uiResponse.body.includes('<template if="showWorkspace">'));
+    assert.ok(uiResponse.body.includes('<template if="showWorkspace && repositories.length > 0 && !settings">'));
     assert.ok(uiResponse.body.includes("Create an organization"));
     assert.ok(uiResponse.body.includes("Step 2 of 2"));
-    assert.ok(uiResponse.body.includes("window.location.assign(`/ui/?org=${encodeURIComponent(result.org.slug)}`)"));
-    assert.ok(uiResponse.body.includes('searchParams.has("org")'));
+    assert.ok(uiResponse.body.includes("await refreshOrganizations()"));
+    assert.ok(uiResponse.body.includes('params.has("org")'));
     assert.ok(uiResponse.body.includes('<template if="authenticated">'));
     assert.ok(uiResponse.body.includes('fetch("/ui/session", { credentials: "same-origin" })'));
     assert.ok(!uiResponse.body.includes("access_token"), "UI auth must not depend on locally stored access tokens");
@@ -1129,8 +1152,8 @@ async function run() {
       "the page should initialize its theme from the system preference",
     );
     assert.ok(
-      uiResponse.body.includes('profile.value?.alias || "Signed in"'),
-      "legacy aliases are optional and not required for the signed-in UI",
+      uiResponse.body.includes('profile.value?.name || profile.value?.email?.split("@")[0]'),
+      "the signed-in user card uses available name/email fields",
     );
     const mainStart = uiResponse.body.indexOf("<main ");
     const viewerStateStart = uiResponse.body.indexOf('<script state type="application/json">', mainStart);

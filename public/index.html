@@ -74,8 +74,8 @@
       <header
         class="relative z-30 flex h-14 flex-shrink-0 items-center justify-between border-b border-gray-200 bg-gray-50 px-4 dark:border-gray-800 dark:bg-gray-900"
       >
-        <div class="flex items-center gap-3">
-          <template if="showWorkspace"
+        <div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden md:gap-3">
+          <template if="showWorkspace && !settings"
             ><button
               class="p-2 text-gray-500 dark:text-gray-300 md:hidden"
               on-click="toggleSidebar()"
@@ -83,11 +83,32 @@
             >
               <i class="fa-solid fa-bars text-lg"></i></button
           ></template>
-          <a href="/" class="flex items-center gap-2 text-lg font-semibold tracking-tight"
+          <a
+            href="/"
+            class="flex flex-shrink-0 items-center gap-2 text-lg font-semibold tracking-tight"
+            aria-label="Git API home"
             ><i class="fa-brands fa-git-alt text-xl text-orange-500"></i><span>Git API</span></a
           >
+          <template if="org && !settings"
+            ><span class="flex-shrink-0 text-gray-400">/</span
+            ><a
+              attr-href="orgHref"
+              attr-title="org"
+              class="max-w-[18vw] truncate text-sm font-medium hover:text-indigo-600 md:max-w-80"
+              >{{ org }}</a
+            ></template
+          >
+          <template if="repo && !settings"
+            ><span class="flex-shrink-0 text-gray-400">/</span
+            ><a
+              attr-href="repoHref"
+              attr-title="repo"
+              class="max-w-[20vw] truncate text-sm font-medium hover:text-indigo-600 md:max-w-80"
+              >{{ repo }}</a
+            ></template
+          >
         </div>
-        <div class="flex items-center gap-4">
+        <div class="flex flex-shrink-0 items-center gap-2 sm:gap-4">
           <button
             class="rounded-full p-1 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
             on-click="toggleTheme()"
@@ -96,20 +117,21 @@
             <i class="fa-solid fa-circle-half-stroke"></i>
           </button>
           <template if="profile"
-            ><a
-              attr-href="profileUrl"
+            ><button
+              on-click="openSettings()"
+              type="button"
               class="flex items-center gap-3 border-l border-gray-200 pl-4 dark:border-gray-700"
-              title="Open profile"
+              title="Settings"
             >
               <span class="hidden text-right leading-tight sm:block"
-                ><span class="block font-medium">{{ userEmail }}</span
+                ><span class="block font-medium">{{ userAlias }}</span
                 ><span class="block text-xs text-gray-500 dark:text-gray-400">{{ userEmail }}</span></span
               >
               <img
                 attr-src="userAvatar"
                 attr-alt="userEmail"
                 class="h-8 w-8 rounded-full border border-gray-200 object-cover dark:border-gray-700"
-              /> </a
+              /></button
           ></template>
           <template if="!profile"
             ><a
@@ -133,10 +155,17 @@
           const showWorkspace = ref(false);
           const userUrl = ref("#");
           const loginUrl = ref("#");
-          const profileUrl = ref("#");
+          const org = ref("");
+          const repo = ref("");
+          const settings = ref(false);
+          const orgHref = computed(() => `/?org=${encodeURIComponent(org.value)}`);
+          const repoHref = computed(
+            () => `/?org=${encodeURIComponent(org.value)}&repo=${encodeURIComponent(repo.value)}`,
+          );
+          const openSettings = () => window.location.assign("/?settings=organizations");
           const themeMedia = window.matchMedia("(prefers-color-scheme: dark)");
           const darkMode = ref(themeMedia.matches);
-          const userAlias = computed(() => profile.value?.alias || "Signed in");
+          const userAlias = computed(() => profile.value?.name || profile.value?.email?.split("@")[0] || "Signed in");
           const userEmail = computed(() => profile.value?.email || "Signed in");
           const userAvatar = computed(
             () =>
@@ -167,28 +196,40 @@
               ? await sessionResponse.json().catch(() => ({ authenticated: false }))
               : { authenticated: false };
             profile.value = session.authenticated ? session.profile : null;
-            showWorkspace.value = Boolean(
-              profile.value &&
-              new URL(window.location.href).searchParams.has("org") &&
-              new URL(window.location.href).searchParams.has("repo"),
-            );
-            profileUrl.value = config.oidcUserUrl || "#";
+            const params = new URL(window.location.href).searchParams;
+            org.value = params.get("org") || "";
+            repo.value = params.get("repo") || "";
+            settings.value = params.get("settings") === "organizations";
+            showWorkspace.value = false;
+            if (profile.value && params.has("org") && !settings.value) {
+              const orgSlug = params.get("org");
+              const response = await fetch(`/api/v1/orgs/${encodeURIComponent(orgSlug)}/repos`).catch(() => null);
+              const result = response?.ok ? await response.json().catch(() => ({})) : {};
+              const repos = Array.isArray(result) ? result : Array.isArray(result.repos) ? result.repos : [];
+              showWorkspace.value = !settings.value && repos.length > 0;
+            }
             const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
             loginUrl.value = config.oidcLoginUrl
               ? `${config.oidcLoginUrl}?returnTo=${encodeURIComponent(returnTo)}`
               : "#";
-            userUrl.value = profile.value ? profileUrl.value : loginUrl.value;
+            userUrl.value = loginUrl.value;
           });
           return {
             profile,
             userUrl,
-            profileUrl,
             darkMode,
             showWorkspace,
+            userAlias,
             userEmail,
             userAvatar,
             toggleTheme,
             toggleSidebar,
+            org,
+            repo,
+            settings,
+            orgHref,
+            repoHref,
+            openSettings,
           };
         }
       </script>
@@ -196,7 +237,7 @@
 
     <div class="workspace">
       <template app>
-        <template if="showWorkspace">
+        <template if="showWorkspace && repositories.length > 0 && !settings">
           <aside
             class="absolute inset-y-0 left-0 z-40 flex h-full w-64 flex-shrink-0 -translate-x-full flex-col border-r border-gray-200 bg-gray-50 transition-transform dark:border-gray-800 dark:bg-gray-900 md:relative md:translate-x-0"
             class-translate-x-0="menuOpen"
@@ -214,48 +255,7 @@
                 <i class="fa-solid fa-plus"></i>
               </button>
             </div>
-            <div class="space-y-2 border-b border-gray-200 p-3 dark:border-gray-800">
-              <label class="block text-xs font-medium text-gray-500 dark:text-gray-300" for="org-select"
-                >Organization</label
-              >
-              <select
-                id="org-select"
-                class="w-full rounded-md border border-gray-300 bg-white px-2 py-2 dark:border-gray-700 dark:bg-gray-900"
-                on-change="selectOrg($event.target.value)"
-              >
-                <option value="">Select organization</option>
-                <template for="org of orgs"
-                  ><option attr-value="org.slug" attr-selected="org.slug === selectedOrg">
-                    {{ org.slug }}
-                  </option></template
-                >
-              </select>
-              <form class="flex gap-1" on-submit.prevent="createOrg()">
-                <input
-                  class="min-w-0 flex-1 rounded-md border border-gray-300 bg-transparent px-2 py-1 dark:border-gray-700"
-                  placeholder="organization-slug"
-                  aria-label="New organization slug"
-                  on-input="setOrgName($event.target.value)"
-                />
-                <button class="rounded bg-indigo-600 px-2 text-white" type="submit" aria-label="Create organization">
-                  <i class="fa-solid fa-plus"></i>
-                </button>
-              </form>
-              <template if="orgError"
-                ><p class="text-xs text-red-600 dark:text-red-400" role="alert">{{ orgError }}</p></template
-              >
-            </div>
             <div class="flex-1 space-y-1 overflow-y-auto p-2">
-              <template if="!selectedOrg"
-                ><p class="px-3 py-2 text-xs text-gray-500 dark:text-gray-300">
-                  Create an organization to get started.
-                </p></template
-              >
-              <template if="selectedOrg && !repositories.length"
-                ><p class="px-3 py-2 text-xs text-gray-500 dark:text-gray-300">
-                  No repositories in this organization yet. Create one to get started.
-                </p></template
-              >
               <template for="repo of repositories"
                 ><a
                   attr-href="repoHref(repo)"
@@ -340,8 +340,7 @@
             "showWorkspace": false,
             "menuOpen": false,
             "repoName": "",
-            "errorMessage": "",
-            "orgError": ""
+            "errorMessage": ""
           }
         </script>
         <script setup>
@@ -352,26 +351,13 @@
             const authenticated = ref(false);
             const selectedOrg = ref("");
             const showWorkspace = ref(false);
-            const orgName = ref("");
-            const orgError = ref("");
+            const settings = ref(new URL(window.location.href).searchParams.get("settings") === "organizations");
             const menuOpen = ref(false);
             const repoName = ref("");
             const errorMessage = ref("");
             const route = () => new URL(window.location.href).searchParams;
             const repoHref = (repo) =>
               `/?org=${encodeURIComponent(selectedOrg.value)}&repo=${encodeURIComponent(repo.repo)}`;
-            const setOrgName = (value) => {
-              orgName.value = value;
-            };
-            const selectOrg = (slug) => {
-              const current = new URL(window.location.href);
-              if (slug) current.searchParams.set("org", slug);
-              else current.searchParams.delete("org");
-              current.searchParams.delete("repo");
-              current.searchParams.delete("path");
-              current.searchParams.delete("dir");
-              window.location.assign(current);
-            };
             const loadRepositories = async () => {
               const org = new URL(window.location.href).searchParams.get("org") || selectedOrg.value;
               selectedOrg.value = org;
@@ -380,27 +366,6 @@
                 : null;
               const result = response?.ok ? await response.json().catch(() => ({})) : {};
               repositories.value = Array.isArray(result) ? result : Array.isArray(result.repos) ? result.repos : [];
-            };
-            const createOrg = async () => {
-              const slug = orgName.value.trim();
-              orgError.value = "";
-              if (!/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]{0,61}[a-zA-Z0-9])?$/.test(slug)) {
-                orgError.value =
-                  "Use 1–63 letters, numbers, dots, underscores, or hyphens; start and end with a letter or number.";
-                return;
-              }
-              try {
-                const response = await fetch("/api/v1/orgs", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ slug }),
-                });
-                if (!response.ok) throw new Error("Organization creation failed.");
-                const result = await response.json();
-                window.location.assign(`/ui/?org=${encodeURIComponent(result.org.slug)}`);
-              } catch (error) {
-                orgError.value = error.message || "Organization creation failed.";
-              }
             };
             const isSelected = (repo) => route().get("repo") === repo.repo;
             const setRepoName = (value) => {
@@ -450,21 +415,28 @@
                 return;
               }
               authenticated.value = true;
-              showWorkspace.value = new URL(window.location.href).searchParams.has("org");
+              showWorkspace.value = false;
               const response = await fetch("/api/v1/orgs").catch(() => null);
               const result = response?.ok ? await response.json().catch(() => ({})) : {};
               orgs.value = Array.isArray(result) ? result : Array.isArray(result.orgs) ? result.orgs : [];
               const requested = new URL(window.location.href).searchParams.get("org");
-              selectedOrg.value = orgs.value.some((org) => org.slug === requested)
-                ? requested
-                : orgs.value[0]?.slug || "";
-              if (selectedOrg.value && requested !== selectedOrg.value) {
+              selectedOrg.value = orgs.value.some((org) => org.slug === requested) ? requested : "";
+              if (requested && !selectedOrg.value && response?.ok) {
                 const current = new URL(window.location.href);
-                current.searchParams.set("org", selectedOrg.value);
+                if (orgs.value.length > 0) {
+                  selectedOrg.value = orgs.value[0].slug;
+                  current.searchParams.set("org", selectedOrg.value);
+                } else {
+                  current.searchParams.delete("org");
+                }
+                current.searchParams.delete("repo");
+                current.searchParams.delete("path");
+                current.searchParams.delete("dir");
                 window.location.assign(current);
                 return;
               }
               await loadRepositories();
+              showWorkspace.value = Boolean(selectedOrg.value && repositories.value.length > 0);
             });
             return {
               repositories,
@@ -472,7 +444,7 @@
               authenticated,
               selectedOrg,
               showWorkspace,
-              orgError,
+              settings,
               menuOpen,
               repoName,
               errorMessage,
@@ -480,9 +452,6 @@
               isSelected,
               closeMenu,
               setRepoName,
-              setOrgName,
-              selectOrg,
-              createOrg,
               createRepository,
             };
           }
@@ -527,10 +496,89 @@
               </div></template
             >
             <template if="authStatus === 'authenticated'">
-              <template if="!repo"
+              <template if="settings"
+                ><div class="flex min-h-full flex-1 gap-6 p-4 md:p-8">
+                  <nav
+                    class="w-32 flex-shrink-0 border-r border-gray-200 pr-3 sm:w-44 sm:pr-4 dark:border-gray-800"
+                    aria-label="Settings navigation"
+                  >
+                    <h1 class="mb-4 text-xl font-semibold">Settings</h1>
+                    <a
+                      href="/?settings=organizations"
+                      aria-current="page"
+                      class="block rounded-md bg-indigo-50 px-3 py-2 font-medium text-indigo-700 dark:bg-indigo-950 dark:text-indigo-200"
+                      >Organizations</a
+                    >
+                  </nav>
+                  <div class="min-w-0 flex-1">
+                    <h2 class="mb-4 text-2xl font-semibold">Organizations</h2>
+                    <ul class="mb-6 space-y-2">
+                      <template for="item of orgs"
+                        ><li>
+                          <a
+                            attr-href="orgHref(item)"
+                            class="block rounded-md border border-gray-200 px-4 py-3 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-900"
+                            >{{ item.slug }}</a
+                          >
+                        </li></template
+                      >
+                    </ul>
+                    <form
+                      class="flex max-w-md flex-col gap-2 sm:flex-row"
+                      on-submit.prevent="createOrganization($event)"
+                    >
+                      <input
+                        aria-label="Organization slug"
+                        placeholder="organization-slug"
+                        class="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900"
+                        required
+                        on-input="setOrgName($event.target.value)"
+                      /><button class="rounded-md bg-indigo-600 px-4 py-2 font-medium text-white" type="submit">
+                        Create organization
+                      </button>
+                    </form>
+                    <template if="orgCreated"
+                      ><p role="status" class="mt-3 text-sm text-green-700 dark:text-green-300">
+                        Organization created.
+                      </p></template
+                    >
+                    <template if="orgError"
+                      ><p role="alert" class="mt-3 text-sm text-red-600 dark:text-red-400">{{ orgError }}</p>
+                      <button
+                        class="mt-2 text-sm text-indigo-600 hover:underline dark:text-indigo-300"
+                        type="button"
+                        on-click="retryOrganizationLoad()"
+                      >
+                        Try again
+                      </button></template
+                    >
+                  </div>
+                </div></template
+              >
+              <template if="!repo && !settings"
                 ><div class="flex min-h-full flex-1 items-center justify-center text-center">
                   <div class="mx-auto w-full max-w-2xl p-6 sm:p-10">
-                    <template if="!org"
+                    <template if="orgError"
+                      ><p class="mb-2 text-sm text-red-600 dark:text-red-400" role="alert">{{ orgError }}</p>
+                      <button
+                        class="mb-4 text-sm text-indigo-600 hover:underline dark:text-indigo-300"
+                        type="button"
+                        on-click="retryOrganizationLoad()"
+                      >
+                        Try again
+                      </button></template
+                    >
+                    <template if="!org && !organizationsLoaded && !orgError"
+                      ><p class="text-sm text-gray-600 dark:text-gray-300" role="status">
+                        Loading organizations…
+                      </p></template
+                    >
+                    <template if="org && !orgRepositoriesLoaded && !orgError"
+                      ><p class="text-sm text-gray-600 dark:text-gray-300" role="status">
+                        Loading repositories…
+                      </p></template
+                    >
+                    <template if="!org && organizationsLoaded && orgs.length === 0"
                       ><div class="mx-auto mb-8 max-w-md text-center">
                         <img
                           src="/ui/welcome.svg"
@@ -566,13 +614,40 @@
                           Create organization
                         </button>
                       </form>
-                      <template if="orgError"
-                        ><p class="mt-3 text-center text-sm text-red-600 dark:text-red-400" role="alert">
-                          {{ orgError }}
-                        </p></template
-                      >
                     </template>
-                    <template if="org"
+                    <template if="!org && organizationsLoaded && orgs.length > 0"
+                      ><div class="w-full max-w-lg text-left">
+                        <h1 class="mb-4 text-3xl font-semibold">Your organizations</h1>
+                        <ul class="space-y-2">
+                          <template for="item of orgs"
+                            ><li>
+                              <a
+                                attr-href="orgHref(item)"
+                                class="block rounded-md border border-gray-200 px-4 py-3 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-900"
+                                >{{ item.slug }}</a
+                              >
+                            </li></template
+                          >
+                        </ul>
+                      </div></template
+                    >
+                    <template if="org && orgRepositoriesLoaded && orgRepositories.length > 0"
+                      ><div class="w-full max-w-2xl text-left">
+                        <h1 class="mb-4 text-3xl font-semibold">Repositories in {{ org }}</h1>
+                        <ul class="space-y-2">
+                          <template for="item of orgRepositories"
+                            ><li>
+                              <a
+                                attr-href="repositoryHref(item)"
+                                class="block rounded-md border border-gray-200 px-4 py-3 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-900"
+                                >{{ item.repo }}</a
+                              >
+                            </li></template
+                          >
+                        </ul>
+                      </div></template
+                    >
+                    <template if="org && orgRepositoriesLoaded && orgRepositories.length === 0"
                       ><div class="mx-auto max-w-md text-center">
                         <div
                           class="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300"
@@ -618,7 +693,7 @@
                   </div>
                 </div></template
               >
-              <template if="repo"
+              <template if="repo && !settings"
                 ><div class="mb-4 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-300">
                   <span
                     class="rounded bg-indigo-50 px-2 py-1 font-medium text-indigo-700 dark:bg-indigo-950 dark:text-indigo-200"
@@ -819,6 +894,11 @@
           <script state type="application/json">
             {
               "authStatus": "loading",
+              "orgs": [],
+              "organizationsLoaded": false,
+              "orgRepositories": [],
+              "orgRepositoriesLoaded": false,
+              "orgCreated": false,
               "signInUrl": "#",
               "repo": null,
               "entries": [],
@@ -837,6 +917,15 @@
             export default function () {
               const org = ref(new URL(window.location.href).searchParams.get("org") || "");
               const authStatus = ref("loading");
+              const settings = ref(new URL(window.location.href).searchParams.get("settings") === "organizations");
+              const orgs = ref([]);
+              const organizationsLoaded = ref(false);
+              const orgRepositories = ref([]);
+              const orgRepositoriesLoaded = ref(false);
+              const orgCreated = ref(false);
+              const orgHref = (item) => `/?org=${encodeURIComponent(item.slug)}`;
+              const repositoryHref = (item) =>
+                `/?org=${encodeURIComponent(org.value)}&repo=${encodeURIComponent(item.repo)}`;
               const signInUrl = ref("#");
               const orgName = ref("");
               const orgError = ref("");
@@ -864,10 +953,13 @@
               };
               const setOrgName = (value) => {
                 orgName.value = value;
+                orgCreated.value = false;
+                orgError.value = "";
               };
-              const createOrganization = async () => {
+              const createOrganization = async (event) => {
                 const slug = orgName.value.trim();
                 orgError.value = "";
+                orgCreated.value = false;
                 if (!/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]{0,61}[a-zA-Z0-9])?$/.test(slug)) {
                   orgError.value =
                     "Use 1–63 letters, numbers, dots, underscores, or hyphens; start and end with a letter or number.";
@@ -888,9 +980,66 @@
                     );
                   }
                   const result = await response.json();
-                  window.location.assign(`/ui/?org=${encodeURIComponent(result.org.slug)}`);
+                  if (settings.value) {
+                    await refreshOrganizations();
+                    orgCreated.value = true;
+                    orgName.value = "";
+                    event?.currentTarget?.reset();
+                  } else {
+                    window.location.assign(`/?org=${encodeURIComponent(result.org.slug)}`);
+                  }
                 } catch (error) {
                   orgError.value = error.message || "Organization creation failed.";
+                }
+              };
+              const refreshOrganizations = async () => {
+                const response = await fetch("/api/v1/orgs");
+                if (!response.ok) throw new Error("Unable to load organizations.");
+                const result = await response.json();
+                orgs.value = Array.isArray(result) ? result : Array.isArray(result.orgs) ? result.orgs : [];
+                organizationsLoaded.value = true;
+              };
+              const refreshOrgRepositories = async () => {
+                const slug = url().searchParams.get("org");
+                if (!slug) {
+                  orgRepositories.value = [];
+                  orgRepositoriesLoaded.value = true;
+                  return;
+                }
+                orgRepositoriesLoaded.value = false;
+                const response = await fetch(`/api/v1/orgs/${encodeURIComponent(slug)}/repos`);
+                if (!response.ok) {
+                  orgRepositories.value = [];
+                  throw new Error("Unable to load repositories for this organization.");
+                }
+                const result = await response.json().catch(() => ({}));
+                orgRepositories.value = Array.isArray(result)
+                  ? result
+                  : Array.isArray(result.repos)
+                    ? result.repos
+                    : [];
+                orgRepositoriesLoaded.value = true;
+              };
+              const retryOrganizationLoad = async () => {
+                orgError.value = "";
+                try {
+                  await refreshOrganizations();
+                } catch {
+                  orgError.value = "Unable to load organizations.";
+                  return;
+                }
+                try {
+                  await refreshOrgRepositories();
+                } catch {
+                  orgError.value = "Unable to load repositories for this organization.";
+                  return;
+                }
+                if (!settings.value) {
+                  try {
+                    await load();
+                  } catch {
+                    errorMessage.value = "Unable to load this repository.";
+                  }
                 }
               };
               const setCommitMessage = (value) => {
@@ -1096,10 +1245,24 @@
                   authStatus.value = "anonymous";
                   return;
                 }
+                try {
+                  await refreshOrganizations();
+                } catch {
+                  orgError.value = "Unable to load organizations.";
+                }
+                try {
+                  await refreshOrgRepositories();
+                } catch {
+                  orgError.value = "Unable to load repositories for this organization.";
+                }
+                if (!settings.value) {
+                  try {
+                    await load();
+                  } catch {
+                    errorMessage.value = "Unable to load this repository.";
+                  }
+                }
                 authStatus.value = "authenticated";
-                load().catch(() => {
-                  errorMessage.value = "Unable to load this repository.";
-                });
               });
               const handleFileSelect = async (files) => {
                 errorMessage.value = "";
@@ -1112,6 +1275,15 @@
               };
               return {
                 repo,
+                settings,
+                orgs,
+                organizationsLoaded,
+                orgRepositories,
+                orgRepositoriesLoaded,
+                orgCreated,
+                orgHref,
+                repositoryHref,
+                retryOrganizationLoad,
                 org,
                 orgError,
                 entries,
