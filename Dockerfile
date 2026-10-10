@@ -1,6 +1,7 @@
 FROM ghcr.io/cloud-cli/image-node:latest
 ENV DATA_PATH=/home/app/data
 ENV PORT=3000
+ENV OIDC_BROWSER_SCOPES="repo:read repo:write"
 
 USER 0
 COPY . .
