@@ -36,6 +36,26 @@
         min-height: 0;
         overflow: hidden;
       }
+      @media (max-width: 767px) {
+        html,
+        body {
+          height: auto;
+          min-height: 100%;
+        }
+        body {
+          min-height: 100vh;
+          overflow-x: hidden;
+          overflow-y: auto;
+        }
+        .workspace {
+          min-height: calc(100vh - 3.5rem);
+          overflow: visible;
+        }
+        .workspace > main,
+        .workspace > main > section {
+          overflow: visible;
+        }
+      }
       ::-webkit-scrollbar {
         width: 6px;
         height: 6px;
