@@ -1,0 +1,165 @@
+<template component="organization-landing">
+  <div class="flex min-h-full flex-1 items-center justify-center text-center">
+    <div class="mx-auto w-full max-w-2xl p-6 sm:p-10">
+      <template if="orgError"
+        ><p class="mb-2 text-sm text-red-600 dark:text-red-400" role="alert">{{ orgError }}</p>
+        <button
+          class="mb-4 text-sm text-indigo-600 hover:underline dark:text-indigo-300"
+          type="button"
+          on-click="retry()"
+        >
+          Try again
+        </button></template
+      >
+      <template if="!org && !organizationsLoaded && !orgError"
+        ><p class="text-sm text-gray-600 dark:text-gray-300" role="status">Loading organizations…</p></template
+      >
+      <template if="org && !repositoriesLoaded && !orgError"
+        ><p class="text-sm text-gray-600 dark:text-gray-300" role="status">Loading repositories…</p></template
+      >
+      <template if="!org && organizationsLoaded && organizations.length === 0"
+        ><div class="mx-auto mb-8 max-w-md text-center">
+          <img
+            src="/ui/welcome.svg"
+            alt="A repository workspace with connected branches"
+            class="mx-auto mb-8 w-full max-w-sm"
+          />
+          <p class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600 dark:text-indigo-300">
+            Step 1 of 2 · Workspace
+          </p>
+          <h1 class="text-3xl font-semibold tracking-tight">Create an organization</h1>
+          <p class="mt-3 text-gray-600 dark:text-gray-300">
+            Organizations keep your repositories together. Choose a name to get started.
+          </p>
+        </div>
+        <form class="mx-auto flex w-full max-w-md flex-col gap-3 sm:flex-row" on-submit.prevent="createOrganization()">
+          <label class="sr-only" for="first-org-name">Organization name</label>
+          <input
+            id="first-org-name"
+            class="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 py-3 text-gray-900 placeholder:text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-400"
+            placeholder="my-organization"
+            required
+            on-input="setOrganizationName($event.target.value)"
+          />
+          <button class="rounded-md bg-indigo-600 px-5 py-3 font-medium text-white hover:bg-indigo-500" type="submit">
+            Create organization
+          </button>
+        </form></template
+      >
+      <template if="!org && organizationsLoaded && organizations.length > 0"
+        ><div class="w-full max-w-lg text-left">
+          <h1 class="mb-4 text-3xl font-semibold">Your organizations</h1>
+          <ul class="space-y-2">
+            <template for="item of organizations"
+              ><li>
+                <a
+                  attr-href="organizationHref(item)"
+                  class="block rounded-md border border-gray-200 px-4 py-3 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-900"
+                  >{{ item.slug }}</a
+                >
+              </li></template
+            >
+          </ul>
+        </div></template
+      >
+      <template if="org && repositoriesLoaded && repositories.length > 0"
+        ><div class="w-full max-w-2xl text-left">
+          <h1 class="mb-4 text-3xl font-semibold">Repositories in {{ org }}</h1>
+          <ul class="space-y-2">
+            <template for="item of repositories"
+              ><li>
+                <a
+                  attr-href="repositoryHref(item)"
+                  class="block rounded-md border border-gray-200 px-4 py-3 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-900"
+                  >{{ item.repo }}</a
+                >
+              </li></template
+            >
+          </ul>
+        </div></template
+      >
+      <template if="org && repositoriesLoaded && repositories.length === 0"
+        ><div class="mx-auto max-w-md text-center">
+          <div
+            class="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300"
+          >
+            <i class="fa-solid fa-building text-2xl"></i>
+          </div>
+          <p class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600 dark:text-indigo-300">
+            Step 2 of 2 · {{ org }}
+          </p>
+          <h1 class="text-3xl font-semibold tracking-tight">Create your first repository</h1>
+          <p class="mt-3 text-gray-600 dark:text-gray-300">
+            Your repository will belong to <strong class="text-gray-900 dark:text-gray-100">{{ org }}</strong>.
+          </p>
+        </div>
+        <form
+          class="mx-auto mt-8 flex w-full max-w-md flex-col gap-3 sm:flex-row"
+          on-submit.prevent="createRepository()"
+        >
+          <label class="sr-only" for="first-repo-name">Repository name</label>
+          <input
+            id="first-repo-name"
+            class="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 py-3 text-gray-900 placeholder:text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-400"
+            placeholder="my-first-repository"
+            required
+            on-input="setRepositoryName($event.target.value)"
+          />
+          <button class="rounded-md bg-indigo-600 px-5 py-3 font-medium text-white hover:bg-indigo-500" type="submit">
+            Create repository
+          </button>
+        </form>
+        <template if="errorMessage"
+          ><p class="mt-3 text-center text-sm text-red-600 dark:text-red-400" role="alert">
+            {{ errorMessage }}
+          </p></template
+        ></template
+      >
+    </div>
+  </div>
+
+  <script setup>
+    import { defineProp, defineEvent, ref } from "@li3/web";
+    export default function () {
+      const org = defineProp("org", { default: "" });
+      const organizations = defineProp("organizations", { default: () => [] });
+      const organizationsLoaded = defineProp("organizationsLoaded", { default: false });
+      const repositories = defineProp("repositories", { default: () => [] });
+      const repositoriesLoaded = defineProp("repositoriesLoaded", { default: false });
+      const orgError = defineProp("orgError", { default: "" });
+      const errorMessage = defineProp("errorMessage", { default: "" });
+      const emitCreateOrganization = defineEvent("createorg");
+      const emitCreateRepository = defineEvent("createrepo");
+      const emitRetry = defineEvent("retry");
+      const organizationName = ref("");
+      const repositoryName = ref("");
+      const organizationHref = (item) => `/?org=${encodeURIComponent(item.slug)}`;
+      const repositoryHref = (item) => `/?org=${encodeURIComponent(org.value)}&repo=${encodeURIComponent(item.repo)}`;
+      const setOrganizationName = (value) => {
+        organizationName.value = value;
+      };
+      const setRepositoryName = (value) => {
+        repositoryName.value = value;
+      };
+      const createOrganization = () => emitCreateOrganization(organizationName.value.trim());
+      const createRepository = () => emitCreateRepository(repositoryName.value.trim());
+      const retry = () => emitRetry();
+      return {
+        org,
+        organizations,
+        organizationsLoaded,
+        repositories,
+        repositoriesLoaded,
+        orgError,
+        errorMessage,
+        organizationHref,
+        repositoryHref,
+        setOrganizationName,
+        setRepositoryName,
+        createOrganization,
+        createRepository,
+        retry,
+      };
+    }
+  </script>
+</template>

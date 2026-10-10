@@ -85,18 +85,17 @@ session, and OIDC endpoints use `/ui/*`, and static assets are served under `/ui
 The OpenAPI document lists the `/api/v1/*` application API and Git Smart HTTP routes,
 not UI-only endpoints. Repository and file-preview state is stored in the
 URL query string (`repo`, `ref`, and `path`), so navigation survives refreshes.
-The UI is a Li³ application split into independent `<template app>` islands for the
-session topbar, repository navigation, selected repository viewer, and refs panel.
-Its initial theme follows the operating system's color-scheme preference; a manual
-toggle is remembered in local storage.
-Each island hydrates JSON state and independently fetches its own API data; URL query
-parameters synchronize repository/file navigation across reloads. The UI uses refs,
-computed values, lifecycle hooks, and event bindings. Framework reference:
+The UI uses a single Li³ `<template app>` root to own session, route, organization,
+repository, theme, and repository-ref state. Reusable sign-in, organization landing,
+and organization settings pages are separate Li³ components, with shared state passed
+through props and user actions emitted back to the root. URL query parameters preserve
+repository/file navigation across reloads. The UI uses refs, computed values, lifecycle
+hooks, and event bindings. Framework reference:
 https://li3.static.apphor.de/docs.html.
 The signed-out user card starts OIDC authorization-code + PKCE sign-in; signed-in users
 can open `${OIDC_ISSUER}/me`. Access tokens stay server-side in an opaque signed session.
-The topbar presents an explicit Sign in button for guests; the light/dark control synchronizes
-reactive theme state across all four page islands using Tailwind v4's class-based variant.
+The topbar presents an explicit Sign in button for guests; its light/dark control updates
+the root theme state using Tailwind v4's class-based variant.
 The repository plus button opens an anchored HTML popover. Empty repositories offer a file upload that creates the initial commit;
 files dropped into or selected for an existing repository remain unstaged and are marked
 with `*`. Branch and tag empty states provide matching create popovers.

@@ -198,9 +198,10 @@ When no repositories exist for a subject or tags/branches lists are empty:
 - **Empty tag/branch lists**: Show “No tags/branches. Create one” actions and anchored popovers.
 - **Existing repository**: Files can be uploaded through a file input or by dropping them on the file list; uploads remain unstaged.
 
-The UI is built with Li³ `@li3/web`: four independent `<template app>` islands own the
-topbar/ui/session, repository navigation, selected-repository viewer, and branches/tags
-panel. Each island declares initial JSON using `<script state>` and hydrates its own
-state in setup with refs, computed values, lifecycle hooks, and `on-*` bindings. The
-URL query string shares navigation state across islands and preserves it on refresh.
+The UI is built with Li³ `@li3/web`: a single `<template app>` root owns shared session,
+route, organization, repository, theme, and branch/tag state. Sign-in, organization
+landing, and organization settings pages are reusable components whose state is passed
+from the root through props and whose actions are emitted back to it. The root uses
+refs, computed values, lifecycle hooks, and `on-*` bindings. The URL query string
+preserves navigation state on refresh.
 The UI selects an organization and repository; repository API and Git paths always include both slugs.

@@ -1,0 +1,72 @@
+<template component="organization-settings">
+  <div class="flex min-h-full flex-1 gap-6 p-4 md:p-8">
+    <nav
+      class="w-32 flex-shrink-0 border-r border-gray-200 pr-3 sm:w-44 sm:pr-4 dark:border-gray-800"
+      aria-label="Settings navigation"
+    >
+      <h1 class="mb-4 text-xl font-semibold">Settings</h1>
+      <a
+        href="/?settings=organizations"
+        aria-current="page"
+        class="block rounded-md bg-indigo-50 px-3 py-2 font-medium text-indigo-700 dark:bg-indigo-950 dark:text-indigo-200"
+        >Organizations</a
+      >
+    </nav>
+    <div class="min-w-0 flex-1">
+      <h2 class="mb-4 text-2xl font-semibold">Organizations</h2>
+      <ul class="mb-6 space-y-2">
+        <template for="item of organizations"
+          ><li>
+            <a
+              attr-href="organizationHref(item)"
+              class="block rounded-md border border-gray-200 px-4 py-3 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-900"
+              >{{ item.slug }}</a
+            >
+          </li></template
+        >
+      </ul>
+      <form class="flex max-w-md flex-col gap-2 sm:flex-row" on-submit.prevent="createOrganization()">
+        <input
+          aria-label="Organization slug"
+          placeholder="organization-slug"
+          class="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900"
+          required
+          on-input="setOrganizationName($event.target.value)"
+        /><button class="rounded-md bg-indigo-600 px-4 py-2 font-medium text-white" type="submit">
+          Create organization
+        </button>
+      </form>
+      <template if="created"
+        ><p role="status" class="mt-3 text-sm text-green-700 dark:text-green-300">Organization created.</p></template
+      >
+      <template if="error"
+        ><p role="alert" class="mt-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
+        <button
+          class="mt-2 text-sm text-indigo-600 hover:underline dark:text-indigo-300"
+          type="button"
+          on-click="retry()"
+        >
+          Try again
+        </button></template
+      >
+    </div>
+  </div>
+  <script setup>
+    import { defineProp, defineEvent, ref } from "@li3/web";
+    export default function () {
+      const organizations = defineProp("organizations", { default: () => [] });
+      const created = defineProp("created", { default: false });
+      const error = defineProp("error", { default: "" });
+      const emitCreate = defineEvent("createorg");
+      const emitRetry = defineEvent("retry");
+      const organizationName = ref("");
+      const organizationHref = (item) => `/?org=${encodeURIComponent(item.slug)}`;
+      const setOrganizationName = (value) => {
+        organizationName.value = value;
+      };
+      const createOrganization = () => emitCreate(organizationName.value.trim());
+      const retry = () => emitRetry();
+      return { organizations, created, error, organizationHref, setOrganizationName, createOrganization, retry };
+    }
+  </script>
+</template>

@@ -111,37 +111,43 @@ async function git(args, options = {}) {
 
 async function run() {
   const ui = fs.readFileSync(path.join(__dirname, "../public/index.html"), "utf8");
-  assert.ok(ui.includes("showWorkspace && repositories.length > 0"), "repository sidebar waits for repositories");
+  const organizationLanding = fs.readFileSync(
+    path.join(__dirname, "../public/components/organization-landing.html"),
+    "utf8",
+  );
+  const organizationSettings = fs.readFileSync(
+    path.join(__dirname, "../public/components/organization-settings.html"),
+    "utf8",
+  );
+  const signInLanding = fs.readFileSync(path.join(__dirname, "../public/components/sign-in-landing.html"), "utf8");
+  assert.strictEqual((ui.match(/<template app>/g) || []).length, 1, "the page has a single shared Li³ app root");
+  assert.strictEqual((ui.match(/<script setup>/g) || []).length, 1, "all page state has one setup context");
+  assert.ok(ui.includes("showWorkspace && orgRepositories.length > 0"), "repository sidebar waits for repositories");
   assert.ok(ui.includes('on-click="openSettings()"'), "user card opens in-app settings");
-  assert.ok(ui.includes("`/?org=${encodeURIComponent(org.value)}&repo=${encodeURIComponent(repo.value)}`"));
-  assert.ok(ui.includes('href="/?settings=organizations"'), "settings sidebar has an Organizations page");
-  assert.ok(ui.includes("await refreshOrganizations()"), "creating an org refreshes the settings list in place");
-  assert.ok(ui.includes('on-click="retryOrganizationLoad()"'), "organization list errors can be retried");
-  assert.ok(ui.includes('current.searchParams.delete("repo")'), "changing organizations clears dependent repo state");
+  assert.ok(ui.includes('if="profile && org && !settings"'), "breadcrumbs are hidden until a session profile exists");
+  assert.ok(ui.includes('bind-repositories="orgRepositories"'), "landing pages receive root-owned repository state");
+  assert.ok(ui.includes('on-createrepo="createFirstRepository($event.detail)"'), "landing actions update root state");
+  assert.ok(!ui.includes("{{ repo.repo }}</h1>"), "repository name is not repeated below the breadcrumb");
+  assert.ok(ui.includes("Welcome to your Git server"), "empty repository welcome uses the Git server wording");
+  assert.ok(organizationLanding.includes("Your organizations"), "organization home is a dedicated Li³ component");
   assert.ok(
-    ui.includes('template if="!org && organizationsLoaded && orgs.length > 0"'),
-    "homepage lists existing organizations after loading",
+    organizationLanding.includes("Create your first repository"),
+    "repo onboarding is a dedicated Li³ component",
   );
+  assert.ok(organizationLanding.includes('defineEvent("createrepo")'), "landing emits repository creation to the root");
+  assert.ok(organizationSettings.includes('href="/?settings=organizations"'), "settings is a dedicated Li³ component");
+  assert.ok(organizationSettings.includes('defineEvent("createorg")'), "settings emits org creation to the root");
+  assert.ok(signInLanding.includes("Sign in to get started"), "anonymous landing is a dedicated Li³ component");
   assert.ok(
-    ui.includes('template if="org && orgRepositoriesLoaded && orgRepositories.length > 0"'),
-    "organization page lists repositories after loading",
-  );
-  assert.ok(
-    ui.includes('template if="org && orgRepositoriesLoaded && orgRepositories.length === 0"'),
-    "empty org shows first-repo onboarding after loading",
+    ui.includes('currentUrl.searchParams.delete("repo")'),
+    "changing organizations clears dependent repo state",
   );
   assert.ok(ui.includes('get("settings") === "organizations"'), "settings route is selected in-app");
-  assert.ok(ui.includes("Your organizations"), "authenticated homepage lists organizations");
-  assert.ok(ui.includes("showWorkspace.value = Boolean(selectedOrg.value && repositories.value.length > 0)"));
-  assert.ok(
-    ui.includes('org.value = session.authenticated ? params.get("org") || "" : "";'),
-    "anonymous visitors do not see organization/repository breadcrumbs",
-  );
   assert.ok(
     ui.includes(
-      "if (!session.authenticated) {\n                  return;\n                }\n                const query",
+      'if (!session.authenticated) {\n                  profile.value = null;\n                  authStatus.value = "anonymous";\n                  return;',
     ),
-    "branch/tag navigation requires an authenticated session",
+    "anonymous visitors do not load private organization/repository state",
   );
   const server = app.listen(0);
   await new Promise((resolve) => server.once("listening", resolve));
@@ -1110,6 +1116,15 @@ async function run() {
 
     const uiResponse = await request(port, "GET", "/ui/");
     assert.strictEqual(uiResponse.status, 200);
+    assert.strictEqual((uiResponse.body.match(/<template app>/g) || []).length, 1);
+    assert.strictEqual((uiResponse.body.match(/<script setup>/g) || []).length, 1);
+    for (const componentPath of [
+      "/ui/components/organization-landing.html",
+      "/ui/components/organization-settings.html",
+      "/ui/components/sign-in-landing.html",
+    ]) {
+      assert.strictEqual((await request(port, "GET", componentPath)).status, 200, `${componentPath} is served`);
+    }
     const repoPanelResponse = await request(port, "GET", "/ui/components/repo-panel.html");
     assert.strictEqual(repoPanelResponse.status, 200);
     const welcomeResponse = await request(port, "GET", "/ui/welcome.svg");
@@ -1117,7 +1132,7 @@ async function run() {
     assert.ok(welcomeResponse.body.includes("Build your workspace"));
     assert.strictEqual((await request(port, "GET", "/welcome.svg")).status, 404);
     assert.ok(uiResponse.body.includes("{{ repo.repo }}"));
-    assert.ok(uiResponse.body.includes("repo=${encodeURIComponent(repo.repo)}"));
+    assert.ok(uiResponse.body.includes("repo=${encodeURIComponent(item.repo)}"));
     assert.ok(!uiResponse.body.includes("{{ repo.owner }}"));
     assert.ok(uiResponse.body.includes("fixed inset-0 z-30 bg-black/40 md:hidden"));
     assert.ok(uiResponse.body.includes('on-click="closeMenu()"'));
@@ -1129,15 +1144,16 @@ async function run() {
     assert.ok(uiResponse.body.includes('<style type="text/tailwindcss">'));
     assert.ok(uiResponse.body.includes("@custom-variant dark (&:where(.dark, .dark *));"));
     assert.ok(uiResponse.body.includes("<span>Sign in</span>"));
-    assert.ok(uiResponse.body.includes("Sign in to get started"));
     assert.ok(uiResponse.body.includes("authStatus === 'anonymous'"));
-    assert.ok(uiResponse.body.includes('<template if="showWorkspace && repositories.length > 0 && !settings">'));
-    assert.ok(uiResponse.body.includes("Create an organization"));
-    assert.ok(uiResponse.body.includes("Step 2 of 2"));
+    assert.ok(uiResponse.body.includes('<template if="showWorkspace && orgRepositories.length > 0 && !settings">'));
+    assert.ok(uiResponse.body.includes("organization-landing"));
+    assert.ok(uiResponse.body.includes("organization-settings"));
+    assert.ok(uiResponse.body.includes("sign-in-landing"));
+    assert.ok(uiResponse.body.includes("Welcome to your Git server"));
+    assert.ok(!uiResponse.body.includes("{{ repo.repo }}</h1>"));
     assert.ok(uiResponse.body.includes("await refreshOrganizations()"));
-    assert.ok(uiResponse.body.includes('params.has("org")'));
-    assert.ok(uiResponse.body.includes('<template if="authenticated">'));
-    assert.ok(uiResponse.body.includes('fetch("/ui/session", { credentials: "same-origin" })'));
+    assert.ok(uiResponse.body.includes('if="profile && org && !settings"'));
+    assert.strictEqual((uiResponse.body.match(/fetch\("\/ui\/session"/g) || []).length, 1);
     assert.ok(!uiResponse.body.includes("access_token"), "UI auth must not depend on locally stored access tokens");
     assert.ok(
       !repoPanelResponse.body.includes("access_token"),
@@ -1156,33 +1172,17 @@ async function run() {
     );
     assert.ok(uiResponse.body.includes("No branches."));
     assert.ok(uiResponse.body.includes("No tags."));
-    assert.strictEqual(
-      (uiResponse.body.match(/window\.matchMedia\("\(prefers-color-scheme: dark\)"\)/g) || []).length,
-      2,
-      "the page should initialize its theme from the system preference",
-    );
+    assert.ok(uiResponse.body.includes('window.matchMedia("(prefers-color-scheme: dark)")'));
     assert.ok(
       uiResponse.body.includes('profile.value?.name || profile.value?.email?.split("@")[0]'),
       "the signed-in user card uses available name/email fields",
     );
-    const mainStart = uiResponse.body.indexOf("<main ");
-    const viewerStateStart = uiResponse.body.indexOf('<script state type="application/json">', mainStart);
-    assert.ok(viewerStateStart >= 0, "viewer state JSON must be present");
-    const viewerStateEnd = uiResponse.body.indexOf("</script>", viewerStateStart);
-    assert.ok(viewerStateEnd > viewerStateStart, "viewer state JSON must be closed");
-    const viewerStateJson = uiResponse.body
-      .slice(viewerStateStart + '<script state type="application/json">'.length, viewerStateEnd)
-      .trim();
-    assert.ok(
-      !Object.hasOwn(JSON.parse(viewerStateJson), "org"),
-      "viewer state must not override the organization initialized from the URL",
-    );
-    const viewerSetupStart = uiResponse.body.indexOf("<script setup>", mainStart);
-    const viewerSetupEnd = uiResponse.body.indexOf("</script>", viewerSetupStart);
-    const viewerSetup = uiResponse.body.slice(viewerSetupStart, viewerSetupEnd);
-    assert.ok(viewerSetup.includes('searchParams.get("org")'), "viewer organization should initialize from the URL");
-    assert.ok(viewerSetup.includes("const setAddFilePath"), "add-file input handler must be in the viewer app island");
-    assert.ok(viewerSetup.includes("setAddFilePath,"), "viewer app island must expose the add-file input handler");
+    const rootSetupStart = uiResponse.body.indexOf("<script setup>");
+    const rootSetupEnd = uiResponse.body.indexOf("</script>", rootSetupStart);
+    const rootSetup = uiResponse.body.slice(rootSetupStart, rootSetupEnd);
+    assert.ok(rootSetup.includes('searchParams.get("org")'), "the shared app state initializes organization from URL");
+    assert.ok(rootSetup.includes("const setAddFilePath"), "the shared app owns the add-file handler");
+    assert.ok(rootSetup.includes("setAddFilePath,"), "the shared app exposes the add-file handler");
     const sidebarComponent = fs.readFileSync(path.join(__dirname, "../public/components/repo-sidebar.html"), "utf8");
     const repoPanelComponent = fs.readFileSync(path.join(__dirname, "../public/components/repo-panel.html"), "utf8");
     const repoViewerComponent = fs.readFileSync(path.join(__dirname, "../public/components/repo-viewer.html"), "utf8");
