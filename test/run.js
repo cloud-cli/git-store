@@ -132,14 +132,17 @@ async function run() {
   assert.ok(ui.includes("Welcome to your Git server"), "empty repository welcome uses the Git server wording");
   assert.ok(organizationLanding.includes("Your organizations"), "organization home is a dedicated Li³ component");
   assert.ok(
-    organizationLanding.includes("Create your first repository"),
-    "repo onboarding is a dedicated Li³ component",
+    organizationLanding.includes("No repositories found in {{ org }}"),
+    "empty organization state does not claim the user has no repository elsewhere",
   );
   assert.ok(organizationLanding.includes('defineEvent("createrepo")'), "landing emits repository creation to the root");
   assert.ok(organizationSettings.includes('href="/?settings=organizations"'), "settings is a dedicated Li³ component");
   assert.ok(organizationSettings.includes('defineEvent("createorg")'), "settings emits org creation to the root");
   assert.ok(signInLanding.includes("Sign in to get started"), "anonymous landing is a dedicated Li³ component");
   assert.ok(ui.includes("Your account does not have repository write access (repo:write)."));
+  assert.ok(ui.includes("session.canWrite === true"), "write capability comes from the browser-session response");
+  assert.ok(ui.includes('result.error || "Upload failed."'), "upload errors preserve backend diagnostics");
+  assert.ok(ui.includes("authStatus === 'authenticated' && repoLoadError && !settings"));
   assert.ok(ui.includes('template if="addFileError"'), "add-file errors stay within the add-file dialog");
   for (const popoverId of ["create-repo-popover", "add-file-popover", "branch-popover", "tag-popover"]) {
     const popoverStart = ui.indexOf(`id="${popoverId}"`);
@@ -236,6 +239,40 @@ async function run() {
       "-m",
       "initial organization commit",
     ]);
+    const scopedFile = await request(
+      port,
+      "POST",
+      "/api/v1/orgs/team-one/repos/inside/files",
+      { path: "from-ui.txt", content: Buffer.from("org-scoped write").toString("base64") },
+      "token-a",
+    );
+    assert.strictEqual(scopedFile.status, 201, `org-scoped upload works: ${scopedFile.body}`);
+    const scopedStage = await request(
+      port,
+      "POST",
+      "/api/v1/orgs/team-one/repos/inside/stage",
+      { files: ["from-ui.txt"] },
+      "token-a",
+    );
+    assert.strictEqual(scopedStage.status, 200, `org-scoped stage works: ${scopedStage.body}`);
+    const scopedCommit = await request(
+      port,
+      "POST",
+      "/api/v1/orgs/team-one/repos/inside/commit",
+      { message: "org scoped write" },
+      "token-a",
+    );
+    assert.strictEqual(scopedCommit.status, 200, `org-scoped commit works: ${scopedCommit.body}`);
+    const scopedRepos = await request(port, "GET", "/api/v1/orgs/team-one/repos", undefined, "token-a");
+    assert.deepStrictEqual(JSON.parse(scopedRepos.body).repos, [{ repo: "inside" }]);
+    const readOnlyScopedWrite = await request(
+      port,
+      "POST",
+      "/api/v1/orgs/reader-org/repos/readonly-repo/files",
+      { path: "denied.txt", content: "" },
+      "read-only",
+    );
+    assert.strictEqual(readOnlyScopedWrite.status, 403, "organization-scoped writes still enforce repo:write");
     const orgClonePath = path.join(dataPath, "clone-org");
     const orgAuthHeader = `Authorization: Basic ${Buffer.from("arbitrary-user:token-a").toString("base64")}`;
     const orgGitUrl = `http://127.0.0.1:${port}/git/team-one/inside.git`;
@@ -1073,7 +1110,30 @@ async function run() {
         sub: "browser-subject",
         name: "Signed In",
       },
+      canWrite: true,
     });
+    process.env.OIDC_BROWSER_SCOPES = "repo:read";
+    const readOnlyLogin = await request(port, "GET", "/ui/auth/login");
+    const readOnlyAuthorization = new URL(readOnlyLogin.headers.location);
+    const readOnlyCookies = readOnlyLogin.headers["set-cookie"].map((cookie) => cookie.split(";")[0]).join("; ");
+    const readOnlyCallback = await request(
+      port,
+      "GET",
+      `/ui/auth/callback?code=mock-code&state=${encodeURIComponent(readOnlyAuthorization.searchParams.get("state"))}`,
+      undefined,
+      undefined,
+      { Cookie: readOnlyCookies },
+    );
+    assert.strictEqual(readOnlyCallback.status, 303);
+    const readOnlySessionCookie = readOnlyCallback.headers["set-cookie"]
+      .map((cookie) => cookie.split(";")[0])
+      .find((cookie) => cookie.startsWith("git_store_session="));
+    const readOnlyBrowserSession = await request(port, "GET", "/ui/session", undefined, undefined, {
+      Cookie: readOnlySessionCookie,
+      Origin: `http://127.0.0.1:${port}`,
+    });
+    assert.strictEqual(JSON.parse(readOnlyBrowserSession.body).canWrite, false);
+    process.env.OIDC_BROWSER_SCOPES = "repo:read repo:write";
     const tokenVerifier = app.locals.verifyToken;
     process.env.OIDC_CLIENT_ID = "mock-git-store-client";
     app.locals.verifyToken = null;

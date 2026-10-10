@@ -32,19 +32,29 @@
             Organizations keep your repositories together. Choose a name to get started.
           </p>
         </div>
-        <form class="mx-auto flex w-full max-w-md flex-col gap-3 sm:flex-row" on-submit.prevent="createOrganization()">
-          <label class="sr-only" for="first-org-name">Organization name</label>
-          <input
-            id="first-org-name"
-            class="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 py-3 text-gray-900 placeholder:text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-400"
-            placeholder="my-organization"
-            required
-            on-input="setOrganizationName($event.target.value)"
-          />
-          <button class="rounded-md bg-indigo-600 px-5 py-3 font-medium text-white hover:bg-indigo-500" type="submit">
-            Create organization
-          </button>
-        </form></template
+        <template if="canWrite"
+          ><form
+            class="mx-auto flex w-full max-w-md flex-col gap-3 sm:flex-row"
+            on-submit.prevent="createOrganization()"
+          >
+            <label class="sr-only" for="first-org-name">Organization name</label>
+            <input
+              id="first-org-name"
+              class="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 py-3 text-gray-900 placeholder:text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-400"
+              placeholder="my-organization"
+              required
+              on-input="setOrganizationName($event.target.value)"
+            />
+            <button class="rounded-md bg-indigo-600 px-5 py-3 font-medium text-white hover:bg-indigo-500" type="submit">
+              Create organization
+            </button>
+          </form></template
+        >
+        <template if="!canWrite && !org"
+          ><p class="mt-4 text-sm text-amber-700 dark:text-amber-300" role="status">
+            Read-only access: ask your Git Store administrator to enable repository write access (repo:write).
+          </p></template
+        ></template
       >
       <template if="!org && organizationsLoaded && organizations.length > 0"
         ><div class="w-full max-w-lg text-left">
@@ -88,27 +98,35 @@
           <p class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600 dark:text-indigo-300">
             Step 2 of 2 · {{ org }}
           </p>
-          <h1 class="text-3xl font-semibold tracking-tight">Create your first repository</h1>
+          <h1 class="text-3xl font-semibold tracking-tight">No repositories found in {{ org }}</h1>
           <p class="mt-3 text-gray-600 dark:text-gray-300">
-            Your repository will belong to <strong class="text-gray-900 dark:text-gray-100">{{ org }}</strong>.
+            If you expected an existing repository, verify that it belongs to this organization and Git Store instance.
+            A new repository will belong to <strong class="text-gray-900 dark:text-gray-100">{{ org }}</strong>.
           </p>
         </div>
-        <form
-          class="mx-auto mt-8 flex w-full max-w-md flex-col gap-3 sm:flex-row"
-          on-submit.prevent="createRepository()"
+        <template if="canWrite"
+          ><form
+            class="mx-auto mt-8 flex w-full max-w-md flex-col gap-3 sm:flex-row"
+            on-submit.prevent="createRepository()"
+          >
+            <label class="sr-only" for="first-repo-name">Repository name</label>
+            <input
+              id="first-repo-name"
+              class="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 py-3 text-gray-900 placeholder:text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-400"
+              placeholder="my-first-repository"
+              required
+              on-input="setRepositoryName($event.target.value)"
+            />
+            <button class="rounded-md bg-indigo-600 px-5 py-3 font-medium text-white hover:bg-indigo-500" type="submit">
+              Create repository
+            </button>
+          </form></template
         >
-          <label class="sr-only" for="first-repo-name">Repository name</label>
-          <input
-            id="first-repo-name"
-            class="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 py-3 text-gray-900 placeholder:text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-400"
-            placeholder="my-first-repository"
-            required
-            on-input="setRepositoryName($event.target.value)"
-          />
-          <button class="rounded-md bg-indigo-600 px-5 py-3 font-medium text-white hover:bg-indigo-500" type="submit">
-            Create repository
-          </button>
-        </form>
+        <template if="!canWrite"
+          ><p class="mt-4 text-sm text-amber-700 dark:text-amber-300" role="status">
+            Read-only access: ask your Git Store administrator to enable repository write access (repo:write).
+          </p></template
+        >
         <template if="errorMessage"
           ><p class="mt-3 text-center text-sm text-red-600 dark:text-red-400" role="alert">
             {{ errorMessage }}
@@ -122,6 +140,7 @@
     import { defineProp, defineEvent, ref } from "@li3/web";
     export default function () {
       const org = defineProp("org", { default: "" });
+      const canWrite = defineProp("canWrite", { default: false });
       const organizations = defineProp("organizations", { default: () => [] });
       const organizationsLoaded = defineProp("organizationsLoaded", { default: false });
       const repositories = defineProp("repositories", { default: () => [] });
@@ -146,6 +165,7 @@
       const retry = () => emitRetry();
       return {
         org,
+        canWrite,
         organizations,
         organizationsLoaded,
         repositories,

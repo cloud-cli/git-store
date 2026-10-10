@@ -158,14 +158,20 @@
               <h2 class="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
                 Repositories
               </h2>
-              <button
-                popovertarget="create-repo-popover"
-                style="anchor-name: --create-repository-anchor"
-                class="p-2 text-gray-500 dark:text-gray-300"
-                aria-label="Create repository"
+              <template if="canWrite"
+                ><button
+                  popovertarget="create-repo-popover"
+                  style="anchor-name: --create-repository-anchor"
+                  class="p-2 text-gray-500 dark:text-gray-300"
+                  aria-label="Create repository"
+                >
+                  <i class="fa-solid fa-plus"></i></button
+              ></template>
+              <template if="!canWrite"
+                ><span class="text-xs text-gray-500" title="Repository write access is required"
+                  >Read-only</span
+                ></template
               >
-                <i class="fa-solid fa-plus"></i>
-              </button>
             </div>
             <div class="flex-1 space-y-1 overflow-y-auto p-2">
               <template for="repo of orgRepositories"
@@ -178,35 +184,20 @@
                 ></template
               >
             </div>
-            <div
-              popover="auto"
-              id="create-repo-popover"
-              style="
-                position: fixed;
-                inset: auto;
-                margin: 0;
-                position-anchor: --create-repository-anchor;
-                top: anchor(bottom);
-                left: anchor(left);
-              "
-              class="w-64 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-            >
-              <!-- Show sign-in button when not authenticated -->
-              <template if="authStatus !== 'authenticated'">
-                <div class="text-center py-8">
-                  <a
-                    href="/ui/auth/login"
-                    class="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-500"
-                    aria-label="Sign in to create repository"
-                  >
-                    <i class="fa-solid fa-arrow-right-to-bracket"></i>
-                    <span>Sign in to create repository</span>
-                  </a>
-                  <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Create a repository after signing in</p>
-                </div>
-                <!-- Show form when authenticated -->
-              </template>
-              <template if="authStatus === 'authenticated'">
+            <template if="canWrite"
+              ><div
+                popover="auto"
+                id="create-repo-popover"
+                style="
+                  position: fixed;
+                  inset: auto;
+                  margin: 0;
+                  position-anchor: --create-repository-anchor;
+                  top: anchor(bottom);
+                  left: anchor(left);
+                "
+                class="w-64 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+              >
                 <form on-submit.prevent="createRepository()" class="space-y-4">
                   <h2 class="text-lg font-semibold">Create repository</h2>
                   <label class="block text-sm text-gray-600 dark:text-gray-300"
@@ -236,8 +227,8 @@
                     </button>
                   </div>
                 </form>
-              </template>
-            </div>
+              </div></template
+            >
           </aside>
           <template if="menuOpen"
             ><div class="fixed inset-0 z-30 bg-black/40 md:hidden" on-click="closeMenu()"></div
@@ -262,8 +253,19 @@
               ><sign-in-landing bind-sign-in-url="userUrl"></sign-in-landing
             ></template>
             <template if="authStatus === 'authenticated'">
+              <template if="!canWrite"
+                ><div
+                  class="mb-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100"
+                  role="status"
+                >
+                  Read-only access: this session does not have repository write access (repo:write). Ask your Git Store
+                  administrator to enable it. You can browse repositories, but cannot create repositories or upload/add
+                  files.
+                </div></template
+              >
               <template if="authStatus === 'authenticated' && settings"
                 ><organization-settings
+                  bind-can-write="canWrite"
                   bind-organizations="orgs"
                   bind-created="orgCreated"
                   bind-error="orgError"
@@ -271,9 +273,18 @@
                   on-retry="retryOrganizationLoad()"
                 ></organization-settings
               ></template>
-              <template if="authStatus === 'authenticated' && !repo && !settings"
+              <template if="authStatus === 'authenticated' && repoLoadError && !settings"
+                ><section class="m-auto max-w-xl p-6 text-center">
+                  <p class="text-red-700 dark:text-red-300" role="alert">{{ repoLoadError }}</p>
+                  <a attr-href="orgHref" class="mt-4 inline-block text-indigo-600 hover:underline dark:text-indigo-300"
+                    >Back to organization</a
+                  >
+                </section></template
+              >
+              <template if="authStatus === 'authenticated' && !repo && !repoLoadError && !settings"
                 ><organization-landing
                   bind-org="org"
+                  bind-can-write="canWrite"
                   bind-organizations="orgs"
                   bind-organizations-loaded="organizationsLoaded"
                   bind-repositories="orgRepositories"
@@ -289,60 +300,64 @@
                 ><div class="mb-4 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-300">
                   <a attr-href="rootHref" class="hover:text-indigo-600 dark:hover:text-indigo-300">Repository root</a
                   ><span>/</span><span>{{ directory || 'Root' }}</span>
-                  <button
-                    popovertarget="add-file-popover"
-                    style="anchor-name: --add-file-anchor"
-                    class="ml-2 text-xs text-indigo-600 hover:underline dark:text-indigo-300"
+                  <template if="canWrite"
+                    ><button
+                      popovertarget="add-file-popover"
+                      style="anchor-name: --add-file-anchor"
+                      class="ml-2 text-xs text-indigo-600 hover:underline dark:text-indigo-300"
+                    >
+                      + Add file
+                    </button></template
                   >
-                    + Add file
-                  </button>
                 </div>
                 <template if="errorMessage"
                   ><p class="mb-3 text-xs text-red-600 dark:text-red-400" role="alert">{{ errorMessage }}</p></template
                 >
-                <div
-                  popover="auto"
-                  id="add-file-popover"
-                  style="
-                    position: fixed;
-                    inset: auto;
-                    margin: 0;
-                    position-anchor: --add-file-anchor;
-                    top: anchor(bottom);
-                    left: anchor(left);
-                  "
-                  class="w-64 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                <template if="canWrite"
+                  ><div
+                    popover="auto"
+                    id="add-file-popover"
+                    style="
+                      position: fixed;
+                      inset: auto;
+                      margin: 0;
+                      position-anchor: --add-file-anchor;
+                      top: anchor(bottom);
+                      left: anchor(left);
+                    "
+                    class="w-64 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                  >
+                    <form on-submit.prevent="addFileToRepo()" class="space-y-4">
+                      <h3 class="text-sm font-semibold">Add file</h3>
+                      <label class="block text-xs text-gray-600 dark:text-gray-300"
+                        >Full relative path<input
+                          class="mt-1 w-full rounded-md border border-gray-300 bg-transparent px-3 py-2 outline-none focus:border-indigo-500 dark:border-gray-700"
+                          placeholder="src/index.html"
+                          required
+                          on-input="setAddFilePath($event.target.value)"
+                      /></label>
+                      <template if="addFileError"
+                        ><p class="text-xs text-red-600 dark:text-red-400" role="alert">{{ addFileError }}</p></template
+                      >
+                      <div class="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          class="rounded-md px-2 py-1 text-gray-500 dark:text-gray-300"
+                          popovertarget="add-file-popover"
+                          popovertargetaction="hide"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          class="rounded-md bg-indigo-600 px-2 py-1 text-sm font-medium text-white hover:bg-indigo-500"
+                          type="submit"
+                        >
+                          Create
+                        </button>
+                      </div>
+                    </form>
+                  </div></template
                 >
-                  <form on-submit.prevent="addFileToRepo()" class="space-y-4">
-                    <h3 class="text-sm font-semibold">Add file</h3>
-                    <label class="block text-xs text-gray-600 dark:text-gray-300"
-                      >Full relative path<input
-                        class="mt-1 w-full rounded-md border border-gray-300 bg-transparent px-3 py-2 outline-none focus:border-indigo-500 dark:border-gray-700"
-                        placeholder="src/index.html"
-                        required
-                        on-input="setAddFilePath($event.target.value)"
-                    /></label>
-                    <template if="addFileError"
-                      ><p class="text-xs text-red-600 dark:text-red-400" role="alert">{{ addFileError }}</p></template
-                    >
-                    <div class="flex justify-end gap-2">
-                      <button
-                        type="button"
-                        class="rounded-md px-2 py-1 text-gray-500 dark:text-gray-300"
-                        popovertarget="add-file-popover"
-                        popovertargetaction="hide"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        class="rounded-md bg-indigo-600 px-2 py-1 text-sm font-medium text-white hover:bg-indigo-500"
-                        type="submit"
-                      >
-                        Create
-                      </button>
-                    </div>
-                  </form>
-                </div>
                 <template if="commits.length > 0">
                   <div
                     class="mb-4 flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-900/50"
@@ -360,7 +375,7 @@
                       >{{ commits[0].hash.slice(0, 7) }}</code
                     >
                   </div>
-                  <template if="hasUncommitted"
+                  <template if="hasUncommitted && canWrite"
                     ><form class="mb-3 flex gap-2" on-submit.prevent="commitChanges()">
                       <input
                         class="min-w-0 flex-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 dark:border-amber-800 dark:bg-amber-950/30"
@@ -382,14 +397,15 @@
                     <div
                       class="flex items-center gap-2 p-2 border-b border-gray-200 dark:border-gray-800 dark:bg-gray-900/50"
                     >
-                      <label for="repo-upload-input" class="sr-only">Upload files</label>
-                      <input
-                        id="repo-upload-input"
-                        class="max-w-full text-xs text-gray-600 file:mr-2 file:rounded file:border-0 file:bg-transparent file:px-2 file:py-1 file:text-xs file:text-indigo-600 dark:text-gray-300 dark:file:text-indigo-300"
-                        type="file"
-                        multiple
-                        on-change="handleFileSelect($event.target.files)"
-                      />
+                      <template if="canWrite"
+                        ><label for="repo-upload-input" class="sr-only">Upload files</label>
+                        <input
+                          id="repo-upload-input"
+                          class="max-w-full text-xs text-gray-600 file:mr-2 file:rounded file:border-0 file:bg-transparent file:px-2 file:py-1 file:text-xs file:text-indigo-600 dark:text-gray-300 dark:file:text-indigo-300"
+                          type="file"
+                          multiple
+                          on-change="handleFileSelect($event.target.files)"
+                      /></template>
                     </div>
                     <ul class="divide-y divide-gray-100 overflow-y-auto dark:divide-gray-800">
                       <template for="entry of entries"
@@ -429,20 +445,31 @@
                         class="mx-auto mb-6 w-60 rounded-xl"
                       />
                       <h1 class="text-2xl font-semibold">Welcome to your Git server</h1>
-                      <p class="mt-2 text-gray-600 dark:text-gray-300">Start by uploading your first file.</p>
+                      <template if="canWrite"
+                        ><p class="mt-2 text-gray-600 dark:text-gray-300">
+                          Start by uploading your first file.
+                        </p></template
+                      >
+                      <template if="!canWrite"
+                        ><p class="mt-2 text-gray-600 dark:text-gray-300">
+                          This repository is empty. Ask your Git Store administrator to enable repository write access
+                          (repo:write) to add files.
+                        </p></template
+                      >
                       <template if="dragging"
                         ><p class="mt-2 text-sm font-medium text-indigo-600 dark:text-indigo-300">
                           Drop files to upload.
                         </p></template
                       >
-                      <label for="repo-file-input" class="sr-only">Select files to upload</label>
-                      <input
-                        id="repo-file-input"
-                        class="mt-6 max-w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-xs dark:border-gray-700 dark:bg-gray-950"
-                        type="file"
-                        multiple
-                        on-change="handleFileSelect($event.target.files)"
-                      />
+                      <template if="canWrite"
+                        ><label for="repo-file-input" class="sr-only">Select files to upload</label>
+                        <input
+                          id="repo-file-input"
+                          class="mt-6 max-w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-xs dark:border-gray-700 dark:bg-gray-950"
+                          type="file"
+                          multiple
+                          on-change="handleFileSelect($event.target.files)"
+                      /></template>
                       <template if="errorMessage"
                         ><p class="mt-2 text-xs text-red-600 dark:text-red-400" role="alert">
                           {{ errorMessage }}
@@ -485,6 +512,7 @@
               const authStatus = ref("loading");
               const settings = ref(new URL(window.location.href).searchParams.get("settings") === "organizations");
               const profile = ref(null);
+              const canWrite = ref(false);
               const userUrl = ref("#");
               const darkMode = ref(window.matchMedia("(prefers-color-scheme: dark)").matches);
               const showWorkspace = ref(false);
@@ -545,6 +573,7 @@
               const orgError = ref("");
               const entries = ref([]);
               const commits = ref([]);
+              const repoLoadError = ref("");
               const directory = ref("");
               const previewPath = ref("");
               const fileContent = ref("");
@@ -566,6 +595,11 @@
                 repoName.value = value;
               };
               const createOrganization = async (requestedSlug) => {
+                if (!canWrite.value) {
+                  orgError.value =
+                    "Read-only access: ask your Git Store administrator to enable repository write access (repo:write).";
+                  return;
+                }
                 const slug = String(requestedSlug || "").trim();
                 orgError.value = "";
                 orgCreated.value = false;
@@ -675,20 +709,43 @@
               const load = async () => {
                 const current = url();
                 const name = current.searchParams.get("repo");
+                repoLoadError.value = "";
                 directory.value = current.searchParams.get("dir") || "";
                 previewPath.value = current.searchParams.get("path") || "";
+                entries.value = [];
+                commits.value = [];
+                branches.value = [];
+                tags.value = [];
+                fileContent.value = "";
                 if (!name || !current.searchParams.get("org")) {
                   repo.value = null;
                   return;
                 }
                 repo.value = { repo: name };
                 const apiBase = `/api/v1/orgs/${encodeURIComponent(current.searchParams.get("org"))}/repos/${encodeURIComponent(name)}`;
-                const [treeResponse, logResponse, branchResponse, tagResponse] = await Promise.all([
-                  fetch(`${apiBase}/tree${directory.value ? `?path=${encodeURIComponent(directory.value)}` : ""}`),
-                  fetch(`${apiBase}/log`),
-                  fetch(`${apiBase}/branches`),
-                  fetch(`${apiBase}/tags`),
-                ]);
+                let treeResponse;
+                let logResponse;
+                let branchResponse;
+                let tagResponse;
+                try {
+                  [treeResponse, logResponse, branchResponse, tagResponse] = await Promise.all([
+                    fetch(`${apiBase}/tree${directory.value ? `?path=${encodeURIComponent(directory.value)}` : ""}`),
+                    fetch(`${apiBase}/log`),
+                    fetch(`${apiBase}/branches`),
+                    fetch(`${apiBase}/tags`),
+                  ]);
+                } catch {
+                  repo.value = null;
+                  repoLoadError.value = `Could not contact the server while loading repository "${name}".`;
+                  return;
+                }
+                if (!treeResponse?.ok) {
+                  const result = (await treeResponse?.json().catch(() => ({}))) || {};
+                  repo.value = null;
+                  const status = treeResponse?.status || 0;
+                  repoLoadError.value = result.error || `Could not load repository "${name}" (${status}).`;
+                  return;
+                }
                 if (treeResponse.ok) entries.value = await treeResponse.json();
                 if (logResponse.ok) commits.value = await logResponse.json();
                 branches.value = branchResponse.ok ? await branchResponse.json() : [];
@@ -699,6 +756,11 @@
                 }
               };
               const createFirstRepository = async (requestedName) => {
+                if (!canWrite.value) {
+                  errorMessage.value =
+                    "Read-only access: repository write access (repo:write) is required to create a repository.";
+                  return;
+                }
                 const name = String(requestedName || "").trim();
                 if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
                   errorMessage.value = "Use letters, numbers, dots, underscores, or hyphens.";
@@ -725,6 +787,11 @@
                 }
               };
               const createRepository = async () => {
+                if (!canWrite.value) {
+                  errorMessage.value =
+                    "Read-only access: repository write access (repo:write) is required to create a repository.";
+                  return;
+                }
                 const name = repoName.value.trim();
                 errorMessage.value = "";
                 if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
@@ -750,6 +817,11 @@
                 }
               };
               const createBranch = async () => {
+                if (!canWrite.value) {
+                  errorMessage.value =
+                    "Read-only access: ask your Git Store administrator to enable repository write access (repo:write).";
+                  return;
+                }
                 const name = branchName.value.trim();
                 if (!name) return;
                 errorMessage.value = "";
@@ -766,6 +838,11 @@
                 }
               };
               const createTag = async () => {
+                if (!canWrite.value) {
+                  errorMessage.value =
+                    "Read-only access: ask your Git Store administrator to enable repository write access (repo:write).";
+                  return;
+                }
                 const name = tagName.value.trim();
                 if (!name) return;
                 errorMessage.value = "";
@@ -782,6 +859,11 @@
                 }
               };
               const addFileToRepo = async () => {
+                if (!canWrite.value) {
+                  addFileError.value =
+                    "Read-only access: ask your Git Store administrator to enable repository write access (repo:write).";
+                  return;
+                }
                 const filePath = addFilePath.value.trim();
                 addFileError.value = "";
                 if (!filePath) {
@@ -835,6 +917,11 @@
                 }
               };
               const commitChanges = async () => {
+                if (!canWrite.value) {
+                  errorMessage.value =
+                    "Read-only access: ask your Git Store administrator to enable repository write access (repo:write).";
+                  return;
+                }
                 errorMessage.value = "";
                 try {
                   const files = entries.value
@@ -862,6 +949,11 @@
                 }
               };
               const uploadFiles = async (files) => {
+                if (!canWrite.value) {
+                  errorMessage.value =
+                    "Read-only access: repository write access (repo:write) is required to upload files.";
+                  return;
+                }
                 const uploadedPaths = [];
                 for (const file of Array.from(files)) {
                   const content = await new Promise((resolve, reject) => {
@@ -877,7 +969,14 @@
                     body: JSON.stringify({ path: filePath, content }),
                   });
                   if (!response.ok) {
-                    throw new Error("Upload failed. Sign in with repository write access and try again.");
+                    const result = await response.json().catch(() => ({}));
+                    const message =
+                      response.status === 401
+                        ? "Your sign-in session expired. Sign in again to upload files."
+                        : response.status === 403
+                          ? "Your browser session does not have repository write access (repo:write). Ask your Git Store administrator to enable it."
+                          : result.error || "Upload failed.";
+                    throw new Error(`${message} (${response.status})`);
                   }
                   uploadedPaths.push(filePath);
                 }
@@ -887,17 +986,28 @@
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ files: uploadedPaths }),
                   });
-                  if (!stage.ok) throw new Error("Could not stage the uploaded files.");
+                  if (!stage.ok) {
+                    const result = await stage.json().catch(() => ({}));
+                    throw new Error(result.error || `Could not stage uploaded files (${stage.status}).`);
+                  }
                   const commit = await fetch(`${base()}/commit`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ message: "Initial commit" }),
                   });
-                  if (!commit.ok) throw new Error("Could not commit the uploaded files.");
+                  if (!commit.ok) {
+                    const result = await commit.json().catch(() => ({}));
+                    throw new Error(result.error || `Could not commit uploaded files (${commit.status}).`);
+                  }
                 }
               };
               const upload = async (event) => {
                 dragging.value = false;
+                if (!canWrite.value) {
+                  errorMessage.value =
+                    "Read-only access: repository write access (repo:write) is required to upload files.";
+                  return;
+                }
                 errorMessage.value = "";
                 try {
                   await uploadFiles(event.dataTransfer.files);
@@ -935,6 +1045,7 @@
                   return;
                 }
                 profile.value = session.profile || null;
+                canWrite.value = session.canWrite === true;
                 const params = currentUrl.searchParams;
                 org.value = params.get("org") || "";
                 settings.value = params.get("settings") === "organizations";
@@ -977,6 +1088,11 @@
                 authStatus.value = "authenticated";
               });
               const handleFileSelect = async (files) => {
+                if (!canWrite.value) {
+                  errorMessage.value =
+                    "Read-only access: repository write access (repo:write) is required to upload files.";
+                  return;
+                }
                 errorMessage.value = "";
                 try {
                   await uploadFiles(files);
@@ -987,6 +1103,7 @@
               };
               return {
                 profile,
+                canWrite,
                 userUrl,
                 darkMode,
                 showWorkspace,
@@ -1023,6 +1140,7 @@
                 commitMessage,
                 dragging,
                 errorMessage,
+                repoLoadError,
                 addFileError,
                 authStatus,
                 hasUncommitted,
@@ -1059,58 +1177,62 @@
                   class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
                 >
                   <i class="fa-solid fa-code-branch"></i> Branches
-                  <button
-                    popovertarget="branch-popover"
-                    style="anchor-name: --branch-popover-anchor"
-                    class="text-xs text-indigo-600 hover:underline dark:text-indigo-300"
-                    aria-label="Create branch"
-                  >
-                    +
-                  </button>
-                </h3>
-                <div
-                  popover="auto"
-                  id="branch-popover"
-                  style="
-                    position: fixed;
-                    inset: auto;
-                    margin: 0;
-                    position-anchor: --branch-popover-anchor;
-                    top: anchor(bottom);
-                    left: anchor(left);
-                  "
-                  class="w-48 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-                >
-                  <form on-submit.prevent="createBranch()" class="space-y-4">
-                    <h3 class="text-sm font-semibold">Create branch</h3>
-                    <label class="block text-xs text-gray-600 dark:text-gray-300"
-                      >Branch name<input
-                        class="mt-1 w-full rounded-md border border-gray-300 bg-transparent px-3 py-2 outline-none focus:border-indigo-500 dark:border-gray-700"
-                        placeholder="main"
-                        required
-                        on-input="setBranchName($event.target.value)"
-                    /></label>
-                    <template if="errorMessage"
-                      ><p class="text-xs text-red-600 dark:text-red-400" role="alert">{{ errorMessage }}</p></template
+                  <template if="canWrite"
+                    ><button
+                      popovertarget="branch-popover"
+                      style="anchor-name: --branch-popover-anchor"
+                      class="text-xs text-indigo-600 hover:underline dark:text-indigo-300"
+                      aria-label="Create branch"
                     >
-                    <div class="flex justify-end gap-2">
-                      <button
-                        type="button"
-                        class="rounded-md px-2 py-1 text-gray-500 dark:text-gray-300"
-                        popovertarget="branch-popover"
-                        popovertargetaction="hide"
+                      +
+                    </button></template
+                  >
+                </h3>
+                <template if="canWrite"
+                  ><div
+                    popover="auto"
+                    id="branch-popover"
+                    style="
+                      position: fixed;
+                      inset: auto;
+                      margin: 0;
+                      position-anchor: --branch-popover-anchor;
+                      top: anchor(bottom);
+                      left: anchor(left);
+                    "
+                    class="w-48 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                  >
+                    <form on-submit.prevent="createBranch()" class="space-y-4">
+                      <h3 class="text-sm font-semibold">Create branch</h3>
+                      <label class="block text-xs text-gray-600 dark:text-gray-300"
+                        >Branch name<input
+                          class="mt-1 w-full rounded-md border border-gray-300 bg-transparent px-3 py-2 outline-none focus:border-indigo-500 dark:border-gray-700"
+                          placeholder="main"
+                          required
+                          on-input="setBranchName($event.target.value)"
+                      /></label>
+                      <template if="errorMessage"
+                        ><p class="text-xs text-red-600 dark:text-red-400" role="alert">{{ errorMessage }}</p></template
                       >
-                        Cancel
-                      </button>
-                      <button
-                        class="rounded-md bg-indigo-600 px-2 py-1 text-sm font-medium text-white hover:bg-indigo-500"
-                        type="submit"
-                      >
-                        Create
-                      </button>
-                    </div>
-                  </form>
-                </div>
+                      <div class="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          class="rounded-md px-2 py-1 text-gray-500 dark:text-gray-300"
+                          popovertarget="branch-popover"
+                          popovertargetaction="hide"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          class="rounded-md bg-indigo-600 px-2 py-1 text-sm font-medium text-white hover:bg-indigo-500"
+                          type="submit"
+                        >
+                          Create
+                        </button>
+                      </div>
+                    </form>
+                  </div></template
+                >
                 <ul class="space-y-1">
                   <template for="branch of branches"
                     ><li>
@@ -1124,13 +1246,15 @@
                   <template if="!branches.length"
                     ><p class="text-xs text-gray-500 dark:text-gray-300">
                       No branches.
-                      <button
-                        type="button"
-                        class="underline text-indigo-600 hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200"
-                        popovertarget="branch-popover"
+                      <template if="canWrite"
+                        ><button
+                          type="button"
+                          class="underline text-indigo-600 hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200"
+                          popovertarget="branch-popover"
+                        >
+                          Create one
+                        </button></template
                       >
-                        Create one
-                      </button>
                     </p></template
                   >
                 </ul>
@@ -1140,58 +1264,62 @@
                   class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
                 >
                   <i class="fa-solid fa-tags"></i> Tags
-                  <button
-                    popovertarget="tag-popover"
-                    style="anchor-name: --tag-popover-anchor"
-                    class="text-xs text-indigo-600 hover:underline dark:text-indigo-300"
-                    aria-label="Create tag"
-                  >
-                    +
-                  </button>
-                </h3>
-                <div
-                  popover="auto"
-                  id="tag-popover"
-                  style="
-                    position: fixed;
-                    inset: auto;
-                    margin: 0;
-                    position-anchor: --tag-popover-anchor;
-                    top: anchor(bottom);
-                    left: anchor(left);
-                  "
-                  class="w-48 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-                >
-                  <form on-submit.prevent="createTag()" class="space-y-4">
-                    <h3 class="text-sm font-semibold">Create tag</h3>
-                    <label class="block text-xs text-gray-600 dark:text-gray-300"
-                      >Tag name<input
-                        class="mt-1 w-full rounded-md border border-gray-300 bg-transparent px-3 py-2 outline-none focus:border-indigo-500 dark:border-gray-700"
-                        placeholder="v1.0.0"
-                        required
-                        on-input="setTagName($event.target.value)"
-                    /></label>
-                    <template if="errorMessage"
-                      ><p class="text-xs text-red-600 dark:text-red-400" role="alert">{{ errorMessage }}</p></template
+                  <template if="canWrite"
+                    ><button
+                      popovertarget="tag-popover"
+                      style="anchor-name: --tag-popover-anchor"
+                      class="text-xs text-indigo-600 hover:underline dark:text-indigo-300"
+                      aria-label="Create tag"
                     >
-                    <div class="flex justify-end gap-2">
-                      <button
-                        type="button"
-                        class="rounded-md px-2 py-1 text-gray-500 dark:text-gray-300"
-                        popovertarget="tag-popover"
-                        popovertargetaction="hide"
+                      +
+                    </button></template
+                  >
+                </h3>
+                <template if="canWrite"
+                  ><div
+                    popover="auto"
+                    id="tag-popover"
+                    style="
+                      position: fixed;
+                      inset: auto;
+                      margin: 0;
+                      position-anchor: --tag-popover-anchor;
+                      top: anchor(bottom);
+                      left: anchor(left);
+                    "
+                    class="w-48 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                  >
+                    <form on-submit.prevent="createTag()" class="space-y-4">
+                      <h3 class="text-sm font-semibold">Create tag</h3>
+                      <label class="block text-xs text-gray-600 dark:text-gray-300"
+                        >Tag name<input
+                          class="mt-1 w-full rounded-md border border-gray-300 bg-transparent px-3 py-2 outline-none focus:border-indigo-500 dark:border-gray-700"
+                          placeholder="v1.0.0"
+                          required
+                          on-input="setTagName($event.target.value)"
+                      /></label>
+                      <template if="errorMessage"
+                        ><p class="text-xs text-red-600 dark:text-red-400" role="alert">{{ errorMessage }}</p></template
                       >
-                        Cancel
-                      </button>
-                      <button
-                        class="rounded-md bg-indigo-600 px-2 py-1 text-sm font-medium text-white hover:bg-indigo-500"
-                        type="submit"
-                      >
-                        Create
-                      </button>
-                    </div>
-                  </form>
-                </div>
+                      <div class="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          class="rounded-md px-2 py-1 text-gray-500 dark:text-gray-300"
+                          popovertarget="tag-popover"
+                          popovertargetaction="hide"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          class="rounded-md bg-indigo-600 px-2 py-1 text-sm font-medium text-white hover:bg-indigo-500"
+                          type="submit"
+                        >
+                          Create
+                        </button>
+                      </div>
+                    </form>
+                  </div></template
+                >
                 <ul class="space-y-1">
                   <template for="tag of tags"
                     ><li>

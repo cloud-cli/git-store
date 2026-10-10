@@ -861,9 +861,11 @@ app.get("/ui/session", async (req, res) => {
   try {
     const browserSession = getBrowserSession(req);
     if (browserSession && isSameOriginRequest(req)) {
+      res.set("Cache-Control", "no-store");
       return res.json({
         authenticated: true,
         profile: browserSession.profile,
+        canWrite: browserSession.scope.split(/\s+/).includes("repo:write"),
       });
     }
     const authorization = req.headers.authorization || "";
