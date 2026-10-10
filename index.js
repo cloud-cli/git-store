@@ -698,6 +698,45 @@ function uploadRepoFile(req, res) {
   }
 }
 
+/** Delete exactly one existing, regular repository working-tree file without staging it. */
+function deleteRepoFile(req, res) {
+  const repoPath = getSafeRepoPath(req.params.repo, req);
+  if (!repoPath) {
+    return res.status(400).json({ error: "Invalid repository name" });
+  }
+  if (!fs.existsSync(repoPath) || !fs.existsSync(path.join(repoPath, ".git"))) {
+    return res.status(404).json({ error: "Repo not found" });
+  }
+  const relativePath = req.query.path;
+  if (typeof relativePath !== "string" || !relativePath.trim()) {
+    return res.status(400).json({ error: "A non-empty path is required" });
+  }
+  const segments = relativePath.replace(/\\/g, "/").split("/");
+  if (segments.includes(".git")) {
+    return res.status(400).json({ error: "Invalid path" });
+  }
+  const filePath = safeRepoFile(repoPath, relativePath);
+  if (!filePath) {
+    return res.status(400).json({ error: "Invalid path" });
+  }
+  try {
+    const stat = fs.lstatSync(filePath);
+    if (stat.isSymbolicLink()) {
+      return res.status(400).json({ error: "Invalid path" });
+    }
+    if (!stat.isFile()) {
+      return res.status(400).json({ error: "Path is not a regular file" });
+    }
+    fs.unlinkSync(filePath);
+    return res.json({ path: relativePath, deleted: true, staged: false });
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return res.status(404).json({ error: "File not found" });
+    }
+    return res.status(500).json({ error: "File deletion failed" });
+  }
+}
+
 /**
  * List repository branches.
  * Resolves the repo path from the authenticated organization's directory.
@@ -1082,6 +1121,7 @@ app.get("/api/v1/repos/:repo/file", requireAuthentication, requireScope("repo:re
   getRepoFile(req, res);
 });
 app.post("/api/v1/repos/:repo/files", requireAuthentication, requireScope("repo:write"), uploadRepoFile);
+app.delete("/api/v1/repos/:repo/files", requireAuthentication, requireScope("repo:write"), deleteRepoFile);
 app.get("/api/v1/repos/:repo/branches", requireAuthentication, requireScope("repo:read"), async (req, res) => {
   getRepoBranches(req, res);
 });
@@ -1559,6 +1599,20 @@ function makeApiSpec() {
             },
             ["path", "content"],
           ),
+        ),
+        delete: operation(
+          "Delete an unstaged working-tree file",
+          {
+            200: { description: "File deleted" },
+            400: { description: "Invalid path or path is not a regular file" },
+            401: unauthorized,
+            404: notFound,
+          },
+          null,
+          [
+            ...pathParametersRepo,
+            { name: "path", in: "query", required: true, schema: { type: "string", minLength: 1 } },
+          ],
         ),
       },
       "/api/v1/repos/{repo}/history": {

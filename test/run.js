@@ -337,6 +337,11 @@ async function run() {
     fs.mkdirSync(readOnlyRepo, { recursive: true });
     await require("simple-git").simpleGit(readOnlyRepo).init();
     fs.writeFileSync(path.join(readOnlyRepo, "readme.txt"), "read only");
+    assert.strictEqual(
+      (await request(port, "DELETE", "/api/v1/repos/read-only-repo/files?path=readme.txt", undefined, "read-only"))
+        .status,
+      403,
+    );
     const readOnlyTree = await request(port, "GET", "/api/v1/repos/read-only-repo/tree", undefined, "read-only");
     assert.strictEqual(readOnlyTree.status, 200, "repo:read permits repository file listing");
     assert.deepStrictEqual(
@@ -425,6 +430,48 @@ async function run() {
     assert.strictEqual(fileA.body, "subject A");
     assert.strictEqual(fileB.status, 404, "another subject must not read repository files");
 
+    assert.strictEqual(
+      (await request(port, "DELETE", "/api/v1/repos/shared-repo/files", undefined, "token-a")).status,
+      400,
+    );
+    assert.strictEqual(
+      (await request(port, "DELETE", "/api/v1/repos/shared-repo/files?path=%20%20", undefined, "token-a")).status,
+      400,
+    );
+    assert.strictEqual(
+      (await request(port, "DELETE", "/api/v1/repos/shared-repo/files?path=.", undefined, "token-a")).status,
+      400,
+    );
+    assert.strictEqual(
+      (await request(port, "DELETE", "/api/v1/repos/shared-repo/files?path=.git%2FHEAD", undefined, "token-a")).status,
+      400,
+    );
+    assert.strictEqual(
+      (
+        await request(
+          port,
+          "DELETE",
+          "/api/v1/repos/shared-repo/files?path=..%2Foutside-secret.txt",
+          undefined,
+          "token-a",
+        )
+      ).status,
+      400,
+    );
+    assert.strictEqual(
+      (await request(port, "DELETE", "/api/v1/repos/shared-repo/files?path=missing.txt", undefined, "token-a")).status,
+      404,
+    );
+    assert.strictEqual(
+      (await request(port, "DELETE", "/api/v1/repos/shared-repo/files?path=private.txt", undefined, "read-only"))
+        .status,
+      403,
+    );
+    assert.strictEqual(
+      (await request(port, "DELETE", "/api/v1/repos/shared-repo/files?path=private.txt", undefined, "token-b")).status,
+      404,
+    );
+
     const largerPayload = Buffer.alloc(128 * 1024, "x");
     const largeUpload = await request(
       port,
@@ -452,6 +499,10 @@ async function run() {
     );
     assert.strictEqual(emptyFile.status, 201, "full-path empty files can be created");
     assert.strictEqual(fs.readFileSync(path.join(repoA, "nested/empty.txt")).length, 0);
+    assert.strictEqual(
+      (await request(port, "DELETE", "/api/v1/repos/shared-repo/files?path=nested", undefined, "token-a")).status,
+      400,
+    );
     const stage = await request(
       port,
       "POST",
@@ -478,6 +529,24 @@ async function run() {
       "token-a",
     );
     assert.strictEqual(JSON.parse(history.body).length, 1);
+    const deleteFile = await request(
+      port,
+      "DELETE",
+      "/api/v1/repos/shared-repo/files?path=private.txt",
+      undefined,
+      "token-a",
+    );
+    assert.strictEqual(deleteFile.status, 200, deleteFile.body);
+    assert.deepStrictEqual(JSON.parse(deleteFile.body), { path: "private.txt", deleted: true, staged: false });
+    assert.strictEqual(
+      fs.existsSync(path.join(repoA, "private.txt")),
+      false,
+      "deleted working-tree file must be absent",
+    );
+    assert.strictEqual(
+      (await request(port, "GET", "/api/v1/repos/shared-repo/file?path=private.txt", undefined, "token-a")).status,
+      404,
+    );
 
     const addTag = await request(port, "POST", "/api/v1/repos/shared-repo/tags", { name: "v1" }, "token-a");
     assert.strictEqual(addTag.status, 200);
@@ -527,6 +596,18 @@ async function run() {
     assert.strictEqual(traversal.status, 400, "path traversal must be rejected");
     fs.writeFileSync(path.join(dataPath, "outside-secret.txt"), "outside");
     fs.symlinkSync(dataPath, path.join(repoA, "escape"), "dir");
+    assert.strictEqual(
+      (
+        await request(
+          port,
+          "DELETE",
+          "/api/v1/repos/shared-repo/files?path=escape%2Foutside-secret.txt",
+          undefined,
+          "token-a",
+        )
+      ).status,
+      400,
+    );
     const symlinkTraversal = await request(
       port,
       "GET",
@@ -555,6 +636,7 @@ async function run() {
       ["GET", "/api/v1/repos/shared-repo/branches"],
       ["GET", "/api/v1/repos/shared-repo/tags"],
       ["POST", "/api/v1/repos/shared-repo/files", { path: "no.txt", content: "eA==" }],
+      ["DELETE", "/api/v1/repos/shared-repo/files?path=private.txt"],
       ["POST", "/api/v1/repos/shared-repo/stage", { files: ["private.txt"] }],
       ["POST", "/api/v1/repos/shared-repo/unstage", { files: ["private.txt"] }],
       ["POST", "/api/v1/repos/shared-repo/commit", { message: "test" }],
@@ -619,7 +701,7 @@ async function run() {
       "/api/v1/orgs/{org}/repos/{repo}/history": ["get"],
       "/api/v1/orgs/{org}/repos/{repo}/branches": ["get", "post"],
       "/api/v1/orgs/{org}/repos/{repo}/tags": ["get", "post"],
-      "/api/v1/orgs/{org}/repos/{repo}/files": ["post"],
+      "/api/v1/orgs/{org}/repos/{repo}/files": ["post", "delete"],
       "/api/v1/orgs/{org}/repos/{repo}/stage": ["post"],
       "/api/v1/orgs/{org}/repos/{repo}/unstage": ["post"],
       "/api/v1/orgs/{org}/repos/{repo}/commit": ["post"],
@@ -639,7 +721,7 @@ async function run() {
       "/api/v1/repos/{repo}/history": ["get"],
       "/api/v1/repos/{repo}/branches": ["get", "post"],
       "/api/v1/repos/{repo}/tags": ["get", "post"],
-      "/api/v1/repos/{repo}/files": ["post"],
+      "/api/v1/repos/{repo}/files": ["post", "delete"],
       "/api/v1/repos/{repo}/stage": ["post"],
       "/api/v1/repos/{repo}/unstage": ["post"],
       "/api/v1/repos/{repo}/commit": ["post"],
@@ -679,6 +761,9 @@ async function run() {
     assert.strictEqual(spec.paths["/api/v1/orgs"]["get"]["x-required-scope"], "repo:read or repo:write");
     assert.strictEqual(spec.paths["/api/v1/orgs/{org}/repos/{repo}"].post["x-required-scope"], "repo:write");
     assert.strictEqual(spec.paths["/api/v1/orgs/{org}/repos/{repo}/tags"].post["x-required-scope"], "repo:write");
+    const deleteFileOperation = spec.paths["/api/v1/orgs/{org}/repos/{repo}/files"].delete;
+    assert.strictEqual(deleteFileOperation["x-required-scope"], "repo:write");
+    assert.ok(deleteFileOperation.responses["403"], "file deletion documents insufficient scope");
     assert.ok(!spec.paths["/api/v1/profile/alias"]);
     assert.ok(!spec.paths["/api/v1/repos"]);
 

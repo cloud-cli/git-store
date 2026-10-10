@@ -274,6 +274,26 @@ Content-Type: application/json
 
 **Response (404)** – repository not found.
 
+### DELETE /api/v1/orgs/{org}/repos/{repo}/files
+
+Delete one existing regular file from the repository working tree. The operation does
+not stage or commit the deletion. The required `path` query parameter is repository-relative.
+Directories, `.git` paths, traversal, and paths that escape through symlinks are rejected.
+
+```http
+DELETE /api/v1/orgs/my-org/repos/my-repo/files?path=README.md
+```
+
+**Response (200)** – `{ "path": "README.md", "deleted": true, "staged": false }`.
+
+**Response (400)** – missing/blank/invalid path or path is not a regular file.
+
+**Response (401)** – no or invalid OIDC token.
+
+**Response (403)** – token lacks `repo:write`.
+
+**Response (404)** – organization, repository, or file not found.
+
 ### POST /api/v1/orgs/{org}/repos/{repo}/stage
 
 Stage one or more files.
