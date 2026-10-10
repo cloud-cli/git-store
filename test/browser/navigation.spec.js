@@ -177,6 +177,23 @@ test("SPA navigation, previews, history, and read-only controls", async ({ page 
   expect(await page.evaluate(() => window.__documentNavigationCount)).toBe(initialCount);
 });
 
+test("organization and repository navigation replaces the displayed page", async ({ page }) => {
+  await page.goto("/ui/?org=example&repo=demo");
+  await expect(page.getByText("notes.txt", { exact: true }).first()).toBeVisible();
+
+  await page.getByRole("banner").getByRole("link", { name: "example" }).click();
+  await expect(page.getByText("Repository root", { exact: true })).toHaveCount(0);
+  await expect(page.locator("[data-repository-view]")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Repositories in example" })).toHaveCount(1);
+  await expect(page.getByRole("link", { name: "demo" }).first()).toBeVisible();
+
+  await page.getByRole("link", { name: "demo" }).first().click();
+  await expect(page.getByText("Repository root", { exact: true })).toHaveCount(1);
+  await expect(page.locator("[data-repository-view]")).toHaveCount(1);
+  await expect(page.locator("#repo-upload-input")).toHaveCount(1);
+  await expect(page.getByText("notes.txt", { exact: true })).toHaveCount(1);
+});
+
 test("read-only UI hides write controls", async ({ page }) => {
   await page.route("**/ui/session", (route) =>
     route.fulfill({ json: { authenticated: true, canWrite: false, profile: { name: "Reader" } } }),

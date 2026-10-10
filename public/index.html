@@ -297,222 +297,228 @@
                 ></organization-landing
               ></template>
               <template if="repo && !settings"
-                ><div class="mb-4 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-300">
-                  <a attr-href="rootHref" class="hover:text-indigo-600 dark:hover:text-indigo-300">Repository root</a
-                  ><span>/</span><span>{{ directory || 'Root' }}</span>
+                ><div data-repository-view>
+                  <div class="mb-4 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-300">
+                    <a attr-href="rootHref" class="hover:text-indigo-600 dark:hover:text-indigo-300">Repository root</a
+                    ><span>/</span><span>{{ directory || 'Root' }}</span>
+                    <template if="canWrite"
+                      ><button
+                        popovertarget="add-file-popover"
+                        style="anchor-name: --add-file-anchor"
+                        class="ml-2 text-xs text-indigo-600 hover:underline dark:text-indigo-300"
+                      >
+                        + Add file
+                      </button></template
+                    >
+                  </div>
+                  <template if="errorMessage"
+                    ><p class="mb-3 text-xs text-red-600 dark:text-red-400" role="alert">
+                      {{ errorMessage }}
+                    </p></template
+                  >
                   <template if="canWrite"
-                    ><button
-                      popovertarget="add-file-popover"
-                      style="anchor-name: --add-file-anchor"
-                      class="ml-2 text-xs text-indigo-600 hover:underline dark:text-indigo-300"
+                    ><div
+                      popover="auto"
+                      id="add-file-popover"
+                      style="
+                        position: fixed;
+                        inset: auto;
+                        margin: 0;
+                        position-anchor: --add-file-anchor;
+                        top: anchor(bottom);
+                        left: anchor(left);
+                      "
+                      class="w-64 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                     >
-                      + Add file
-                    </button></template
-                  >
-                </div>
-                <template if="errorMessage"
-                  ><p class="mb-3 text-xs text-red-600 dark:text-red-400" role="alert">{{ errorMessage }}</p></template
-                >
-                <template if="canWrite"
-                  ><div
-                    popover="auto"
-                    id="add-file-popover"
-                    style="
-                      position: fixed;
-                      inset: auto;
-                      margin: 0;
-                      position-anchor: --add-file-anchor;
-                      top: anchor(bottom);
-                      left: anchor(left);
-                    "
-                    class="w-64 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-                  >
-                    <form on-submit.prevent="addFileToRepo()" class="space-y-4">
-                      <h3 class="text-sm font-semibold">Add file</h3>
-                      <label class="block text-xs text-gray-600 dark:text-gray-300"
-                        >Full relative path<input
-                          class="mt-1 w-full rounded-md border border-gray-300 bg-transparent px-3 py-2 outline-none focus:border-indigo-500 dark:border-gray-700"
-                          placeholder="src/index.html"
-                          required
-                          on-input="setAddFilePath($event.target.value)"
-                      /></label>
-                      <template if="addFileError"
-                        ><p class="text-xs text-red-600 dark:text-red-400" role="alert">{{ addFileError }}</p></template
-                      >
-                      <div class="flex justify-end gap-2">
-                        <button
-                          type="button"
-                          class="rounded-md px-2 py-1 text-gray-500 dark:text-gray-300"
-                          popovertarget="add-file-popover"
-                          popovertargetaction="hide"
+                      <form on-submit.prevent="addFileToRepo()" class="space-y-4">
+                        <h3 class="text-sm font-semibold">Add file</h3>
+                        <label class="block text-xs text-gray-600 dark:text-gray-300"
+                          >Full relative path<input
+                            class="mt-1 w-full rounded-md border border-gray-300 bg-transparent px-3 py-2 outline-none focus:border-indigo-500 dark:border-gray-700"
+                            placeholder="src/index.html"
+                            required
+                            on-input="setAddFilePath($event.target.value)"
+                        /></label>
+                        <template if="addFileError"
+                          ><p class="text-xs text-red-600 dark:text-red-400" role="alert">
+                            {{ addFileError }}
+                          </p></template
                         >
-                          Cancel
-                        </button>
-                        <button
-                          class="rounded-md bg-indigo-600 px-2 py-1 text-sm font-medium text-white hover:bg-indigo-500"
-                          type="submit"
-                        >
-                          Create
-                        </button>
-                      </div>
-                    </form>
-                  </div></template
-                >
-                <template if="commits.length > 0">
-                  <div
-                    class="mb-4 flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-900/50"
-                  >
-                    <div
-                      class="flex h-8 w-8 items-center justify-center rounded-full bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
-                    >
-                      <i class="fa-solid fa-code-commit"></i>
-                    </div>
-                    <div class="min-w-0 flex-1">
-                      <div class="truncate font-medium">{{ commits[0].message }}</div>
-                      <div class="mt-0.5 text-xs text-gray-500 dark:text-gray-300">{{ commits[0].author_name }}</div>
-                    </div>
-                    <code class="rounded bg-gray-200 px-2 py-1 font-mono text-xs dark:bg-gray-800"
-                      >{{ commits[0].hash.slice(0, 7) }}</code
-                    >
-                  </div>
-                  <template if="hasUncommitted && canWrite"
-                    ><form class="mb-3 flex gap-2" on-submit.prevent="commitChanges()">
-                      <input
-                        class="min-w-0 flex-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 dark:border-amber-800 dark:bg-amber-950/30"
-                        placeholder="Commit message"
-                        on-input="setCommitMessage($event.target.value)"
-                      /><button class="rounded-md bg-indigo-600 px-3 py-2 font-medium text-white hover:bg-indigo-500">
-                        Commit
-                      </button>
-                    </form>
-                    <template if="errorMessage"
-                      ><p class="mb-3 text-xs text-red-600 dark:text-red-400" role="alert">
-                        {{ errorMessage }}
-                      </p></template
-                    ></template
-                  >
-                  <div
-                    class="flex min-h-64 flex-1 flex-col overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800"
-                  >
-                    <div
-                      class="flex items-center gap-2 p-2 border-b border-gray-200 dark:border-gray-800 dark:bg-gray-900/50"
-                    >
-                      <template if="canWrite"
-                        ><label for="repo-upload-input" class="sr-only">Upload files</label>
-                        <input
-                          id="repo-upload-input"
-                          class="max-w-full text-xs text-gray-600 file:mr-2 file:rounded file:border-0 file:bg-transparent file:px-2 file:py-1 file:text-xs file:text-indigo-600 dark:text-gray-300 dark:file:text-indigo-300"
-                          type="file"
-                          multiple
-                          on-change="handleFileSelect($event.target.files)"
-                      /></template>
-                    </div>
-                    <ul class="divide-y divide-gray-100 overflow-y-auto dark:divide-gray-800">
-                      <template for="entry of entries"
-                        ><li
-                          class="flex items-center justify-between px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-900/50"
-                        >
-                          <a attr-href="entryHref(entry)" class="flex min-w-0 flex-1 items-center gap-3"
-                            ><i
-                              class="fa-solid w-4 text-center text-base"
-                              bind-class="{ 'fa-folder': entry.type === 'directory', 'fa-file-lines': entry.type === 'file', 'text-blue-400': entry.type === 'directory', 'text-gray-400': entry.type === 'file' }"
-                            ></i
-                            ><span class="truncate"
-                              >{{ entry.name }}<sup class="ml-1 text-amber-500"
-                                >{{ entry.uncommitted ? '*' : '' }}</sup
-                              ></span
-                            ></a
-                          ><span class="ml-3 max-w-[45%] truncate text-xs text-gray-500 dark:text-gray-300"
-                            >{{ entry.uncommitted ? 'Uncommitted' : entry.type }}</span
+                        <div class="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            class="rounded-md px-2 py-1 text-gray-500 dark:text-gray-300"
+                            popovertarget="add-file-popover"
+                            popovertargetaction="hide"
                           >
-                        </li></template
-                      >
-                    </ul>
+                            Cancel
+                          </button>
+                          <button
+                            class="rounded-md bg-indigo-600 px-2 py-1 text-sm font-medium text-white hover:bg-indigo-500"
+                            type="submit"
+                          >
+                            Create
+                          </button>
+                        </div>
+                      </form>
+                    </div></template
+                  >
+                  <template if="commits.length > 0">
                     <div
-                      class="mt-auto border-t border-dashed border-gray-300 p-4 text-center text-xs text-gray-500 dark:text-gray-300 dark:border-gray-700"
-                      class-dragging="dragging"
+                      class="mb-4 flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-900/50"
                     >
-                      Drop files here to upload them unstaged
+                      <div
+                        class="flex h-8 w-8 items-center justify-center rounded-full bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                      >
+                        <i class="fa-solid fa-code-commit"></i>
+                      </div>
+                      <div class="min-w-0 flex-1">
+                        <div class="truncate font-medium">{{ commits[0].message }}</div>
+                        <div class="mt-0.5 text-xs text-gray-500 dark:text-gray-300">{{ commits[0].author_name }}</div>
+                      </div>
+                      <code class="rounded bg-gray-200 px-2 py-1 font-mono text-xs dark:bg-gray-800"
+                        >{{ commits[0].hash.slice(0, 7) }}</code
+                      >
                     </div>
-                  </div>
-                </template>
-                <template if="commits.length === 0">
-                  <div class="flex min-h-full flex-1 items-center justify-center text-center">
-                    <div class="mx-auto max-w-md p-8">
-                      <img
-                        src="/ui/welcome.svg"
-                        alt="A friendly Git folder illustration"
-                        class="mx-auto mb-6 w-60 rounded-xl"
-                      />
-                      <h1 class="text-2xl font-semibold">Welcome to your Git server</h1>
-                      <template if="canWrite"
-                        ><p class="mt-2 text-gray-600 dark:text-gray-300">
-                          Start by uploading your first file.
-                        </p></template
-                      >
-                      <template if="!canWrite"
-                        ><p class="mt-2 text-gray-600 dark:text-gray-300">
-                          This repository is empty. Ask your Git Store administrator to enable repository write access
-                          (repo:write) to add files.
-                        </p></template
-                      >
-                      <template if="dragging"
-                        ><p class="mt-2 text-sm font-medium text-indigo-600 dark:text-indigo-300">
-                          Drop files to upload.
-                        </p></template
-                      >
-                      <template if="canWrite"
-                        ><label for="repo-file-input" class="sr-only">Select files to upload</label>
+                    <template if="hasUncommitted && canWrite"
+                      ><form class="mb-3 flex gap-2" on-submit.prevent="commitChanges()">
                         <input
-                          id="repo-file-input"
-                          class="mt-6 max-w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-xs dark:border-gray-700 dark:bg-gray-950"
-                          type="file"
-                          multiple
-                          on-change="handleFileSelect($event.target.files)"
-                      /></template>
+                          class="min-w-0 flex-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 dark:border-amber-800 dark:bg-amber-950/30"
+                          placeholder="Commit message"
+                          on-input="setCommitMessage($event.target.value)"
+                        /><button class="rounded-md bg-indigo-600 px-3 py-2 font-medium text-white hover:bg-indigo-500">
+                          Commit
+                        </button>
+                      </form>
                       <template if="errorMessage"
-                        ><p class="mt-2 text-xs text-red-600 dark:text-red-400" role="alert">
+                        ><p class="mb-3 text-xs text-red-600 dark:text-red-400" role="alert">
                           {{ errorMessage }}
                         </p></template
-                      >
-                    </div>
-                  </div>
-                </template>
-                <template if="previewPath"
-                  ><div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 md:p-10">
-                    <section
-                      class="flex h-full w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-gray-200 bg-white text-gray-900 shadow-2xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-                      role="dialog"
-                      aria-modal="true"
-                      aria-label="File preview"
+                      ></template
                     >
-                      <header
-                        class="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-800"
+                    <div
+                      class="flex min-h-64 flex-1 flex-col overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800"
+                    >
+                      <div
+                        class="flex items-center gap-2 p-2 border-b border-gray-200 dark:border-gray-800 dark:bg-gray-900/50"
                       >
-                        <div class="font-medium">{{ previewPath }}</div>
-                        <button
-                          on-click="closePreview()"
-                          class="rounded px-2 py-1 text-gray-500 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
-                          aria-label="Close preview"
+                        <template if="canWrite"
+                          ><label for="repo-upload-input" class="sr-only">Upload files</label>
+                          <input
+                            id="repo-upload-input"
+                            class="max-w-full text-xs text-gray-600 file:mr-2 file:rounded file:border-0 file:bg-transparent file:px-2 file:py-1 file:text-xs file:text-indigo-600 dark:text-gray-300 dark:file:text-indigo-300"
+                            type="file"
+                            multiple
+                            on-change="handleFileSelect($event.target.files)"
+                        /></template>
+                      </div>
+                      <ul class="divide-y divide-gray-100 overflow-y-auto dark:divide-gray-800">
+                        <template for="entry of entries"
+                          ><li
+                            class="flex items-center justify-between px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-900/50"
+                          >
+                            <a attr-href="entryHref(entry)" class="flex min-w-0 flex-1 items-center gap-3"
+                              ><i
+                                class="fa-solid w-4 text-center text-base"
+                                bind-class="{ 'fa-folder': entry.type === 'directory', 'fa-file-lines': entry.type === 'file', 'text-blue-400': entry.type === 'directory', 'text-gray-400': entry.type === 'file' }"
+                              ></i
+                              ><span class="truncate"
+                                >{{ entry.name }}<sup class="ml-1 text-amber-500"
+                                  >{{ entry.uncommitted ? '*' : '' }}</sup
+                                ></span
+                              ></a
+                            ><span class="ml-3 max-w-[45%] truncate text-xs text-gray-500 dark:text-gray-300"
+                              >{{ entry.uncommitted ? 'Uncommitted' : entry.type }}</span
+                            >
+                          </li></template
                         >
-                          <i class="fa-solid fa-xmark"></i>
-                        </button>
-                      </header>
-                      <template if="previewLoading"
-                        ><p class="flex-1 p-4 text-center text-gray-500" role="status">Loading preview…</p></template
+                      </ul>
+                      <div
+                        class="mt-auto border-t border-dashed border-gray-300 p-4 text-center text-xs text-gray-500 dark:text-gray-300 dark:border-gray-700"
+                        class-dragging="dragging"
                       >
-                      <template if="!previewLoading && previewUrl"
-                        ><img
-                          attr-src="previewUrl"
-                          alt="Image preview"
-                          class="max-h-full max-w-full self-center object-contain p-4"
-                      /></template>
-                      <template if="!previewLoading && !previewUrl">
-                        <pre class="flex-1 overflow-auto p-4 text-xs leading-5">{{ fileContent }}</pre>
-                      </template>
-                    </section>
-                  </div></template
-                >
+                        Drop files here to upload them unstaged
+                      </div>
+                    </div>
+                  </template>
+                  <template if="commits.length === 0">
+                    <div class="flex min-h-full flex-1 items-center justify-center text-center">
+                      <div class="mx-auto max-w-md p-8">
+                        <img
+                          src="/ui/welcome.svg"
+                          alt="A friendly Git folder illustration"
+                          class="mx-auto mb-6 w-60 rounded-xl"
+                        />
+                        <h1 class="text-2xl font-semibold">Welcome to your Git server</h1>
+                        <template if="canWrite"
+                          ><p class="mt-2 text-gray-600 dark:text-gray-300">
+                            Start by uploading your first file.
+                          </p></template
+                        >
+                        <template if="!canWrite"
+                          ><p class="mt-2 text-gray-600 dark:text-gray-300">
+                            This repository is empty. Ask your Git Store administrator to enable repository write access
+                            (repo:write) to add files.
+                          </p></template
+                        >
+                        <template if="dragging"
+                          ><p class="mt-2 text-sm font-medium text-indigo-600 dark:text-indigo-300">
+                            Drop files to upload.
+                          </p></template
+                        >
+                        <template if="canWrite"
+                          ><label for="repo-file-input" class="sr-only">Select files to upload</label>
+                          <input
+                            id="repo-file-input"
+                            class="mt-6 max-w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-xs dark:border-gray-700 dark:bg-gray-950"
+                            type="file"
+                            multiple
+                            on-change="handleFileSelect($event.target.files)"
+                        /></template>
+                        <template if="errorMessage"
+                          ><p class="mt-2 text-xs text-red-600 dark:text-red-400" role="alert">
+                            {{ errorMessage }}
+                          </p></template
+                        >
+                      </div>
+                    </div>
+                  </template>
+                  <template if="previewPath"
+                    ><div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 md:p-10">
+                      <section
+                        class="flex h-full w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-gray-200 bg-white text-gray-900 shadow-2xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="File preview"
+                      >
+                        <header
+                          class="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-800"
+                        >
+                          <div class="font-medium">{{ previewPath }}</div>
+                          <button
+                            on-click="closePreview()"
+                            class="rounded px-2 py-1 text-gray-500 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                            aria-label="Close preview"
+                          >
+                            <i class="fa-solid fa-xmark"></i>
+                          </button>
+                        </header>
+                        <template if="previewLoading"
+                          ><p class="flex-1 p-4 text-center text-gray-500" role="status">Loading preview…</p></template
+                        >
+                        <template if="!previewLoading && previewUrl"
+                          ><img
+                            attr-src="previewUrl"
+                            alt="Image preview"
+                            class="max-h-full max-w-full self-center object-contain p-4"
+                        /></template>
+                        <template if="!previewLoading && !previewUrl">
+                          <pre class="flex-1 overflow-auto p-4 text-xs leading-5">{{ fileContent }}</pre>
+                        </template>
+                      </section>
+                    </div></template
+                  >
+                </div>
               </template>
             </template>
           </section>
@@ -603,11 +609,16 @@
               let loadRequest = 0;
               let previewRequest = 0;
               let organizationRequest = 0;
+              // Li³ conditionals can retain cloned descendants across route changes; remove the old page before switching state.
+              const removeRepositoryView = () => {
+                document.querySelectorAll("[data-repository-view]").forEach((view) => view.remove());
+              };
               const releasePreview = () => {
                 if (previewUrl.value) URL.revokeObjectURL(previewUrl.value);
                 previewUrl.value = "";
               };
               const navigate = async (target, push = true) => {
+                const previous = url();
                 const next = new URL(target, window.location.href);
                 const nextPath = `${next.pathname}${next.search}${next.hash}`;
                 if (push) history.pushState({}, "", nextPath);
@@ -616,6 +627,16 @@
                 ++loadRequest;
                 ++previewRequest;
                 releasePreview();
+                const nextRepo = next.searchParams.get("repo");
+                if (
+                  !nextRepo ||
+                  next.searchParams.get("settings") === "organizations" ||
+                  nextRepo !== previous.searchParams.get("repo") ||
+                  next.searchParams.get("org") !== previous.searchParams.get("org")
+                ) {
+                  removeRepositoryView();
+                  repo.value = null;
+                }
                 orgError.value = "";
                 org.value = next.searchParams.get("org") || "";
                 settings.value = next.searchParams.get("settings") === "organizations";
