@@ -197,9 +197,9 @@
               : { authenticated: false };
             profile.value = session.authenticated ? session.profile : null;
             const params = new URL(window.location.href).searchParams;
-            org.value = params.get("org") || "";
-            repo.value = params.get("repo") || "";
-            settings.value = params.get("settings") === "organizations";
+            org.value = session.authenticated ? params.get("org") || "" : "";
+            repo.value = session.authenticated ? params.get("repo") || "" : "";
+            settings.value = session.authenticated && params.get("settings") === "organizations";
             showWorkspace.value = false;
             if (profile.value && params.has("org") && !settings.value) {
               const orgSlug = params.get("org");
@@ -1505,6 +1505,13 @@
                 return `${current.pathname}${current.search}${current.hash}`;
               };
               onInit(async () => {
+                const sessionResponse = await fetch("/ui/session", { credentials: "same-origin" }).catch(() => null);
+                const session = sessionResponse?.ok
+                  ? await sessionResponse.json().catch(() => ({ authenticated: false }))
+                  : { authenticated: false };
+                if (!session.authenticated) {
+                  return;
+                }
                 const query = new URL(window.location.href).searchParams;
                 const name = query.get("repo");
                 if (name && query.get("org")) {

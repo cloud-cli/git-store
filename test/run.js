@@ -133,6 +133,16 @@ async function run() {
   assert.ok(ui.includes('get("settings") === "organizations"'), "settings route is selected in-app");
   assert.ok(ui.includes("Your organizations"), "authenticated homepage lists organizations");
   assert.ok(ui.includes("showWorkspace.value = Boolean(selectedOrg.value && repositories.value.length > 0)"));
+  assert.ok(
+    ui.includes('org.value = session.authenticated ? params.get("org") || "" : "";'),
+    "anonymous visitors do not see organization/repository breadcrumbs",
+  );
+  assert.ok(
+    ui.includes(
+      "if (!session.authenticated) {\n                  return;\n                }\n                const query",
+    ),
+    "branch/tag navigation requires an authenticated session",
+  );
   const server = app.listen(0);
   await new Promise((resolve) => server.once("listening", resolve));
   const port = server.address().port;
