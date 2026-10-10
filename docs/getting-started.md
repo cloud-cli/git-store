@@ -53,6 +53,27 @@ npm start
 The Docker image supplies browser scopes by default. When running directly with Node.js,
 set `OIDC_BROWSER_SCOPES` explicitly if browser users should be able to access repositories.
 
+## Register an OIDC client
+
+Create a client/application in your identity provider (for example, Auth Lab or Keycloak)
+with the authorization-code flow enabled. Configure its exact redirect URI as
+`https://<git-store-host>/ui/auth/callback` (or set `OIDC_REDIRECT_URI` to that URL), and
+use the provider's issuer URL for `OIDC_ISSUER`. The client must support PKCE with `S256`;
+Git Store requests the standard OIDC scopes `openid profile email` and uses the client ID
+and secret from `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`.
+
+For the browser UI, **do not configure `repo:read` or `repo:write` as identity-provider
+scopes**. Git Store grants these application permissions to its cookie-backed browser
+session from `OIDC_BROWSER_SCOPES`; the Docker image defaults this to
+`repo:read repo:write`. Override it to `repo:read` for read-only browser access. These
+permissions are enforced within the signed-in subject's own organizations.
+
+This is separate from API clients that send OIDC bearer tokens. For those clients,
+`repo:read` and `repo:write` are Git Store-defined OAuth scopes: configure the provider to
+issue the required value in the introspected token's `scope`, `scp`, or `scopes` claim, and
+Git Store enforces it on each API operation. Provider-specific role claims are not
+automatically interpreted as these scope values.
+
 ## Basic API calls (using `curl`)
 
 ```bash
@@ -106,11 +127,11 @@ curl -X POST http://localhost:3000/api/v1/orgs/my-org/repos/myproject/branches \
 
 ## OIDC authentication and file uploads
 
-The server uses OIDC bearer token introspection for API clients. Read operations require
+The server introspects OIDC bearer tokens for API clients. Read operations require
 `repo:read` or `repo:write`; repository creation and mutations require `repo:write`.
 `repo:write` includes read access. A valid token missing a required scope returns **403
-Forbidden**; unauthenticated requests return **401 Unauthorized**. A guest or read-only
-token cannot create a repository.
+Forbidden**; unauthenticated requests return **401 Unauthorized**. Browser UI requests
+instead use the cookie-backed session and its `OIDC_BROWSER_SCOPES` configuration.
 
 The topbar's **Sign in** action starts an OIDC authorization-code flow with PKCE. The
 callback validates state, PKCE, and the ID token, confirms the access token is active,
@@ -119,14 +140,13 @@ server-side. Register the exact callback URL (preferably configured with
 `OIDC_REDIRECT_URI`) with the OIDC client. If that variable is unset, the service derives
 the callback from `PUBLIC_URL` or reverse-proxy forwarded host/protocol headers.
 
-Browser-session and bearer requests are accepted only after:
+Bearer requests are accepted only after:
 
-1. The request is same-origin with this Git Store server
-2. The configured OIDC issuer introspects the token as active and confirms a non-empty `sub`.
-3. Each repository route checks the token's `repo:read` or `repo:write` scope.
+1. The configured OIDC issuer introspects the token as active and confirms a non-empty `sub`.
+2. Each repository route checks the token's `repo:read` or `repo:write` scope.
 
-Cross-origin cookie requests are rejected for security. The `/ui/session` endpoint allows
-clients to verify the current authentication state.
+Cookie-authenticated browser writes must be same-origin. The `/ui/session` endpoint allows
+the UI to verify the current authentication state.
 
 ### File upload methods
 
