@@ -125,6 +125,7 @@ async function run() {
   assert.ok(ui.includes("showWorkspace && orgRepositories.length > 0"), "repository sidebar waits for repositories");
   assert.ok(ui.includes('on-click="openSettings()"'), "user card opens in-app settings");
   assert.ok(ui.includes('if="profile && org && !settings"'), "breadcrumbs are hidden until a session profile exists");
+  assert.ok(ui.includes('if="profile && repoLabel && !settings"'), "selected repository appears in the shared topbar");
   assert.ok(ui.includes('bind-repositories="orgRepositories"'), "landing pages receive root-owned repository state");
   assert.ok(ui.includes('on-createrepo="createFirstRepository($event.detail)"'), "landing actions update root state");
   assert.ok(!ui.includes("{{ repo.repo }}</h1>"), "repository name is not repeated below the breadcrumb");
@@ -138,6 +139,13 @@ async function run() {
   assert.ok(organizationSettings.includes('href="/?settings=organizations"'), "settings is a dedicated Li³ component");
   assert.ok(organizationSettings.includes('defineEvent("createorg")'), "settings emits org creation to the root");
   assert.ok(signInLanding.includes("Sign in to get started"), "anonymous landing is a dedicated Li³ component");
+  assert.ok(ui.includes("Your account does not have repository write access (repo:write)."));
+  assert.ok(ui.includes('template if="addFileError"'), "add-file errors stay within the add-file dialog");
+  for (const popoverId of ["create-repo-popover", "add-file-popover", "branch-popover", "tag-popover"]) {
+    const popoverStart = ui.indexOf(`id="${popoverId}"`);
+    const popoverMarkup = ui.slice(popoverStart, ui.indexOf(">", popoverStart));
+    assert.ok(popoverMarkup.includes("dark:text-gray-100"), `${popoverId} has readable dark-mode text`);
+  }
   assert.ok(
     ui.includes('currentUrl.searchParams.delete("repo")'),
     "changing organizations clears dependent repo state",
@@ -1188,10 +1196,12 @@ async function run() {
     const repoViewerComponent = fs.readFileSync(path.join(__dirname, "../public/components/repo-viewer.html"), "utf8");
     assert.ok(!sidebarComponent.includes("item.owner"));
     assert.ok(sidebarComponent.includes('popover="auto"'));
+    assert.ok(sidebarComponent.includes("dark:text-gray-100"));
     assert.ok(!sidebarComponent.includes("dialogOpen"));
     assert.ok(!repoPanelComponent.includes("owner="));
     assert.ok(repoPanelComponent.includes("No branches."));
     assert.ok(repoPanelComponent.includes("No tags."));
+    assert.ok(repoPanelComponent.includes("dark:text-gray-100"));
     assert.ok(!repoViewerComponent.includes("No commits yet"));
     assert.ok(repoViewerComponent.includes('id="repo-file-input"'));
 
