@@ -1091,9 +1091,21 @@ async function run() {
       "legacy aliases are optional and not required for the signed-in UI",
     );
     const mainStart = uiResponse.body.indexOf("<main ");
+    const viewerStateStart = uiResponse.body.indexOf('<script state type="application/json">', mainStart);
+    assert.ok(viewerStateStart >= 0, "viewer state JSON must be present");
+    const viewerStateEnd = uiResponse.body.indexOf("</script>", viewerStateStart);
+    assert.ok(viewerStateEnd > viewerStateStart, "viewer state JSON must be closed");
+    const viewerStateJson = uiResponse.body
+      .slice(viewerStateStart + '<script state type="application/json">'.length, viewerStateEnd)
+      .trim();
+    assert.ok(
+      !Object.hasOwn(JSON.parse(viewerStateJson), "org"),
+      "viewer state must not override the organization initialized from the URL",
+    );
     const viewerSetupStart = uiResponse.body.indexOf("<script setup>", mainStart);
     const viewerSetupEnd = uiResponse.body.indexOf("</script>", viewerSetupStart);
     const viewerSetup = uiResponse.body.slice(viewerSetupStart, viewerSetupEnd);
+    assert.ok(viewerSetup.includes('searchParams.get("org")'), "viewer organization should initialize from the URL");
     assert.ok(viewerSetup.includes("const setAddFilePath"), "add-file input handler must be in the viewer app island");
     assert.ok(viewerSetup.includes("setAddFilePath,"), "viewer app island must expose the add-file input handler");
     const sidebarComponent = fs.readFileSync(path.join(__dirname, "../public/components/repo-sidebar.html"), "utf8");
