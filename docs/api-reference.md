@@ -246,7 +246,10 @@ GET /api/v1/orgs/{org}/repos/{repo}/file
 
 - `path` – relative path to the file within the repository.
 
-**Response (200)** – `text/plain` file contents.
+**Response (200)** – text files are returned as UTF-8 `text/plain`. Supported raster image
+extensions (`.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.avif`, `.bmp`) are returned as their
+image MIME type with original bytes so browsers can preview them. Other file types are returned
+as UTF-8 `text/plain`; SVG and other active formats are not served as inline images.
 
 **Response (400)** – invalid path or path traversal detected.
 

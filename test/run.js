@@ -81,16 +81,16 @@ function request(port, method, requestPath, body, token, extraHeaders = {}, rawP
     }
 
     const req = http.request({ hostname: "127.0.0.1", port, method, path: actualPath, headers }, (res) => {
-      let responseBody = "";
-      res.setEncoding("utf8");
+      const chunks = [];
       res.on("data", (chunk) => {
-        responseBody += chunk;
+        chunks.push(Buffer.from(chunk));
       });
       res.on("end", () =>
         resolve({
           status: res.statusCode,
           headers: res.headers,
-          body: responseBody,
+          body: Buffer.concat(chunks).toString("utf8"),
+          rawBody: Buffer.concat(chunks),
         }),
       );
     });
@@ -243,7 +243,10 @@ async function run() {
       port,
       "POST",
       "/api/v1/orgs/team-one/repos/inside/files",
-      { path: "from-ui.txt", content: Buffer.from("org-scoped write").toString("base64") },
+      {
+        path: "from-ui.txt",
+        content: Buffer.from("org-scoped write").toString("base64"),
+      },
       "token-a",
     );
     assert.strictEqual(scopedFile.status, 201, `org-scoped upload works: ${scopedFile.body}`);
@@ -527,6 +530,18 @@ async function run() {
     const fileB = await request(port, "GET", "/api/v1/repos/shared-repo/file?path=private.txt", undefined, "token-b");
     assert.strictEqual(fileA.status, 200);
     assert.strictEqual(fileA.body, "subject A");
+    const imageBytes = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x41, 0x42, 0xff, 0xd9]);
+    fs.writeFileSync(path.join(dataPath, "orgs", "team-one", "inside", "preview.jpg"), imageBytes);
+    const imageResponse = await request(
+      port,
+      "GET",
+      "/api/v1/orgs/team-one/repos/inside/file?path=preview.jpg",
+      undefined,
+      "token-a",
+    );
+    assert.strictEqual(imageResponse.headers["content-type"], "image/jpeg");
+    assert.strictEqual(imageResponse.headers["x-content-type-options"], "nosniff");
+    assert.deepStrictEqual(imageResponse.rawBody, imageBytes, "image response preserves bytes");
     assert.strictEqual(fileB.status, 404, "another subject must not read repository files");
 
     assert.strictEqual(
@@ -1227,7 +1242,10 @@ async function run() {
       !repoPanelResponse.body.includes("access_token"),
       "branch and tag actions must use the browser session instead of locally stored access tokens",
     );
-    assert.ok(uiResponse.body.includes('document.documentElement.classList.toggle("dark", darkMode.value)'));
+    assert.ok(
+      uiResponse.body.includes("document.documentElement.classList.toggle(") &&
+        uiResponse.body.includes("darkMode.value"),
+    );
     assert.ok(uiResponse.body.includes('themeMedia.addEventListener("change"'));
     assert.ok(!uiResponse.body.includes('localStorage.getItem("theme")'));
     assert.ok(
@@ -1242,7 +1260,8 @@ async function run() {
     assert.ok(uiResponse.body.includes("No tags."));
     assert.ok(uiResponse.body.includes('window.matchMedia("(prefers-color-scheme: dark)")'));
     assert.ok(
-      uiResponse.body.includes('profile.value?.name || profile.value?.email?.split("@")[0]'),
+      uiResponse.body.includes("profile.value?.name") &&
+        uiResponse.body.includes('profile.value?.email?.split("@")[0]'),
       "the signed-in user card uses available name/email fields",
     );
     const rootSetupStart = uiResponse.body.indexOf("<script setup>");

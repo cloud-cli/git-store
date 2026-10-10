@@ -654,6 +654,21 @@ function getRepoFile(req, res) {
   }
 
   try {
+    const imageTypes = {
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".png": "image/png",
+      ".gif": "image/gif",
+      ".webp": "image/webp",
+      ".avif": "image/avif",
+      ".bmp": "image/bmp",
+    };
+    const detected = imageTypes[path.extname(filePath).toLowerCase()];
+    if (detected) {
+      res.set("X-Content-Type-Options", "nosniff");
+      return res.type(detected).send(fs.readFileSync(filePath));
+    }
+    res.set("X-Content-Type-Options", "nosniff");
     return res.type("text/plain").send(fs.readFileSync(filePath, "utf8"));
   } catch (error) {
     return res.status(500).json({ error: error.message });
@@ -898,7 +913,10 @@ app.get("/ui/session", async (req, res) => {
     } catch {
       // Validated introspection claims still identify the authenticated session.
     }
-    return res.json({ authenticated: true, profile: sanitizeUserProfile(profile, claims.sub) });
+    return res.json({
+      authenticated: true,
+      profile: sanitizeUserProfile(profile, claims.sub),
+    });
   } catch {
     return res.json({ authenticated: false, profile: null });
   }
@@ -1343,7 +1361,15 @@ function makeApiSpec() {
               401: unauthorized,
               403: { description: "Insufficient scope" },
             },
-            jsonBody({ slug: { type: "string", pattern: "^[a-z0-9](?:[a-z0-9._-]{0,61}[a-z0-9])?$" } }, ["slug"]),
+            jsonBody(
+              {
+                slug: {
+                  type: "string",
+                  pattern: "^[a-z0-9](?:[a-z0-9._-]{0,61}[a-z0-9])?$",
+                },
+              },
+              ["slug"],
+            ),
             [],
           ),
           security: [{ bearerAuth: [] }],
@@ -1361,7 +1387,14 @@ function makeApiSpec() {
               404: { description: "Organization not found" },
             },
             null,
-            [{ name: "org", in: "path", required: true, schema: { type: "string" } }],
+            [
+              {
+                name: "org",
+                in: "path",
+                required: true,
+                schema: { type: "string" },
+              },
+            ],
           ),
           security: [{ bearerAuth: [] }],
           "x-required-scope": "repo:read or repo:write",
@@ -1569,7 +1602,10 @@ function makeApiSpec() {
         get: operation(
           "Read a repository file",
           {
-            200: { description: "File contents" },
+            200: {
+              description:
+                "UTF-8 text, or original bytes with a safe raster-image MIME type for supported image extensions",
+            },
             400: { description: "Invalid path" },
             404: notFound,
           },
@@ -1613,7 +1649,12 @@ function makeApiSpec() {
           null,
           [
             ...pathParametersRepo,
-            { name: "path", in: "query", required: true, schema: { type: "string", minLength: 1 } },
+            {
+              name: "path",
+              in: "query",
+              required: true,
+              schema: { type: "string", minLength: 1 },
+            },
           ],
         ),
       },
@@ -1674,7 +1715,12 @@ function makeApiSpec() {
           {
             ...definition,
             parameters: [
-              { name: "org", in: "path", required: true, schema: { type: "string" } },
+              {
+                name: "org",
+                in: "path",
+                required: true,
+                schema: { type: "string" },
+              },
               ...(definition.parameters || []),
             ],
             security: [{ bearerAuth: [] }],

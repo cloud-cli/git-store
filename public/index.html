@@ -490,14 +490,26 @@
                         class="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-800"
                       >
                         <div class="font-medium">{{ previewPath }}</div>
-                        <a
-                          attr-href="rootHref"
+                        <button
+                          on-click="closePreview()"
                           class="rounded px-2 py-1 text-gray-500 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
                           aria-label="Close preview"
-                          ><i class="fa-solid fa-xmark"></i
-                        ></a>
+                        >
+                          <i class="fa-solid fa-xmark"></i>
+                        </button>
                       </header>
-                      <pre class="flex-1 overflow-auto p-4 text-xs leading-5">{{ fileContent }}</pre>
+                      <template if="previewLoading"
+                        ><p class="flex-1 p-4 text-center text-gray-500" role="status">Loading preview…</p></template
+                      >
+                      <template if="!previewLoading && previewUrl"
+                        ><img
+                          attr-src="previewUrl"
+                          alt="Image preview"
+                          class="max-h-full max-w-full self-center object-contain p-4"
+                      /></template>
+                      <template if="!previewLoading && !previewUrl">
+                        <pre class="flex-1 overflow-auto p-4 text-xs leading-5">{{ fileContent }}</pre>
+                      </template>
                     </section>
                   </div></template
                 >
@@ -548,7 +560,7 @@
               const repositoryNavHref = (item) =>
                 `/?org=${encodeURIComponent(org.value)}&repo=${encodeURIComponent(item.repo)}`;
               const isSelected = (item) => repoLabel.value === item.repo;
-              const openSettings = () => window.location.assign("/?settings=organizations");
+              const openSettings = () => navigate("/?settings=organizations");
               const toggleTheme = () => {
                 darkMode.value = !darkMode.value;
                 document.documentElement.classList.toggle("dark", darkMode.value);
@@ -577,6 +589,8 @@
               const directory = ref("");
               const previewPath = ref("");
               const fileContent = ref("");
+              const previewUrl = ref("");
+              const previewLoading = ref(false);
               const repoName = ref("");
               const addFilePath = ref("");
               const commitMessage = ref("");
@@ -585,6 +599,36 @@
               const addFileError = ref("");
               const hasUncommitted = computed(() => entries.value.some((entry) => entry.uncommitted));
               const url = () => new URL(window.location.href);
+              let navigationRequest = 0;
+              let loadRequest = 0;
+              let previewRequest = 0;
+              let organizationRequest = 0;
+              const releasePreview = () => {
+                if (previewUrl.value) URL.revokeObjectURL(previewUrl.value);
+                previewUrl.value = "";
+              };
+              const navigate = async (target, push = true) => {
+                const next = new URL(target, window.location.href);
+                const nextPath = `${next.pathname}${next.search}${next.hash}`;
+                if (push) history.pushState({}, "", nextPath);
+                else history.replaceState({}, "", nextPath);
+                const requestId = ++navigationRequest;
+                ++loadRequest;
+                ++previewRequest;
+                releasePreview();
+                orgError.value = "";
+                org.value = next.searchParams.get("org") || "";
+                settings.value = next.searchParams.get("settings") === "organizations";
+                await refreshOrgRepositories().catch(() => {
+                  if (requestId === navigationRequest) {
+                    orgRepositories.value = [];
+                    orgRepositoriesLoaded.value = true;
+                    orgError.value = "Unable to load repositories for this organization.";
+                  }
+                });
+                if (requestId === navigationRequest) await load();
+              };
+              const closePreview = () => navigate(rootHref.value);
               const base = () =>
                 `/api/v1/orgs/${encodeURIComponent(new URL(window.location.href).searchParams.get("org"))}/repos/${encodeURIComponent(repo.value.repo)}`;
               const rootHref = computed(
@@ -627,7 +671,8 @@
                     await refreshOrganizations();
                     orgCreated.value = true;
                   } else {
-                    window.location.assign(`/?org=${encodeURIComponent(result.org.slug)}`);
+                    await refreshOrganizations();
+                    await navigate(`/?org=${encodeURIComponent(result.org.slug)}`);
                   }
                 } catch (error) {
                   orgError.value = error.message || "Organization creation failed.";
@@ -642,6 +687,7 @@
               };
               const refreshOrgRepositories = async () => {
                 const slug = url().searchParams.get("org");
+                const requestId = ++organizationRequest;
                 if (!slug) {
                   orgRepositories.value = [];
                   orgRepositoriesLoaded.value = true;
@@ -650,10 +696,11 @@
                 orgRepositoriesLoaded.value = false;
                 const response = await fetch(`/api/v1/orgs/${encodeURIComponent(slug)}/repos`);
                 if (!response.ok) {
-                  orgRepositories.value = [];
+                  if (requestId === organizationRequest) orgRepositories.value = [];
                   throw new Error("Unable to load repositories for this organization.");
                 }
                 const result = await response.json().catch(() => ({}));
+                if (requestId !== organizationRequest) return;
                 orgRepositories.value = Array.isArray(result)
                   ? result
                   : Array.isArray(result.repos)
@@ -707,18 +754,22 @@
               };
               // Keep UI requests on the cookie session; access tokens are not stored in localStorage.
               const load = async () => {
+                const requestId = ++loadRequest;
                 const current = url();
                 const name = current.searchParams.get("repo");
                 repoLoadError.value = "";
                 directory.value = current.searchParams.get("dir") || "";
                 previewPath.value = current.searchParams.get("path") || "";
-                entries.value = [];
-                commits.value = [];
-                branches.value = [];
-                tags.value = [];
                 fileContent.value = "";
+                previewLoading.value = Boolean(previewPath.value);
+                releasePreview();
                 if (!name || !current.searchParams.get("org")) {
                   repo.value = null;
+                  entries.value = [];
+                  commits.value = [];
+                  branches.value = [];
+                  tags.value = [];
+                  previewLoading.value = false;
                   return;
                 }
                 repo.value = { repo: name };
@@ -735,24 +786,54 @@
                     fetch(`${apiBase}/tags`),
                   ]);
                 } catch {
+                  if (requestId !== loadRequest) return;
                   repo.value = null;
+                  previewLoading.value = false;
                   repoLoadError.value = `Could not contact the server while loading repository "${name}".`;
                   return;
                 }
+                if (requestId !== loadRequest) return;
                 if (!treeResponse?.ok) {
                   const result = (await treeResponse?.json().catch(() => ({}))) || {};
                   repo.value = null;
+                  previewLoading.value = false;
                   const status = treeResponse?.status || 0;
                   repoLoadError.value = result.error || `Could not load repository "${name}" (${status}).`;
                   return;
                 }
-                if (treeResponse.ok) entries.value = await treeResponse.json();
-                if (logResponse.ok) commits.value = await logResponse.json();
-                branches.value = branchResponse.ok ? await branchResponse.json() : [];
-                tags.value = tagResponse.ok ? await tagResponse.json() : [];
+                const [loadedEntries, loadedCommits, loadedBranches, loadedTags] = await Promise.all([
+                  treeResponse.json(),
+                  logResponse.ok ? logResponse.json() : [],
+                  branchResponse.ok ? branchResponse.json() : [],
+                  tagResponse.ok ? tagResponse.json() : [],
+                ]);
+                if (requestId !== loadRequest) return;
+                entries.value = loadedEntries;
+                commits.value = loadedCommits;
+                branches.value = loadedBranches;
+                tags.value = loadedTags;
                 if (previewPath.value) {
-                  const response = await fetch(`${apiBase}/file?path=${encodeURIComponent(previewPath.value)}`);
-                  fileContent.value = response.ok ? await response.text() : "Unable to load file";
+                  const currentPreviewRequest = ++previewRequest;
+                  try {
+                    const response = await fetch(`${apiBase}/file?path=${encodeURIComponent(previewPath.value)}`);
+                    if (requestId !== loadRequest || currentPreviewRequest !== previewRequest) return;
+                    const mimeType = response.headers.get("content-type")?.split(";")[0];
+                    if (response.ok && mimeType?.startsWith("image/")) {
+                      const blob = await response.blob();
+                      if (requestId === loadRequest && currentPreviewRequest === previewRequest)
+                        previewUrl.value = URL.createObjectURL(blob);
+                    } else {
+                      const text = response.ok ? await response.text() : "Unable to load file";
+                      if (requestId === loadRequest && currentPreviewRequest === previewRequest)
+                        fileContent.value = text;
+                    }
+                  } catch {
+                    if (requestId === loadRequest && currentPreviewRequest === previewRequest)
+                      fileContent.value = "Unable to load file preview.";
+                  } finally {
+                    if (requestId === loadRequest && currentPreviewRequest === previewRequest)
+                      previewLoading.value = false;
+                  }
                 }
               };
               const createFirstRepository = async (requestedName) => {
@@ -774,7 +855,7 @@
                     },
                   );
                   if (response.ok)
-                    window.location.assign(`/?org=${encodeURIComponent(org.value)}&repo=${encodeURIComponent(name)}`);
+                    await navigate(`/?org=${encodeURIComponent(org.value)}&repo=${encodeURIComponent(name)}`);
                   else {
                     const result = await response.json().catch(() => ({}));
                     errorMessage.value =
@@ -811,7 +892,7 @@
                         : `${result.error || "Repository creation failed"} (${result.code || response.status})`,
                     );
                   }
-                  window.location.assign(repositoryNavHref({ repo: name }));
+                  await navigate(repositoryNavHref({ repo: name }));
                 } catch (error) {
                   errorMessage.value = error.message || "Repository creation failed.";
                 }
@@ -831,8 +912,10 @@
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ name }),
                   });
-                  if (response.ok) window.location.reload();
-                  else throw new Error("Failed to create branch.");
+                  if (response.ok) {
+                    branchName.value = "";
+                    await load();
+                  } else throw new Error("Failed to create branch.");
                 } catch (error) {
                   errorMessage.value = error.message;
                 }
@@ -852,8 +935,10 @@
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ name }),
                   });
-                  if (response.ok) window.location.reload();
-                  else throw new Error("Failed to create tag.");
+                  if (response.ok) {
+                    tagName.value = "";
+                    await load();
+                  } else throw new Error("Failed to create tag.");
                 } catch (error) {
                   errorMessage.value = error.message;
                 }
@@ -911,7 +996,7 @@
                     addFileError.value = result.error || `Failed to commit file (${commitResponse.status}).`;
                     return;
                   }
-                  window.location.reload();
+                  await load();
                 } catch (error) {
                   addFileError.value = error.message || "Could not create and commit the file.";
                 }
@@ -938,12 +1023,14 @@
                   const response = await fetch(`${base()}/commit`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ message: commitMessage.value || "autocommit" }),
+                    body: JSON.stringify({
+                      message: commitMessage.value || "autocommit",
+                    }),
                   });
                   if (!response.ok) throw new Error("Could not commit changes. Sign in and try again.");
                   const current = url();
                   current.searchParams.delete("path");
-                  window.location.assign(current);
+                  await navigate(current, false);
                 } catch (error) {
                   errorMessage.value = error.message;
                 }
@@ -1011,7 +1098,7 @@
                 errorMessage.value = "";
                 try {
                   await uploadFiles(event.dataTransfer.files);
-                  window.location.reload();
+                  await load();
                 } catch (error) {
                   errorMessage.value = error.message;
                 }
@@ -1027,6 +1114,26 @@
                 window.addEventListener("keydown", (event) => {
                   if (event.key === "Escape") closeMenu();
                 });
+                window.addEventListener("popstate", () => navigate(window.location.href, false));
+                document.addEventListener("click", (event) => {
+                  const link = event.target.closest("a[href]");
+                  if (
+                    !link ||
+                    event.defaultPrevented ||
+                    event.button !== 0 ||
+                    event.metaKey ||
+                    event.ctrlKey ||
+                    event.shiftKey ||
+                    event.altKey ||
+                    link.target ||
+                    link.origin !== location.origin
+                  )
+                    return;
+                  const target = new URL(link.href);
+                  if (target.pathname !== "/" && target.pathname !== "/ui/") return;
+                  event.preventDefault();
+                  navigate(target.href);
+                });
                 const config = await fetch("/ui/config")
                   .then((response) => response.json())
                   .catch(() => ({}));
@@ -1035,7 +1142,9 @@
                 userUrl.value = config.oidcLoginUrl
                   ? `${config.oidcLoginUrl}?returnTo=${encodeURIComponent(returnTo)}`
                   : "#";
-                const sessionResponse = await fetch("/ui/session", { credentials: "same-origin" }).catch(() => null);
+                const sessionResponse = await fetch("/ui/session", {
+                  credentials: "same-origin",
+                }).catch(() => null);
                 const session = sessionResponse?.ok
                   ? await sessionResponse.json().catch(() => ({ authenticated: false }))
                   : { authenticated: false };
@@ -1070,7 +1179,7 @@
                   currentUrl.searchParams.delete("repo");
                   currentUrl.searchParams.delete("path");
                   currentUrl.searchParams.delete("dir");
-                  window.location.assign(currentUrl);
+                  await navigate(currentUrl, false);
                   return;
                 }
                 try {
@@ -1096,7 +1205,7 @@
                 errorMessage.value = "";
                 try {
                   await uploadFiles(files);
-                  window.location.reload();
+                  await load();
                 } catch (error) {
                   errorMessage.value = error.message;
                 }
@@ -1116,6 +1225,7 @@
                 repositoryNavHref,
                 isSelected,
                 openSettings,
+                closePreview,
                 toggleTheme,
                 toggleSidebar,
                 closeMenu,
@@ -1135,6 +1245,8 @@
                 directory,
                 previewPath,
                 fileContent,
+                previewUrl,
+                previewLoading,
                 repoName,
                 addFilePath,
                 commitMessage,

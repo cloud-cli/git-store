@@ -188,6 +188,8 @@ loads repositories from the API, and opens a file preview when a file is selecte
 The selected repository, ref, and file path are kept in the query string;
 for example, `/?repo=myproject&ref=main&path=README.md` can be refreshed
 without losing the preview.
+Internal navigation and repository mutations update the page in place. Text files open as text;
+supported raster images such as JPEG and PNG open as images.
 
 ### Empty states and HTML popovers
 
