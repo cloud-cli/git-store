@@ -26,16 +26,18 @@ participate in organization or repository naming.
   `/api/v1/orgs/<org>/repos/<repo>` and `/git/<org>/<repo>.git`.
 - Organization and repository names are short path-only identifiers. The
   authenticated subject's stable hashed `sub` claim is used for organization ownership
-  metadata. Organizations are recorded in `DATA_PATH/organizations.json`; repositories
-  live under `DATA_PATH/orgs/<slug>/<repo>`.
+  metadata. Organization metadata lives in `DATA_PATH/orgs/<slug>/.organization.json`;
+  repositories live alongside it under `DATA_PATH/orgs/<slug>/<repo>`.
 - `npm test` runs a Node-built-in integration suite covering subject isolation,
   unauthorized access, route inventory, traversal rejection, and UI wiring.
 
 ### Storage note
 
-This MVP stores organization metadata in `DATA_PATH/organizations.json` and repositories
-under `DATA_PATH/orgs/<slug>/<repo>`. Ownership metadata is the SHA-256 hash of the OIDC
-`sub` claim. This release has no storage migration; start with an empty data volume.
+The organization and repository directory structure is authoritative. At startup the
+service walks `DATA_PATH/orgs` and indexes valid `DATA_PATH/orgs/<slug>/.organization.json`
+files; repositories remain at `DATA_PATH/orgs/<slug>/<repo>`. Ownership metadata is the
+SHA-256 hash of the OIDC `sub` claim. Existing `organizations.json` registries are migrated
+and archived after successful migration.
 
 ## Run
 

@@ -9,7 +9,7 @@
 - [x] Use `/home/app` as the Docker application directory.
 - [x] Add Node-only integration checks for subject isolation and unauthorized behavior.
 - [x] Add Diátaxis tutorial, how-to/getting-started, and reference documentation.
-- [x] Store organizations in `DATA_PATH/organizations.json` and repositories under `DATA_PATH/orgs/<slug>/<repo>`.
+- [x] Store organization metadata in `DATA_PATH/orgs/<slug>/.organization.json`; keep repositories under `DATA_PATH/orgs/<slug>/<repo>` and rebuild the index from disk.
 - [x] Scope repository API and Git routes under organization/repository slugs.
 - [x] Add repository name validation.
 - [x] Implement identity isolation across two injected subjects.

@@ -4,8 +4,9 @@
 
 Git Store is a minimal HTTP API for managing multiple Git repositories on disk.
 Repositories are stored under the required `DATA_PATH` environment variable (the
-Docker image defaults it to `/home/app/data`). Organizations are recorded in
-`DATA_PATH/organizations.json`; repositories live under `DATA_PATH/orgs/<slug>/<repo>`.
+Docker image defaults it to `/home/app/data`). Organization metadata is stored in
+`DATA_PATH/orgs/<slug>/.organization.json`; repositories live beside it under
+`DATA_PATH/orgs/<slug>/<repo>`. The service walks organization folders at startup.
 Ownership metadata is the SHA-256 hash of the OIDC `sub`.
 
 ## Quick start (Docker)
@@ -175,9 +176,10 @@ The system will not fail on uploading empty content—the file is created with n
 
 ## Storage
 
-Organization metadata is stored in `DATA_PATH/organizations.json`; repository data is
-stored in `DATA_PATH/orgs/<slug>/<repo>`. Ownership metadata is a SHA-256 hash of the
-OIDC `sub`. This MVP has no migration; use an empty data volume.
+Organization folders and their `.organization.json` metadata are authoritative; the
+service rebuilds its index at startup. Repository data remains in
+`DATA_PATH/orgs/<slug>/<repo>`. Existing `organizations.json` registries are migrated
+and archived after successful migration.
 
 ## Web UI
 

@@ -120,7 +120,9 @@ async function run() {
     assert.strictEqual((await request(port, "POST", "/api/v1/orgs", { slug: "bad slug" }, "token-a")).status, 400);
     const orgCreated = await request(port, "POST", "/api/v1/orgs", { slug: "Team-One" }, "token-a");
     assert.strictEqual(orgCreated.status, 201);
-    assert.deepStrictEqual(JSON.parse(orgCreated.body), { org: { slug: "team-one" } });
+    assert.deepStrictEqual(JSON.parse(orgCreated.body), {
+      org: { slug: "team-one" },
+    });
     assert.strictEqual((await request(port, "POST", "/api/v1/orgs", { slug: "team-one" }, "token-b")).status, 409);
     for (const [token, slug] of [
       ["token-a", "team-extra"],
@@ -136,19 +138,26 @@ async function run() {
       tokenSubjects.set(token, oldClaims);
     }
     assert.deepStrictEqual(JSON.parse((await request(port, "GET", "/api/v1/orgs", undefined, "token-a")).body), {
-      orgs: [{ slug: "team-one" }, { slug: "team-extra" }],
+      orgs: [{ slug: "team-extra" }, { slug: "team-one" }],
     });
     assert.deepStrictEqual(JSON.parse((await request(port, "GET", "/api/v1/orgs", undefined, "token-b")).body), {
       orgs: [{ slug: "team-two" }],
     });
-    const organizationRegistry = fs.readFileSync(path.join(dataPath, "organizations.json"), "utf8");
-    assert.ok(!organizationRegistry.includes("oidc-subject-a"), "organization registry must not persist raw subjects");
+    const organizationMetadata = fs.readFileSync(path.join(dataPath, "orgs", "team-one", ".organization.json"), "utf8");
+    assert.ok(!organizationMetadata.includes("oidc-subject-a"), "organization metadata must not persist raw subjects");
+    assert.match(JSON.parse(organizationMetadata).ownerHash, /^[a-f0-9]{64}$/);
     const organizationsModulePath = require.resolve("../organizations");
     delete require.cache[organizationsModulePath];
     assert.deepStrictEqual(require("../organizations").listForSubject("oidc-subject-a"), [
-      { slug: "team-one" },
       { slug: "team-extra" },
+      { slug: "team-one" },
     ]);
+    fs.mkdirSync(path.join(dataPath, "orgs", "broken"), { recursive: true });
+    fs.writeFileSync(path.join(dataPath, "orgs", "broken", ".organization.json"), "not json");
+    fs.mkdirSync(path.join(dataPath, "orgs", "../escape"), { recursive: true });
+    require("../organizations").reload();
+    assert.strictEqual(require("../organizations").get("broken"), null);
+    assert.strictEqual(require("../organizations").get("../escape"), null);
     assert.strictEqual(
       (await request(port, "POST", "/api/v1/orgs/team-one/repos/inside", undefined, "token-a")).status,
       201,
@@ -217,7 +226,9 @@ async function run() {
       "/git/team-one/inside.git/info/refs?service=git-upload-pack",
       undefined,
       undefined,
-      { Authorization: `Basic ${Buffer.from("user:token-b").toString("base64")}` },
+      {
+        Authorization: `Basic ${Buffer.from("user:token-b").toString("base64")}`,
+      },
     );
     assert.strictEqual(foreignOrgGit.status, 404, "organization Git transport is limited to its owning subject");
     const canonicalizedOrgGit = await request(
@@ -226,7 +237,9 @@ async function run() {
       "/git/TEAM-ONE/inside.git/info/refs?service=git-upload-pack",
       undefined,
       undefined,
-      { Authorization: `Basic ${Buffer.from("user:token-a").toString("base64")}` },
+      {
+        Authorization: `Basic ${Buffer.from("user:token-a").toString("base64")}`,
+      },
     );
     assert.strictEqual(canonicalizedOrgGit.status, 200, "Git transport canonicalizes case-insensitive org slugs");
     const createA = await request(port, "POST", "/api/v1/repos/shared-repo", undefined, "token-a");
@@ -329,7 +342,9 @@ async function run() {
     assert.deepStrictEqual(JSON.parse(listA.body), {
       repos: [{ repo: "git-http" }, { repo: "inside" }, { repo: "shared-repo" }],
     });
-    assert.deepStrictEqual(JSON.parse(listB.body), { repos: [{ repo: "shared-repo" }] });
+    assert.deepStrictEqual(JSON.parse(listB.body), {
+      repos: [{ repo: "shared-repo" }],
+    });
 
     const readOnlyList = await request(port, "GET", "/api/v1/repos", undefined, "read-only");
     assert.strictEqual(readOnlyList.status, 200, "repo:read permits repository listing");
@@ -537,7 +552,11 @@ async function run() {
       "token-a",
     );
     assert.strictEqual(deleteFile.status, 200, deleteFile.body);
-    assert.deepStrictEqual(JSON.parse(deleteFile.body), { path: "private.txt", deleted: true, staged: false });
+    assert.deepStrictEqual(JSON.parse(deleteFile.body), {
+      path: "private.txt",
+      deleted: true,
+      staged: false,
+    });
     assert.strictEqual(
       fs.existsSync(path.join(repoA, "private.txt")),
       false,
@@ -667,7 +686,9 @@ async function run() {
           "/git/git-http.git/info/refs?service=git-upload-pack",
           undefined,
           undefined,
-          { Authorization: `Basic ${Buffer.from("user:token-a").toString("base64")}` },
+          {
+            Authorization: `Basic ${Buffer.from("user:token-a").toString("base64")}`,
+          },
           true,
         )
       ).status,
@@ -895,8 +916,15 @@ async function run() {
       { Cookie: usernameFreeSessionCookie, Origin: `http://127.0.0.1:${port}` },
     );
     assert.strictEqual(usernameFreeRepo.status, 201, "organization/repository creation does not depend on username");
-    oidcUserInfo = { id: "browser-subject", name: "Signed In", preferred_username: "browser-user" };
-    oidcIdClaims = { sub: "browser-subject", preferred_username: "different-username" };
+    oidcUserInfo = {
+      id: "browser-subject",
+      name: "Signed In",
+      preferred_username: "browser-user",
+    };
+    oidcIdClaims = {
+      sub: "browser-subject",
+      preferred_username: "different-username",
+    };
     const inconsistentUsernameLogin = await request(port, "GET", "/ui/auth/login");
     const inconsistentUsernameAuthorization = new URL(inconsistentUsernameLogin.headers.location);
     const inconsistentUsernameCookies = inconsistentUsernameLogin.headers["set-cookie"]
@@ -911,8 +939,15 @@ async function run() {
       { Cookie: inconsistentUsernameCookies },
     );
     assert.strictEqual(inconsistentUsernameCallback.status, 303, "OIDC usernames do not determine repository identity");
-    oidcUserInfo = { id: "browser-subject", name: "Signed In", preferred_username: "changed-provider-user" };
-    oidcIdClaims = { sub: "browser-subject", preferred_username: "changed-provider-user" };
+    oidcUserInfo = {
+      id: "browser-subject",
+      name: "Signed In",
+      preferred_username: "changed-provider-user",
+    };
+    oidcIdClaims = {
+      sub: "browser-subject",
+      preferred_username: "changed-provider-user",
+    };
     const changedUsernameLogin = await request(port, "GET", "/ui/auth/login");
     const changedUsernameAuthorization = new URL(changedUsernameLogin.headers.location);
     const changedUsernameCookies = changedUsernameLogin.headers["set-cookie"]
@@ -929,7 +964,10 @@ async function run() {
     assert.strictEqual(changedUsernameCallback.status, 303, "provider username changes do not block sign-in");
 
     oidcUserInfo = { id: "id-only-subject", name: "Signed In" };
-    oidcIdClaims = { sub: "id-only-subject", preferred_username: "id-only-user" };
+    oidcIdClaims = {
+      sub: "id-only-subject",
+      preferred_username: "id-only-user",
+    };
     const idTokenUsernameLogin = await request(port, "GET", "/ui/auth/login");
     const idTokenUsernameAuthorization = new URL(idTokenUsernameLogin.headers.location);
     const idTokenUsernameCookies = idTokenUsernameLogin.headers["set-cookie"]
@@ -949,7 +987,11 @@ async function run() {
       "sign-in succeeds using the subject without username coupling",
     );
 
-    oidcUserInfo = { id: "browser-subject", name: "Signed In", preferred_username: "browser-user" };
+    oidcUserInfo = {
+      id: "browser-subject",
+      name: "Signed In",
+      preferred_username: "browser-user",
+    };
     oidcIdClaims = { sub: "browser-subject" };
     process.env.OIDC_REDIRECT_URI = `http://127.0.0.1:${port}/auth/callback`;
     expectedCallbackPath = "/auth/callback";
