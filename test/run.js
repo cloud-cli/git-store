@@ -950,6 +950,8 @@ async function run() {
 
     const uiResponse = await request(port, "GET", "/ui/");
     assert.strictEqual(uiResponse.status, 200);
+    const repoPanelResponse = await request(port, "GET", "/ui/components/repo-panel.html");
+    assert.strictEqual(repoPanelResponse.status, 200);
     const welcomeResponse = await request(port, "GET", "/ui/welcome.svg");
     assert.strictEqual(welcomeResponse.status, 200);
     assert.ok(welcomeResponse.body.includes("Build your workspace"));
@@ -974,6 +976,13 @@ async function run() {
     assert.ok(uiResponse.body.includes("Step 2 of 2"));
     assert.ok(uiResponse.body.includes("window.location.assign(`/ui/?org=${encodeURIComponent(result.org.slug)}`)"));
     assert.ok(uiResponse.body.includes('searchParams.has("org")'));
+    assert.ok(uiResponse.body.includes('<template if="authenticated">'));
+    assert.ok(uiResponse.body.includes('fetch("/ui/session", { credentials: "same-origin" })'));
+    assert.ok(!uiResponse.body.includes("access_token"), "UI auth must not depend on locally stored access tokens");
+    assert.ok(
+      !repoPanelResponse.body.includes("access_token"),
+      "branch and tag actions must use the browser session instead of locally stored access tokens",
+    );
     assert.ok(uiResponse.body.includes('document.documentElement.classList.toggle("dark", darkMode.value)'));
     assert.ok(uiResponse.body.includes('themeMedia.addEventListener("change"'));
     assert.ok(!uiResponse.body.includes('localStorage.getItem("theme")'));

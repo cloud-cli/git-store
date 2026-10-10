@@ -184,10 +184,6 @@
       const setTagName = (value) => {
         tagName.value = value;
       };
-      const tokenHeaders = () => {
-        const token = localStorage.getItem("access_token");
-        return token ? { Authorization: `Bearer ${token}` } : {};
-      };
       const selectRef = (ref) => {
         const query = new URL(window.location.href).searchParams;
         query.set("org", new URL(window.location.href).searchParams.get("org") || "");
@@ -210,7 +206,6 @@
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
-                ...tokenHeaders(),
               },
               body: JSON.stringify({ name }),
             },
@@ -236,7 +231,6 @@
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
-                ...tokenHeaders(),
               },
               body: JSON.stringify({ name }),
             },
