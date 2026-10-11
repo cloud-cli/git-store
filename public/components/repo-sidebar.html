@@ -12,7 +12,7 @@
         class="text-gray-400"
         aria-label="Create repository"
       >
-        <i class="fa-solid fa-plus"></i>
+        <i class="ph ph-plus"></i>
       </button>
     </div>
     <div class="flex-1 space-y-1 overflow-y-auto p-2">
@@ -27,7 +27,7 @@
           on-click.prevent="$$emit('select', item)"
           class="flex items-center gap-2 rounded-md px-3 py-2 text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
           class-selected="selected && selected.repo === item.repo"
-          ><i class="fa-solid fa-book-bookmark text-xs text-gray-400"></i>{{ item.repo }}</a
+          ><i class="ph ph-book-bookmark text-base text-gray-400"></i>{{ item.repo }}</a
         ></template
       >
     </div>
@@ -53,7 +53,7 @@
       <h2 class="text-lg font-semibold">Create repository</h2>
       <p class="mt-1 text-sm text-gray-500 dark:text-gray-300">Choose a name for your first repository.</p>
       <input
-        class="mt-4 w-full rounded-md border border-gray-300 bg-transparent px-3 py-2 outline-none focus:border-indigo-500 dark:border-gray-700"
+        class="flow-input mt-4 w-full px-3 py-2"
         placeholder="repository-name"
         on-input="setRepoName($event.target.value)"
         required
@@ -67,9 +67,7 @@
         >
           Cancel
         </button>
-        <button class="rounded-md bg-indigo-600 px-3 py-2 font-medium text-white hover:bg-indigo-500" type="submit">
-          Create
-        </button>
+        <button class="flow-action rounded-lg px-3 py-2 font-medium text-white" type="submit">Create</button>
       </div>
     </form>
   </div>

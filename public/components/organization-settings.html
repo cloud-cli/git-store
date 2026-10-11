@@ -4,36 +4,39 @@
       class="w-32 flex-shrink-0 border-r border-gray-200 pr-3 sm:w-44 sm:pr-4 dark:border-gray-800"
       aria-label="Settings navigation"
     >
-      <h1 class="mb-4 text-xl font-semibold">Settings</h1>
+      <h1 class="mb-4 text-xl font-bold">Settings</h1>
       <a
         href="/?settings=organizations"
         aria-current="page"
-        class="block rounded-md bg-indigo-50 px-3 py-2 font-medium text-indigo-700 dark:bg-indigo-950 dark:text-indigo-200"
+        class="block rounded-lg border border-green-200 bg-green-50 px-3 py-2 font-medium text-green-800 dark:border-green-900 dark:bg-green-950 dark:text-green-200"
         >Organizations</a
       >
     </nav>
     <div class="min-w-0 flex-1">
-      <h2 class="mb-4 text-2xl font-semibold">Organizations</h2>
+      <h2 class="mb-4 text-2xl font-bold">Organizations</h2>
       <ul class="mb-6 space-y-2">
         <template for="item of organizations"
           ><li>
             <a
               attr-href="organizationHref(item)"
-              class="block rounded-md border border-gray-200 px-4 py-3 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-900"
-              >{{ item.slug }}</a
+              class="flow-onboarding-card flex items-center gap-3 px-4 py-3 transition-colors hover:border-green-300 dark:hover:border-green-800"
+              ><i class="ph ph-buildings text-lg text-brand"></i><span class="font-medium">{{ item.slug }}</span></a
             >
           </li></template
         >
       </ul>
       <template if="canWrite"
-        ><form class="flex max-w-md flex-col gap-2 sm:flex-row" on-submit.prevent="createOrganization()">
+        ><form
+          class="flow-onboarding-card flex max-w-xl flex-col gap-3 p-4 sm:flex-row"
+          on-submit.prevent="createOrganization()"
+        >
           <input
             aria-label="Organization slug"
-            placeholder="organization-slug"
-            class="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900"
+            placeholder="e.g. homebots-inc"
+            class="flow-input min-w-0 flex-1 px-3 py-2"
             required
             on-input="setOrganizationName($event.target.value)"
-          /><button class="rounded-md bg-indigo-600 px-4 py-2 font-medium text-white" type="submit">
+          /><button class="flow-action rounded-lg px-4 py-2 font-medium text-white" type="submit">
             Create organization
           </button>
         </form></template
@@ -48,11 +51,7 @@
       >
       <template if="error"
         ><p role="alert" class="mt-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
-        <button
-          class="mt-2 text-sm text-indigo-600 hover:underline dark:text-indigo-300"
-          type="button"
-          on-click="retry()"
-        >
+        <button class="mt-2 text-sm text-brand hover:underline dark:text-green-300" type="button" on-click="retry()">
           Try again
         </button></template
       >

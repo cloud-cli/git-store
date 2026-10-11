@@ -13,9 +13,7 @@
               class="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900"
               placeholder="my-first-repository"
               on-input="setRepositoryName($event.target.value)"
-            /><button class="rounded-md bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-500">
-              Create
-            </button>
+            /><button class="flow-action rounded-lg px-4 py-2 font-medium text-white">Create</button>
           </form>
         </div>
       </div>
@@ -29,7 +27,7 @@
             <div
               class="flex h-8 w-8 items-center justify-center rounded-full bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
             >
-              <i class="fa-solid fa-code-commit"></i>
+              <i class="ph ph-git-commit"></i>
             </div>
             <div class="flex-1">
               <div class="font-medium">{{ commits[0].message }}</div>
@@ -54,12 +52,7 @@
                 type="file"
                 multiple
               />
-              <button
-                type="submit"
-                class="rounded-md bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-500"
-              >
-                Upload
-              </button>
+              <button type="submit" class="flow-action rounded-lg px-4 py-2 font-medium text-white">Upload</button>
             </form>
           </div>
         </div>
@@ -70,9 +63,7 @@
             class="min-w-0 flex-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 dark:border-amber-800 dark:bg-amber-950/30"
             placeholder="Commit message"
             on-input="setCommitMessage($event.target.value)"
-          /><button class="rounded-md bg-indigo-600 px-3 py-2 font-medium text-white hover:bg-indigo-500">
-            Commit
-          </button>
+          /><button class="flow-action rounded-lg px-3 py-2 font-medium text-white">Commit</button>
         </form></template
       >
       <template if="commits.length > 0"
@@ -95,7 +86,7 @@
               on-change="upload($event.target.files)"
             />
             <button type="button" class="rounded px-2 py-1" aria-label="Upload files" on-click="openFilePicker()">
-              <i class="fa-solid fa-upload"></i>
+              <i class="ph ph-upload-simple"></i>
             </button>
           </div>
           <ul class="divide-y divide-gray-100 dark:divide-gray-800">
@@ -106,8 +97,8 @@
               >
                 <div class="flex items-center gap-3">
                   <i
-                    class="fa-solid w-4 text-center text-base"
-                    bind-class="{ 'fa-folder': entry.type === 'directory', 'fa-file-lines': entry.type === 'file', 'text-blue-400': entry.type === 'directory', 'text-gray-400': entry.type === 'file' }"
+                    class="ph w-4 text-center text-base"
+                    bind-class="{ 'ph-folder': entry.type === 'directory', 'ph-file': entry.type === 'file', 'text-brand': entry.type === 'directory', 'text-gray-400': entry.type === 'file' }"
                   ></i
                   ><span
                     >{{ entry.name }}<sup class="ml-1 text-amber-500">{{ entry.uncommitted ? '*' : '' }}</sup></span
