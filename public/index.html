@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Flow · Git Store</title>
+    <title>Git Store</title>
     <script type="importmap">
       { "imports": { "@li3/": "https://cdn.li3.dev/@li3/" } }
     </script>
@@ -58,31 +58,13 @@
       .dark .flow-topbar {
         background: #111713;
       }
-      .flow-logo {
-        color: #1c201e;
-        font-size: 24px;
-        font-weight: 700;
-        letter-spacing: -0.04em;
-      }
-      .dark .flow-logo {
-        color: #f3f5f3;
-      }
-      .flow-logo-mark {
-        display: flex;
+      .home-indicator {
+        display: block;
         width: 24px;
-        flex-direction: column;
-        gap: 3px;
-      }
-      .flow-logo-mark span {
-        height: 6px;
+        height: 24px;
+        flex: 0 0 auto;
         border-radius: 999px;
         background: #3b714b;
-      }
-      .flow-logo-mark span:nth-child(2) {
-        width: 80%;
-      }
-      .flow-logo-dot {
-        color: #3b714b;
       }
       .flow-user-card {
         min-height: 56px;
@@ -369,9 +351,6 @@
           height: 72px;
           padding: 12px 16px;
         }
-        .flow-logo {
-          font-size: 22px;
-        }
         .flow-user-card {
           min-height: 44px;
           gap: 8px;
@@ -441,10 +420,9 @@
             >
               <i class="ph ph-list text-lg"></i></button
           ></template>
-          <a href="/" class="flow-logo flex flex-shrink-0 items-center gap-2" aria-label="Flow home"
-            ><span class="flow-logo-mark" aria-hidden="true"><span></span><span></span><span></span></span
-            ><span>flow<span class="flow-logo-dot">.</span></span></a
-          >
+          <a href="/" class="flex flex-shrink-0 items-center" aria-label="Home"
+            ><span class="home-indicator" aria-hidden="true"></span
+          ></a>
           <template if="profile && org && !settings"
             ><template if="showWorkspace"
               ><span class="flex-shrink-0 text-gray-400">/</span
