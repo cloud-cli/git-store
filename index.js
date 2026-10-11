@@ -545,7 +545,7 @@ async function createRepo(req, res) {
     const git = getGit(repoPath);
 
     if (!fs.existsSync(path.join(repoPath, ".git"))) {
-      await git.init();
+      await git.init(false, ["--initial-branch=main"]);
       await git.addConfig("user.name", "git-store");
       await git.addConfig("user.email", "git-store@local");
     }

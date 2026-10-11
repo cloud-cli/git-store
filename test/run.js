@@ -1015,6 +1015,18 @@ async function run() {
       { Cookie: usernameFreeSessionCookie, Origin: `http://127.0.0.1:${port}` },
     );
     assert.strictEqual(usernameFreeRepo.status, 201, "organization/repository creation does not depend on username");
+    const usernameFreeRepoBranch = await git([
+      "-C",
+      path.join(dataPath, "orgs", "username-free-org", "project"),
+      "symbolic-ref",
+      "--short",
+      "HEAD",
+    ]);
+    assert.strictEqual(
+      usernameFreeRepoBranch.stdout.trim(),
+      "main",
+      "new repositories use main as their initial branch",
+    );
     oidcUserInfo = {
       id: "browser-subject",
       name: "Signed In",
