@@ -127,29 +127,117 @@
       .dark .flow-repo-sidebar {
         background: #111713;
       }
-      .flow-repo-link {
-        min-height: 38px;
-        border: 1px solid transparent;
-        border-radius: 9px;
-        color: #525e56;
+      .flow-sidebar-section {
+        position: relative;
+        border-top: 1px solid #dfe5e0;
+        padding-bottom: 4px;
       }
-      .flow-repo-link:hover {
+      .flow-sidebar-section:first-child {
+        border-top: 0;
+      }
+      .flow-sidebar-heading {
+        display: flex;
+        min-height: 34px;
+        align-items: center;
+        gap: 7px;
+        padding: 0 36px 0 8px;
+        color: #65736a;
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        list-style: none;
+        text-transform: uppercase;
+      }
+      .flow-sidebar-heading::-webkit-details-marker {
+        display: none;
+      }
+      .flow-sidebar-heading .flow-disclosure-icon {
+        color: #89958c;
+        font-size: 13px;
+        transition: transform 120ms ease;
+      }
+      .flow-sidebar-section details[open] > .flow-sidebar-heading {
+        margin-bottom: 4px;
+        border-bottom: 1px solid #e8ece9;
+      }
+      .flow-sidebar-section details[open] > .flow-sidebar-heading .flow-disclosure-icon {
+        transform: rotate(90deg);
+      }
+      .dark .flow-sidebar-section {
+        border-color: #303b33;
+      }
+      .dark .flow-sidebar-heading {
+        color: #aab6ac;
+      }
+      .dark .flow-sidebar-section details[open] > .flow-sidebar-heading {
+        border-color: #29342c;
+      }
+      .flow-sidebar-action {
+        position: absolute;
+        top: 3px;
+        right: 4px;
+        display: inline-flex;
+        width: 26px;
+        height: 26px;
+        align-items: center;
+        justify-content: center;
+        border-radius: 6px;
+        color: #66746a;
+      }
+      .flow-sidebar-action:hover {
+        background: rgb(255 255 255 / 75%);
+        color: #3b714b;
+      }
+      .flow-sidebar-readonly {
+        position: absolute;
+        top: 9px;
+        right: 8px;
+        color: #87938a;
+        font-size: 10px;
+      }
+      .flow-sidebar-content {
+        padding: 4px 4px 8px;
+      }
+      .flow-sidebar-item {
+        min-height: 32px;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        color: #525e56;
+        font-size: 13px;
+        padding: 5px 8px;
+      }
+      .flow-sidebar-item:hover {
         background: rgb(255 255 255 / 55%);
       }
-      .flow-repo-link.selected {
-        border-color: #3b714b;
+      .flow-sidebar-item.selected {
+        border-color: #cdded0;
         background: #fff;
         color: #3b714b;
         font-weight: 600;
-        box-shadow: 0 1px 2px rgb(28 32 30 / 8%);
       }
-      .dark .flow-repo-link {
+      .dark .flow-sidebar-action {
+        color: #aab6ac;
+      }
+      .dark .flow-sidebar-action:hover {
+        background: #202a23;
+        color: #a4d1ae;
+      }
+      .dark .flow-sidebar-item {
         color: #c1cbc3;
       }
-      .dark .flow-repo-link.selected {
-        border-color: #77a985;
+      .dark .flow-sidebar-item.selected {
+        border-color: #3d5844;
         background: #1a231d;
         color: #a4d1ae;
+      }
+      .flow-sidebar-empty {
+        padding: 4px 8px;
+        color: #7a877e;
+        font-size: 12px;
+      }
+      .dark .flow-sidebar-empty {
+        color: #9aa69c;
       }
       .flow-main {
         background: transparent;
@@ -209,12 +297,6 @@
       }
       .dark .flow-dropzone {
         border-color: #3a4940;
-      }
-      .flow-panel {
-        width: 192px;
-        border: 0;
-        background: transparent;
-        padding: 0;
       }
       .flow-onboarding-card {
         border: 1px solid #e1e5e1;
@@ -323,10 +405,6 @@
         .workspace > main > section {
           overflow: visible;
         }
-        .flow-panel {
-          width: 100%;
-          padding-top: 16px;
-        }
         .flow-popover[popover]:popover-open {
           inset: auto;
           top: anchor(top);
@@ -425,74 +503,226 @@
       <div class="flow-workspace workspace">
         <template if="showWorkspace && orgRepositories.length > 0 && !settings">
           <aside
-            class="flow-repo-sidebar fixed inset-y-[72px] left-0 z-40 flex h-[calc(100vh-72px)] w-64 flex-shrink-0 -translate-x-full flex-col transition-transform md:relative md:inset-y-auto md:h-auto md:translate-x-0"
+            class="flow-repo-sidebar fixed inset-y-[72px] left-0 z-40 flex h-[calc(100vh-72px)] w-56 min-h-0 flex-shrink-0 -translate-x-full flex-col overflow-y-auto transition-transform md:relative md:inset-y-auto md:h-auto md:translate-x-0"
             class-translate-x-0="menuOpen"
           >
-            <div class="mb-2 flex items-center justify-between px-2">
-              <h2 class="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                Repositories
-              </h2>
+            <div class="flow-sidebar-section flow-sidebar-repositories">
+              <details open>
+                <summary class="flow-sidebar-heading">
+                  <i class="ph ph-caret-right flow-disclosure-icon"></i><span>Repositories</span>
+                </summary>
+                <nav class="flow-sidebar-content flex flex-col gap-1">
+                  <template for="repo of orgRepositories"
+                    ><a
+                      attr-href="repositoryNavHref(repo)"
+                      class="flow-sidebar-item flex items-center gap-2 transition-colors"
+                      class-selected="isSelected(repo)"
+                      on-click="closeMenu()"
+                      ><i class="ph ph-book-bookmark text-sm text-gray-400"></i>{{ repo.repo }}</a
+                    ></template
+                  >
+                </nav>
+              </details>
               <template if="canWrite"
                 ><button
                   popovertarget="create-repo-popover"
                   style="anchor-name: --create-repository-anchor"
-                  class="p-2 text-gray-500 dark:text-gray-300"
+                  class="flow-sidebar-action"
                   aria-label="Create repository"
                 >
                   <i class="ph ph-plus"></i></button
               ></template>
               <template if="!canWrite"
-                ><span class="text-xs text-gray-500" title="Repository write access is required"
+                ><span class="flow-sidebar-readonly" title="Repository write access is required"
                   >Read-only</span
                 ></template
               >
-            </div>
-            <div class="flex-1 space-y-1 overflow-y-auto p-2">
-              <template for="repo of orgRepositories"
-                ><a
-                  attr-href="repositoryNavHref(repo)"
-                  class="flow-repo-link flex items-center gap-2 px-3 py-2 text-sm transition-colors"
-                  class-selected="isSelected(repo)"
-                  on-click="closeMenu()"
-                  ><i class="ph ph-book-bookmark text-base text-gray-400"></i>{{ repo.repo }}</a
-                ></template
-              >
-            </div>
-            <template if="canWrite"
-              ><div
-                popover="auto"
-                id="create-repo-popover"
-                style="position-anchor: --create-repository-anchor"
-                class="flow-popover w-64 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-              >
-                <form on-submit.prevent="createRepository()" class="space-y-4">
-                  <h2 class="text-lg font-semibold">Create repository</h2>
-                  <label class="block text-sm text-gray-600 dark:text-gray-300"
-                    >Repository name<input
-                      class="flow-input mt-1 w-full px-3 py-2"
-                      placeholder="my-project"
-                      required
-                      on-input="setRepoName($event.target.value)"
-                  /></label>
-                  <template if="errorMessage"
-                    ><p class="text-xs text-red-600 dark:text-red-400" role="alert">{{ errorMessage }}</p></template
-                  >
-                  <div class="flex justify-end gap-2">
-                    <button
-                      type="button"
-                      class="rounded-md px-3 py-2 text-gray-500 dark:text-gray-300"
-                      popovertarget="create-repo-popover"
-                      popovertargetaction="hide"
+              <template if="canWrite"
+                ><div
+                  popover="auto"
+                  id="create-repo-popover"
+                  style="position-anchor: --create-repository-anchor"
+                  class="flow-popover w-56 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                >
+                  <form on-submit.prevent="createRepository()" class="space-y-4">
+                    <h2 class="text-lg font-semibold">Create repository</h2>
+                    <label class="block text-sm text-gray-600 dark:text-gray-300"
+                      >Repository name<input
+                        class="flow-input mt-1 w-full px-3 py-2"
+                        placeholder="my-project"
+                        required
+                        on-input="setRepoName($event.target.value)"
+                    /></label>
+                    <template if="errorMessage"
+                      ><p class="text-xs text-red-600 dark:text-red-400" role="alert">{{ errorMessage }}</p></template
                     >
-                      Cancel
-                    </button>
-                    <button class="flow-action rounded-lg px-3 py-2 font-medium text-white" type="submit">
-                      Create
-                    </button>
-                  </div>
-                </form>
-              </div></template
-            >
+                    <div class="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        class="rounded-md px-3 py-2 text-gray-500 dark:text-gray-300"
+                        popovertarget="create-repo-popover"
+                        popovertargetaction="hide"
+                      >
+                        Cancel
+                      </button>
+                      <button class="flow-action rounded-lg px-3 py-2 font-medium text-white" type="submit">
+                        Create
+                      </button>
+                    </div>
+                  </form>
+                </div></template
+              >
+            </div>
+            <template if="authStatus === 'authenticated' && repo && !settings">
+              <div class="flow-sidebar-section">
+                <details>
+                  <summary class="flow-sidebar-heading">
+                    <i class="ph ph-caret-right flow-disclosure-icon"></i><span>Branches</span>
+                  </summary>
+                  <ul class="flow-sidebar-content space-y-0.5">
+                    <template for="branch of branches"
+                      ><li>
+                        <a attr-href="refHref(branch)" class="flow-sidebar-item block transition-colors"
+                          >{{ branch }}</a
+                        >
+                      </li></template
+                    >
+                    <template if="!branches.length"
+                      ><li class="flow-sidebar-empty">
+                        No branches.
+                        <template if="canWrite"
+                          ><button
+                            type="button"
+                            class="text-brand hover:text-green-800 dark:text-green-300 dark:hover:text-green-200"
+                            popovertarget="branch-popover"
+                          >
+                            Create one
+                          </button></template
+                        >
+                      </li></template
+                    >
+                  </ul>
+                </details>
+                <template if="canWrite"
+                  ><button
+                    popovertarget="branch-popover"
+                    style="anchor-name: --branch-popover-anchor"
+                    class="flow-sidebar-action"
+                    aria-label="Create branch"
+                  >
+                    <i class="ph ph-plus"></i></button
+                ></template>
+                <template if="canWrite"
+                  ><div
+                    popover="auto"
+                    id="branch-popover"
+                    style="position-anchor: --branch-popover-anchor"
+                    class="flow-popover w-48 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                  >
+                    <form on-submit.prevent="createBranch()" class="space-y-4">
+                      <h3 class="text-sm font-semibold">Create branch</h3>
+                      <label class="block text-xs text-gray-600 dark:text-gray-300"
+                        >Branch name<input
+                          class="flow-input mt-1 w-full px-3 py-2"
+                          placeholder="main"
+                          required
+                          on-input="setBranchName($event.target.value)"
+                      /></label>
+                      <template if="errorMessage"
+                        ><p class="text-xs text-red-600 dark:text-red-400" role="alert">{{ errorMessage }}</p></template
+                      >
+                      <div class="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          class="rounded-md px-2 py-1 text-gray-500 dark:text-gray-300"
+                          popovertarget="branch-popover"
+                          popovertargetaction="hide"
+                        >
+                          Cancel
+                        </button>
+                        <button class="flow-action rounded-lg px-2 py-1 text-sm font-medium text-white" type="submit">
+                          Create
+                        </button>
+                      </div>
+                    </form>
+                  </div></template
+                >
+              </div>
+              <div class="flow-sidebar-section">
+                <details>
+                  <summary class="flow-sidebar-heading">
+                    <i class="ph ph-caret-right flow-disclosure-icon"></i><span>Tags</span>
+                  </summary>
+                  <ul class="flow-sidebar-content space-y-0.5">
+                    <template for="tag of tags"
+                      ><li>
+                        <a attr-href="refHref(tag)" class="flow-sidebar-item flex items-center gap-2 transition-colors"
+                          ><i class="ph ph-tag text-xs text-gray-400"></i>{{ tag }}</a
+                        >
+                      </li></template
+                    >
+                    <template if="!tags.length"
+                      ><li class="flow-sidebar-empty">
+                        No tags.
+                        <template if="canWrite"
+                          ><button
+                            type="button"
+                            class="text-brand hover:text-green-800 dark:text-green-300 dark:hover:text-green-200"
+                            popovertarget="tag-popover"
+                          >
+                            Create one
+                          </button></template
+                        >
+                      </li></template
+                    >
+                  </ul>
+                </details>
+                <template if="canWrite"
+                  ><button
+                    popovertarget="tag-popover"
+                    style="anchor-name: --tag-popover-anchor"
+                    class="flow-sidebar-action"
+                    aria-label="Create tag"
+                  >
+                    <i class="ph ph-plus"></i></button
+                ></template>
+                <template if="canWrite"
+                  ><div
+                    popover="auto"
+                    id="tag-popover"
+                    style="position-anchor: --tag-popover-anchor"
+                    class="flow-popover w-48 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                  >
+                    <form on-submit.prevent="createTag()" class="space-y-4">
+                      <h3 class="text-sm font-semibold">Create tag</h3>
+                      <label class="block text-xs text-gray-600 dark:text-gray-300"
+                        >Tag name<input
+                          class="flow-input mt-1 w-full px-3 py-2"
+                          placeholder="v1.0.0"
+                          required
+                          on-input="setTagName($event.target.value)"
+                      /></label>
+                      <template if="errorMessage"
+                        ><p class="text-xs text-red-600 dark:text-red-400" role="alert">{{ errorMessage }}</p></template
+                      >
+                      <div class="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          class="rounded-md px-2 py-1 text-gray-500 dark:text-gray-300"
+                          popovertarget="tag-popover"
+                          popovertargetaction="hide"
+                        >
+                          Cancel
+                        </button>
+                        <button class="flow-action rounded-lg px-2 py-1 text-sm font-medium text-white" type="submit">
+                          Create
+                        </button>
+                      </div>
+                    </form>
+                  </div></template
+                >
+              </div>
+            </template>
           </aside>
           <template if="menuOpen"
             ><div class="fixed inset-0 z-30 bg-black/40 md:hidden" on-click="closeMenu()"></div
@@ -1575,161 +1805,6 @@
               };
             }
           </script>
-
-          <template if="authStatus === 'authenticated' && repo && !settings"
-            ><aside class="flow-panel h-40 w-full flex-shrink-0 overflow-y-auto md:h-full md:w-48">
-              <div class="mb-6">
-                <h3
-                  class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
-                >
-                  <i class="ph ph-git-branch"></i> Branches
-                  <template if="canWrite"
-                    ><button
-                      popovertarget="branch-popover"
-                      style="anchor-name: --branch-popover-anchor"
-                      class="rounded p-1 text-brand hover:bg-gray-200/70 dark:text-green-300 dark:hover:bg-gray-800"
-                      aria-label="Create branch"
-                    >
-                      <i class="ph ph-plus"></i></button
-                  ></template>
-                </h3>
-                <template if="canWrite"
-                  ><div
-                    popover="auto"
-                    id="branch-popover"
-                    style="position-anchor: --branch-popover-anchor"
-                    class="flow-popover w-48 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-                  >
-                    <form on-submit.prevent="createBranch()" class="space-y-4">
-                      <h3 class="text-sm font-semibold">Create branch</h3>
-                      <label class="block text-xs text-gray-600 dark:text-gray-300"
-                        >Branch name<input
-                          class="flow-input mt-1 w-full px-3 py-2"
-                          placeholder="main"
-                          required
-                          on-input="setBranchName($event.target.value)"
-                      /></label>
-                      <template if="errorMessage"
-                        ><p class="text-xs text-red-600 dark:text-red-400" role="alert">{{ errorMessage }}</p></template
-                      >
-                      <div class="flex justify-end gap-2">
-                        <button
-                          type="button"
-                          class="rounded-md px-2 py-1 text-gray-500 dark:text-gray-300"
-                          popovertarget="branch-popover"
-                          popovertargetaction="hide"
-                        >
-                          Cancel
-                        </button>
-                        <button class="flow-action rounded-lg px-2 py-1 text-sm font-medium text-white" type="submit">
-                          Create
-                        </button>
-                      </div>
-                    </form>
-                  </div></template
-                >
-                <ul class="space-y-1">
-                  <template for="branch of branches"
-                    ><li>
-                      <a
-                        attr-href="refHref(branch)"
-                        class="block rounded-lg px-3 py-1.5 text-sm text-gray-600 hover:bg-white/70 dark:text-gray-300 dark:hover:bg-gray-800"
-                        >{{ branch }}</a
-                      >
-                    </li></template
-                  >
-                  <template if="!branches.length"
-                    ><p class="text-xs text-gray-500 dark:text-gray-300">
-                      No branches.
-                      <template if="canWrite"
-                        ><button
-                          type="button"
-                          class="underline text-brand hover:text-green-800 dark:text-green-300 dark:hover:text-green-200"
-                          popovertarget="branch-popover"
-                        >
-                          Create one
-                        </button></template
-                      >
-                    </p></template
-                  >
-                </ul>
-              </div>
-              <div>
-                <h3
-                  class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
-                >
-                  <i class="ph ph-tag"></i> Tags
-                  <template if="canWrite"
-                    ><button
-                      popovertarget="tag-popover"
-                      style="anchor-name: --tag-popover-anchor"
-                      class="rounded p-1 text-brand hover:bg-gray-200/70 dark:text-green-300 dark:hover:bg-gray-800"
-                      aria-label="Create tag"
-                    >
-                      <i class="ph ph-plus"></i></button
-                  ></template>
-                </h3>
-                <template if="canWrite"
-                  ><div
-                    popover="auto"
-                    id="tag-popover"
-                    style="position-anchor: --tag-popover-anchor"
-                    class="flow-popover w-48 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-                  >
-                    <form on-submit.prevent="createTag()" class="space-y-4">
-                      <h3 class="text-sm font-semibold">Create tag</h3>
-                      <label class="block text-xs text-gray-600 dark:text-gray-300"
-                        >Tag name<input
-                          class="flow-input mt-1 w-full px-3 py-2"
-                          placeholder="v1.0.0"
-                          required
-                          on-input="setTagName($event.target.value)"
-                      /></label>
-                      <template if="errorMessage"
-                        ><p class="text-xs text-red-600 dark:text-red-400" role="alert">{{ errorMessage }}</p></template
-                      >
-                      <div class="flex justify-end gap-2">
-                        <button
-                          type="button"
-                          class="rounded-md px-2 py-1 text-gray-500 dark:text-gray-300"
-                          popovertarget="tag-popover"
-                          popovertargetaction="hide"
-                        >
-                          Cancel
-                        </button>
-                        <button class="flow-action rounded-lg px-2 py-1 text-sm font-medium text-white" type="submit">
-                          Create
-                        </button>
-                      </div>
-                    </form>
-                  </div></template
-                >
-                <ul class="space-y-1">
-                  <template for="tag of tags"
-                    ><li>
-                      <a
-                        attr-href="refHref(tag)"
-                        class="flex items-center gap-2 rounded px-2 py-1.5 text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
-                        ><i class="ph ph-tag text-xs opacity-50"></i>{{ tag }}</a
-                      >
-                    </li></template
-                  >
-                  <template if="!tags.length"
-                    ><p class="text-xs text-gray-500 dark:text-gray-300">
-                      No tags.
-                      <button
-                        type="button"
-                        class="underline text-brand hover:text-green-800 dark:text-green-300 dark:hover:text-green-200"
-                        popovertarget="tag-popover"
-                      >
-                        Create one
-                      </button>
-                    </p></template
-                  >
-                </ul>
-              </div>
-            </aside></template
-          >
         </main>
       </div>
     </template>

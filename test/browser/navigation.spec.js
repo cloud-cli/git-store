@@ -120,7 +120,11 @@ test.afterEach(() => {
 
 test("uploads and branch, tag, and commit mutations update without document reload", async ({ page }) => {
   await page.goto("/ui/?org=example&repo=demo");
+  if (page.viewportSize().width < 768) {
+    await page.getByRole("button", { name: "Toggle repositories" }).click();
+  }
   const initialCount = await page.evaluate(() => window.__documentNavigationCount);
+  const sidebar = page.locator(".flow-repo-sidebar");
 
   await page.locator("#repo-upload-input").setInputFiles({
     name: "uploaded.txt",
@@ -132,11 +136,15 @@ test("uploads and branch, tag, and commit mutations update without document relo
   await page.getByRole("button", { name: "Create branch" }).click();
   await page.locator("#branch-popover input").fill("feature/ui");
   await page.locator("#branch-popover button[type=submit]").click();
+  await expect(sidebar.locator("details").nth(1).getByText("feature/ui", { exact: true })).toHaveCount(1);
+  await sidebar.locator("details").nth(1).locator("summary").click();
   await expect(page.getByRole("link", { name: "feature/ui" })).toBeVisible();
 
   await page.getByRole("button", { name: "Create tag" }).click();
   await page.locator("#tag-popover input").fill("v1.0");
   await page.locator("#tag-popover button[type=submit]").click();
+  await expect(sidebar.locator("details").nth(2).getByText("v1.0", { exact: true })).toHaveCount(1);
+  await sidebar.locator("details").nth(2).locator("summary").click();
   await expect(page.getByRole("link", { name: "v1.0" })).toBeVisible();
 
   await page.getByRole("link", { name: /uploaded\.txt/ }).click();
@@ -152,6 +160,19 @@ test("uploads and branch, tag, and commit mutations update without document relo
   await page.locator("#add-file-popover button[type=submit]").click();
   await expect(page.getByRole("link", { name: /created\.md/ })).toBeVisible();
   expect(await page.evaluate(() => window.__documentNavigationCount)).toBe(initialCount);
+});
+
+test("repository sidebar keeps branches and tags compact and collapsed by default", async ({ page }) => {
+  await page.goto("/ui/?org=example&repo=demo");
+
+  const sidebar = page.locator(".flow-repo-sidebar");
+  const sections = sidebar.locator("details");
+  await expect(sections).toHaveCount(3);
+  await expect(sections.nth(0)).toHaveAttribute("open", "");
+  await expect(sections.nth(1)).not.toHaveAttribute("open", "");
+  await expect(sections.nth(2)).not.toHaveAttribute("open", "");
+  await expect(sidebar.locator(".flow-sidebar-heading")).toHaveCount(3);
+  await expect(page.locator(".flow-panel")).toHaveCount(0);
 });
 
 test("SPA navigation, previews, history, and read-only controls", async ({ page }) => {
