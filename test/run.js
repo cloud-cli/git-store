@@ -1275,6 +1275,7 @@ async function run() {
     assert.strictEqual((uiResponse.body.match(/<script setup>/g) || []).length, 1);
     for (const componentPath of [
       "/ui/components/commit-hash.html",
+      "/ui/components/file-preview.html",
       "/ui/components/organization-landing.html",
       "/ui/components/organization-settings.html",
       "/ui/components/sign-in-landing.html",

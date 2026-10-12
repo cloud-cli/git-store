@@ -10,20 +10,46 @@ let runtimeErrors;
 let imageBytes;
 let tailwindSource;
 let lucideComponentSource;
+let codeBlockComponentSource;
+let highlightSource;
+let lightHighlightTheme;
+let darkHighlightTheme;
 const lucideModuleCache = new Map();
 
 test.beforeAll(async () => {
-  const [tailwindResponse, lucideResponse] = await Promise.all([
+  const [
+    tailwindResponse,
+    lucideResponse,
+    codeBlockResponse,
+    highlightResponse,
+    lightThemeResponse,
+    darkThemeResponse,
+  ] = await Promise.all([
     fetch("https://unpkg.com/@tailwindcss/browser@4"),
     fetch("https://sodium.static.apphor.de/lucide-icon.html"),
+    fetch("https://sodium.static.apphor.de/code-block.html"),
+    fetch("https://unpkg.com/@highlightjs/cdn-assets@11.11.1/es/highlight.min.js"),
+    fetch("https://unpkg.com/@highlightjs/cdn-assets@11.11.1/styles/github.min.css"),
+    fetch("https://unpkg.com/@highlightjs/cdn-assets@11.11.1/styles/atom-one-dark.min.css"),
   ]);
-  if (!tailwindResponse.ok || !lucideResponse.ok) {
+  if (
+    !tailwindResponse.ok ||
+    !lucideResponse.ok ||
+    !codeBlockResponse.ok ||
+    !highlightResponse.ok ||
+    !lightThemeResponse.ok ||
+    !darkThemeResponse.ok
+  ) {
     throw new Error(
-      `Failed to fetch browser UI assets (Tailwind ${tailwindResponse.status}, Lucide ${lucideResponse.status})`,
+      `Failed to fetch browser UI assets (Tailwind ${tailwindResponse.status}, Lucide ${lucideResponse.status}, code-block ${codeBlockResponse.status}, Highlight.js ${highlightResponse.status})`,
     );
   }
   tailwindSource = await tailwindResponse.text();
   lucideComponentSource = await lucideResponse.text();
+  codeBlockComponentSource = await codeBlockResponse.text();
+  highlightSource = await highlightResponse.text();
+  lightHighlightTheme = await lightThemeResponse.text();
+  darkHighlightTheme = await darkThemeResponse.text();
 });
 
 test.beforeEach(async ({ page }) => {
@@ -49,6 +75,7 @@ test.beforeEach(async ({ page }) => {
   currentEntries = [
     { path: "notes.txt", name: "notes.txt", type: "file" },
     { path: "photo.jpg", name: "photo.jpg", type: "file" },
+    { path: "app.js", name: "app.js", type: "file" },
     { path: "docs", name: "docs", type: "directory" },
   ];
   currentBranches = ["main"];
@@ -79,6 +106,30 @@ test.beforeEach(async ({ page }) => {
       contentType: "text/html",
       headers: { "access-control-allow-origin": "*" },
       body: lucideComponentSource,
+    }),
+  );
+  await page.route("https://sodium.static.apphor.de/code-block.html", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      headers: { "access-control-allow-origin": "*" },
+      body: codeBlockComponentSource,
+    }),
+  );
+  await page.route("https://unpkg.com/@highlightjs/cdn-assets@11.11.1/es/highlight.min.js", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/javascript",
+      headers: { "access-control-allow-origin": "*" },
+      body: highlightSource,
+    }),
+  );
+  await page.route("https://unpkg.com/@highlightjs/cdn-assets@11.11.1/styles/**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/css",
+      headers: { "access-control-allow-origin": "*" },
+      body: route.request().url().includes("atom-one-dark") ? darkHighlightTheme : lightHighlightTheme,
     }),
   );
   await page.route("https://unpkg.com/lucide@latest/dist/esm/**", async (route) => {
@@ -171,7 +222,11 @@ test.beforeEach(async ({ page }) => {
       return route.fulfill({ status: 200, contentType: "image/jpeg", body: imageBytes });
     }
     if (url.pathname.endsWith("/file")) {
-      return route.fulfill({ status: 200, contentType: "text/plain", body: "plain text preview" });
+      const content =
+        url.searchParams.get("path") === "app.js"
+          ? 'const greeting = "hello";\nconsole.log(greeting);'
+          : "plain text preview";
+      return route.fulfill({ status: 200, contentType: "text/plain", body: content });
     }
     return route.fulfill({ json: {} });
   });
@@ -230,12 +285,12 @@ test("uploads and branch, tag, and commit mutations update without document relo
     await expect.poll(() => sidebar.evaluate((element) => element.classList.contains("translate-x-0"))).toBe(false);
   }
   await page.getByRole("link", { name: /uploaded\.txt/ }).click();
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await page.getByRole("button", { name: "Close preview" }).click();
+  await expect(page.getByTestId("file-page")).toBeVisible();
+  await page.getByRole("button", { name: "Back to files" }).click();
   await page.getByPlaceholder("Commit message").fill("Save uploaded file");
   await page.getByRole("button", { name: "Commit", exact: true }).click();
   await expect(page.getByTestId("latest-commit-header").getByText("Save uploaded file", { exact: true })).toBeVisible();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByTestId("file-page")).toHaveCount(0);
   expect(new URL(page.url()).searchParams.has("path")).toBe(false);
 
   await page.getByRole("button", { name: "Add file" }).click();
@@ -329,26 +384,44 @@ test("anonymous landing welcomes returning users", async ({ page }) => {
   await expect(page.getByRole("link", { name: "Continue to Git Store" })).toBeVisible();
 });
 
-test("SPA navigation, previews, history, and read-only controls", async ({ page }) => {
+test("SPA navigation, file pages, history, and read-only controls", async ({ page }) => {
   await page.goto("/ui/?org=example&repo=demo");
   await expect(page.getByText("notes.txt", { exact: true }).first()).toBeVisible();
+  const repositoryPanel = page.getByTestId("repository-content-panel");
+  await expect(repositoryPanel.getByTestId("latest-commit-header")).toHaveCount(1);
+  await expect(repositoryPanel.getByTestId("folder-path-toolbar")).toHaveCount(1);
+  await expect(repositoryPanel.getByTestId("repository-file-list")).toHaveCount(1);
+  await expect(page.locator('lucide-icon[data-testid="repository-entry-icon"][icon="folder"]')).toHaveCount(1);
+  await expect(page.locator('lucide-icon[data-testid="repository-entry-icon"][icon="file-text"]')).toHaveCount(1);
+  await expect(page.locator('lucide-icon[data-testid="repository-entry-icon"][icon="file-image"]')).toHaveCount(1);
+  await expect(page.locator('lucide-icon[data-testid="repository-entry-icon"][icon="file-code"]')).toHaveCount(1);
+  await expect(page.locator('lucide-icon[data-testid="repository-entry-icon"][icon="folder"] svg')).toBeVisible();
+  await expect(page.locator('lucide-icon[data-testid="repository-entry-icon"][icon="file-text"] svg')).toBeVisible();
+  await expect(page.locator('lucide-icon[data-testid="repository-entry-icon"][icon="file-image"] svg')).toBeVisible();
+  await expect(page.locator('lucide-icon[data-testid="repository-entry-icon"][icon="file-code"] svg')).toBeVisible();
   const initialCount = await page.evaluate(() => window.__documentNavigationCount);
   await page.getByText("notes.txt", { exact: true }).first().click();
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await expect(page.locator("pre")).toContainText("plain text preview");
+  await expect(page.getByTestId("file-page")).toBeVisible();
+  await expect(page.getByTestId("file-code-block")).toContainText("plain text preview");
   await page.goBack();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByTestId("file-page")).toHaveCount(0);
   await page.goForward();
-  await expect(page.locator("pre")).toContainText("plain text preview");
-  await page.getByRole("button", { name: "Close preview" }).click();
+  await expect(page.getByTestId("file-code-block")).toContainText("plain text preview");
+  await page.getByRole("button", { name: "Back to files" }).click();
+  await page.getByText("app.js", { exact: true }).first().click();
+  await expect(page.getByTestId("file-page-icon")).toHaveAttribute("icon", "file-code");
+  await expect(page.getByTestId("file-page-icon").locator("svg")).toBeVisible();
+  await expect(page.getByTestId("file-language")).toHaveText("javascript");
+  await expect(page.getByTestId("file-code-block").locator(".hljs-keyword")).toContainText("const");
+  await page.getByRole("button", { name: "Back to files" }).click();
   await page.getByText("photo.jpg", { exact: true }).first().click();
-  const imagePreview = page.getByRole("img", { name: "Image preview" });
+  const imagePreview = page.getByRole("img", { name: "photo.jpg" });
   await expect(imagePreview).toBeVisible();
   await expect.poll(() => imagePreview.evaluate((image) => image.naturalWidth)).toBe(1);
   await page.goBack();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByTestId("file-page")).toHaveCount(0);
   await page.goForward();
-  await expect(page.getByRole("img", { name: "Image preview" })).toBeVisible();
+  await expect(page.getByRole("img", { name: "photo.jpg" })).toBeVisible();
   expect(await page.evaluate(() => window.__documentNavigationCount)).toBe(initialCount);
 });
 

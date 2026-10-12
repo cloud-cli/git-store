@@ -9,7 +9,9 @@
       { "imports": { "@li3/": "https://cdn.li3.dev/@li3/" } }
     </script>
     <link rel="component" href="https://sodium.static.apphor.de/lucide-icon.html" />
+    <link rel="component" href="https://sodium.static.apphor.de/code-block.html" />
     <link rel="component" href="/ui/components/commit-hash.html" />
+    <link rel="component" href="/ui/components/file-preview.html" />
     <link rel="component" href="/ui/components/organization-landing.html" />
     <link rel="component" href="/ui/components/organization-settings.html" />
     <link rel="component" href="/ui/components/sign-in-landing.html" />
@@ -451,282 +453,271 @@
               ></template>
               <template if="repo && !settings"
                 ><div class="flex min-h-0 flex-1 flex-col" data-repository-view>
-                  <template if="commits.length > 0"
-                    ><div
-                      data-testid="latest-commit-header"
-                      class="mb-2 flex min-h-16 shrink-0 items-center justify-between gap-3 rounded-t-xl border border-gray-200 bg-[#f8faf9]/90 p-4 dark:border-[#344039] dark:bg-[#1d2620]"
-                    >
-                      <div class="flex min-w-0 items-center gap-3">
-                        <div
-                          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
-                        >
-                          <lucide-icon icon="git-commit-horizontal" size="18"></lucide-icon>
-                        </div>
-                        <span class="truncate text-sm font-semibold">{{ commits[0].message }}</span>
-                      </div>
-                      <commit-hash bind-hash="commits[0].hash"></commit-hash></div
-                  ></template>
-                  <div
-                    data-testid="folder-path-toolbar"
-                    class="mb-4 flex min-h-11 shrink-0 items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-600 shadow-[0_1px_2px_rgba(28,32,30,0.06)] dark:border-[#344039] dark:bg-[#171e19] dark:text-gray-300 sm:px-4"
-                  >
-                    <nav
-                      aria-label="Folder path"
-                      class="flex min-w-0 items-center gap-1.5 overflow-x-auto whitespace-nowrap"
-                    >
-                      <a
-                        attr-href="rootHref"
-                        aria-label="Root"
-                        title="Root directory"
-                        class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-brand dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-green-300"
-                        ><lucide-icon icon="house" size="15"></lucide-icon><span class="sr-only">Root</span></a
-                      >
-                      <template for="segment of directorySegments"
-                        ><span aria-hidden="true" class="text-gray-400">/</span>
-                        <a
-                          attr-href="folderHref(segment.path)"
-                          class="max-w-48 truncate hover:text-brand dark:hover:text-green-300"
-                          >{{ segment.name }}</a
-                        ></template
-                      >
-                    </nav>
-                    <template if="canWrite"
-                      ><button
-                        popovertarget="add-file-popover"
-                        class="[anchor-name:--add-file-anchor] inline-flex shrink-0 items-center gap-1 rounded-md border border-gray-300 bg-gray-200/80 px-2.5 py-1 font-mono text-xs text-gray-700 transition-colors hover:bg-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                      >
-                        <lucide-icon icon="plus" size="14"></lucide-icon>
-                        Add file
-                      </button></template
-                    >
-                  </div>
-                  <template if="errorMessage"
-                    ><p class="mb-3 text-xs text-red-600 dark:text-red-400" role="alert">
-                      {{ errorMessage }}
-                    </p></template
-                  >
-                  <template if="canWrite"
-                    ><div
-                      popover="auto"
-                      id="add-file-popover"
-                      class="[position:fixed] inset-auto m-0 max-h-[calc(100dvh-2rem)] overflow-y-auto [position-anchor:--add-file-anchor] [top:anchor(bottom)] [left:auto] [right:anchor(right)] [position-try-fallbacks:flip-block] open:max-md:[top:anchor(top)] open:max-md:left-4 open:max-md:[right:auto] open:max-md:w-auto open:max-md:max-w-[calc(100vw-32px)] open:max-md:max-h-[calc(100dvh-96px)] open:max-md:overflow-y-auto open:max-md:[translate:0_-100%] w-64 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-                    >
-                      <form on-submit.prevent="addFileToRepo()" class="space-y-4">
-                        <h3 class="text-sm font-semibold">Add file</h3>
-                        <label class="block text-xs text-gray-600 dark:text-gray-300"
-                          >Full relative path<input
-                            class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 focus:border-brand focus:outline-2 focus:outline-brand/20 focus:outline-offset-1 dark:border-[#46544a] dark:bg-[#111713] dark:text-[#e5e9e5] dark:placeholder:text-[#98a49a]"
-                            placeholder="src/index.html"
-                            required
-                            on-input="setAddFilePath($event.target.value)"
-                        /></label>
-                        <template if="addFileError"
-                          ><p class="text-xs text-red-600 dark:text-red-400" role="alert">
-                            {{ addFileError }}
-                          </p></template
-                        >
-                        <div class="flex justify-end gap-2">
-                          <button
-                            type="button"
-                            class="rounded-md px-2 py-1 text-gray-500 dark:text-gray-300"
-                            popovertarget="add-file-popover"
-                            popovertargetaction="hide"
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            class="rounded-lg bg-brand px-2 py-1 text-sm font-medium text-white transition-colors hover:bg-brand-hover"
-                            type="submit"
-                          >
-                            Create
-                          </button>
-                        </div>
-                      </form>
-                    </div></template
-                  >
-                  <template if="commits.length > 0">
+                  <template if="!previewPath">
                     <div
+                      data-testid="repository-content-panel"
                       class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-[0_1px_2px_rgba(28,32,30,0.08)] dark:border-[#344039] dark:bg-[#171e19]"
                     >
-                      <template if="hasUncommitted && canWrite"
-                        ><form
-                          class="flex gap-2 border-b border-gray-100 p-3 dark:border-gray-800"
-                          on-submit.prevent="commitChanges()"
-                        >
-                          <input
-                            class="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 focus:border-brand focus:outline-2 focus:outline-brand/20 focus:outline-offset-1 dark:border-[#46544a] dark:bg-[#111713] dark:text-[#e5e9e5] dark:placeholder:text-[#98a49a]"
-                            placeholder="Commit message"
-                            on-input="setCommitMessage($event.target.value)"
-                          /><button
-                            class="rounded-lg bg-brand px-3 py-2 font-medium text-white transition-colors hover:bg-brand-hover"
-                          >
-                            Commit
-                          </button>
-                        </form>
-                        <template if="errorMessage"
-                          ><p
-                            class="border-b border-gray-100 px-4 py-2 text-xs text-red-600 dark:border-gray-800 dark:text-red-400"
-                            role="alert"
-                          >
-                            {{ errorMessage }}
-                          </p></template
-                        ></template
-                      >
-                      <ul
-                        data-testid="repository-file-list"
-                        class="min-h-0 flex-1 divide-y divide-gray-100 overflow-y-auto dark:divide-gray-800"
-                      >
-                        <template for="entry of entries"
-                          ><li
-                            class="flex min-h-[45px] items-center justify-between border-[#eef0ee] px-4 py-2.5 hover:bg-gray-50 dark:border-[#303b33] dark:hover:bg-gray-900/50"
-                          >
-                            <a attr-href="entryHref(entry)" class="flex min-w-0 flex-1 items-center gap-3">
-                              <lucide-icon
-                                attr-icon="entry.type === 'directory' ? 'folder' : 'file'"
-                                size="18"
-                                class="w-4 shrink-0 text-gray-400"
-                                class-text-brand="entry.type === 'directory'"
-                              ></lucide-icon>
-                              <span class="truncate text-sm font-medium text-gray-700 dark:text-gray-200"
-                                >{{ entry.name }}<sup class="ml-1 text-amber-500"
-                                  >{{ entry.uncommitted ? '*' : '' }}</sup
-                                ></span
-                              >
-                            </a>
-                            <span class="ml-3 max-w-[45%] truncate text-xs text-gray-400"
-                              >{{ entry.uncommitted ? 'Uncommitted' : entry.type }}</span
-                            >
-                          </li></template
-                        >
-                      </ul>
-                      <template if="canWrite"
-                        ><input
-                          id="repo-upload-input"
-                          class="sr-only"
-                          aria-label="Select files to upload"
-                          type="file"
-                          multiple
-                          on-change="handleFileSelect($event.target.files)"
-                        />
-                        <div
-                          data-testid="upload-dropzone"
-                          bind-class="{ 'border-brand': dragging, 'bg-[#f1f7f1]': dragging, 'dark:bg-[#23362a]': dragging }"
-                          class="m-6 mt-auto flex min-h-[120px] shrink-0 flex-col items-center justify-center rounded-[9px] border-2 border-dashed border-[#e1e6e2] bg-white p-6 text-center text-sm text-gray-500 transition-colors hover:bg-gray-50 dark:border-[#3a4940] dark:bg-transparent dark:text-gray-300 dark:hover:bg-gray-900/50 max-md:m-3 max-md:min-h-[56px] max-md:flex-row max-md:flex-wrap max-md:gap-x-1 max-md:gap-y-0 max-md:px-2 max-md:py-2"
-                        >
-                          <lucide-icon
-                            icon="upload"
-                            size="22"
-                            class="mb-2 text-gray-400 max-md:mb-0 max-md:hidden"
-                          ></lucide-icon>
-                          <span class="max-md:hidden">Drop files here to upload them unstaged or</span>
-                          <span class="hidden max-md:inline">Drop files or</span>
-                          <label for="repo-upload-input" class="cursor-pointer font-medium text-brand hover:underline"
-                            >click here to upload</label
-                          >
-                        </div></template
-                      >
-                      <template if="!canWrite"
+                      <template if="commits.length > 0"
                         ><div
-                          class="m-6 mt-auto border-t border-dashed border-gray-300 p-4 text-center text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400 max-md:m-3"
+                          data-testid="latest-commit-header"
+                          class="flex min-h-16 shrink-0 items-center justify-between gap-3 border-b border-gray-100 bg-[#f8faf9]/90 p-4 dark:border-gray-800 dark:bg-[#1d2620]"
                         >
-                          Read-only access
+                          <div class="flex min-w-0 items-center gap-3">
+                            <div
+                              class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                            >
+                              <lucide-icon icon="git-commit-horizontal" size="18"></lucide-icon>
+                            </div>
+                            <span class="truncate text-sm font-semibold">{{ commits[0].message }}</span>
+                          </div>
+                          <commit-hash bind-hash="commits[0].hash"></commit-hash></div
+                      ></template>
+                      <div
+                        data-testid="folder-path-toolbar"
+                        class="flex min-h-11 shrink-0 items-center justify-between gap-3 border-b border-gray-100 bg-white px-3 py-2 text-xs font-medium text-gray-600 dark:border-gray-800 dark:bg-[#171e19] dark:text-gray-300 sm:px-4"
+                      >
+                        <nav
+                          aria-label="Folder path"
+                          class="flex min-w-0 items-center gap-1.5 overflow-x-auto whitespace-nowrap"
+                        >
+                          <a
+                            attr-href="rootHref"
+                            aria-label="Root"
+                            title="Root directory"
+                            class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-brand dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-green-300"
+                            ><lucide-icon icon="house" size="15"></lucide-icon><span class="sr-only">Root</span></a
+                          >
+                          <template for="segment of directorySegments"
+                            ><span aria-hidden="true" class="text-gray-400">/</span>
+                            <a
+                              attr-href="folderHref(segment.path)"
+                              class="max-w-48 truncate hover:text-brand dark:hover:text-green-300"
+                              >{{ segment.name }}</a
+                            ></template
+                          >
+                        </nav>
+                        <template if="canWrite"
+                          ><button
+                            popovertarget="add-file-popover"
+                            class="[anchor-name:--add-file-anchor] inline-flex shrink-0 items-center gap-1 rounded-md border border-gray-300 bg-gray-200/80 px-2.5 py-1 font-mono text-xs text-gray-700 transition-colors hover:bg-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                          >
+                            <lucide-icon icon="plus" size="14"></lucide-icon>
+                            Add file
+                          </button></template
+                        >
+                      </div>
+                      <template if="errorMessage"
+                        ><p
+                          class="border-b border-gray-100 px-4 py-2 text-xs text-red-600 dark:border-gray-800 dark:text-red-400"
+                          role="alert"
+                        >
+                          {{ errorMessage }}
+                        </p></template
+                      >
+                      <template if="canWrite"
+                        ><div
+                          popover="auto"
+                          id="add-file-popover"
+                          class="[position:fixed] inset-auto m-0 max-h-[calc(100dvh-2rem)] overflow-y-auto [position-anchor:--add-file-anchor] [top:anchor(bottom)] [left:auto] [right:anchor(right)] [position-try-fallbacks:flip-block] open:max-md:[top:anchor(top)] open:max-md:left-4 open:max-md:[right:auto] open:max-md:w-auto open:max-md:max-w-[calc(100vw-32px)] open:max-md:max-h-[calc(100dvh-96px)] open:max-md:overflow-y-auto open:max-md:[translate:0_-100%] w-64 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                        >
+                          <form on-submit.prevent="addFileToRepo()" class="space-y-4">
+                            <h3 class="text-sm font-semibold">Add file</h3>
+                            <label class="block text-xs text-gray-600 dark:text-gray-300"
+                              >Full relative path<input
+                                class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 focus:border-brand focus:outline-2 focus:outline-brand/20 focus:outline-offset-1 dark:border-[#46544a] dark:bg-[#111713] dark:text-[#e5e9e5] dark:placeholder:text-[#98a49a]"
+                                placeholder="src/index.html"
+                                required
+                                on-input="setAddFilePath($event.target.value)"
+                            /></label>
+                            <template if="addFileError"
+                              ><p class="text-xs text-red-600 dark:text-red-400" role="alert">
+                                {{ addFileError }}
+                              </p></template
+                            >
+                            <div class="flex justify-end gap-2">
+                              <button
+                                type="button"
+                                class="rounded-md px-2 py-1 text-gray-500 dark:text-gray-300"
+                                popovertarget="add-file-popover"
+                                popovertargetaction="hide"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                class="rounded-lg bg-brand px-2 py-1 text-sm font-medium text-white transition-colors hover:bg-brand-hover"
+                                type="submit"
+                              >
+                                Create
+                              </button>
+                            </div>
+                          </form>
                         </div></template
                       >
-                    </div>
-                  </template>
-                  <template if="commits.length === 0">
-                    <div
-                      class="flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl border border-gray-200 bg-white p-6 text-center shadow-[0_1px_2px_rgba(28,32,30,0.08)] dark:border-[#344039] dark:bg-[#171e19]"
-                    >
-                      <div class="mx-auto w-full max-w-md">
-                        <div
-                          class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-app-bg text-brand dark:bg-[#23362a] dark:text-[#a4d1ae]"
-                        >
-                          <lucide-icon icon="git-branch" size="24"></lucide-icon>
+                      <template if="commits.length > 0">
+                        <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+                          <template if="hasUncommitted && canWrite"
+                            ><form
+                              class="flex gap-2 border-b border-gray-100 p-3 dark:border-gray-800"
+                              on-submit.prevent="commitChanges()"
+                            >
+                              <input
+                                class="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 focus:border-brand focus:outline-2 focus:outline-brand/20 focus:outline-offset-1 dark:border-[#46544a] dark:bg-[#111713] dark:text-[#e5e9e5] dark:placeholder:text-[#98a49a]"
+                                placeholder="Commit message"
+                                on-input="setCommitMessage($event.target.value)"
+                              /><button
+                                class="rounded-lg bg-brand px-3 py-2 font-medium text-white transition-colors hover:bg-brand-hover"
+                              >
+                                Commit
+                              </button>
+                            </form>
+                            <template if="errorMessage"
+                              ><p
+                                class="border-b border-gray-100 px-4 py-2 text-xs text-red-600 dark:border-gray-800 dark:text-red-400"
+                                role="alert"
+                              >
+                                {{ errorMessage }}
+                              </p></template
+                            ></template
+                          >
+                          <ul
+                            data-testid="repository-file-list"
+                            class="min-h-0 flex-1 divide-y divide-gray-100 overflow-y-auto dark:divide-gray-800"
+                          >
+                            <template for="entry of entries"
+                              ><li
+                                class="flex min-h-[45px] items-center justify-between border-[#eef0ee] px-4 py-2.5 hover:bg-gray-50 dark:border-[#303b33] dark:hover:bg-gray-900/50"
+                              >
+                                <a attr-href="entryHref(entry)" class="flex min-w-0 flex-1 items-center gap-3">
+                                  <lucide-icon
+                                    data-testid="repository-entry-icon"
+                                    bind-icon="entryIcon(entry)"
+                                    size="18"
+                                    class="shrink-0 text-gray-400"
+                                    class-text-brand="entry.type === 'directory'"
+                                    class-text-blue-600="entryIcon(entry) === 'file-code'"
+                                    class-text-violet-500="entryIcon(entry) === 'file-image'"
+                                  ></lucide-icon>
+                                  <span class="truncate text-sm font-medium text-gray-700 dark:text-gray-200"
+                                    >{{ entry.name }}<sup class="ml-1 text-amber-500"
+                                      >{{ entry.uncommitted ? '*' : '' }}</sup
+                                    ></span
+                                  >
+                                </a>
+                                <span class="ml-3 max-w-[45%] truncate text-xs text-gray-400"
+                                  >{{ entry.uncommitted ? 'Uncommitted' : entry.type }}</span
+                                >
+                              </li></template
+                            >
+                          </ul>
+                          <template if="canWrite"
+                            ><input
+                              id="repo-upload-input"
+                              class="sr-only"
+                              aria-label="Select files to upload"
+                              type="file"
+                              multiple
+                              on-change="handleFileSelect($event.target.files)"
+                            />
+                            <div
+                              data-testid="upload-dropzone"
+                              bind-class="{ 'border-brand': dragging, 'bg-[#f1f7f1]': dragging, 'dark:bg-[#23362a]': dragging }"
+                              class="m-6 mt-auto flex min-h-[120px] shrink-0 flex-col items-center justify-center rounded-[9px] border-2 border-dashed border-[#e1e6e2] bg-white p-6 text-center text-sm text-gray-500 transition-colors hover:bg-gray-50 dark:border-[#3a4940] dark:bg-transparent dark:text-gray-300 dark:hover:bg-gray-900/50 max-md:m-3 max-md:min-h-[56px] max-md:flex-row max-md:flex-wrap max-md:gap-x-1 max-md:gap-y-0 max-md:px-2 max-md:py-2"
+                            >
+                              <lucide-icon
+                                icon="upload"
+                                size="22"
+                                class="mb-2 text-gray-400 max-md:mb-0 max-md:hidden"
+                              ></lucide-icon>
+                              <span class="max-md:hidden">Drop files here to upload them unstaged or</span>
+                              <span class="hidden max-md:inline">Drop files or</span>
+                              <label
+                                for="repo-upload-input"
+                                class="cursor-pointer font-medium text-brand hover:underline"
+                                >click here to upload</label
+                              >
+                            </div></template
+                          >
+                          <template if="!canWrite"
+                            ><div
+                              class="m-6 mt-auto border-t border-dashed border-gray-300 p-4 text-center text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400 max-md:m-3"
+                            >
+                              Read-only access
+                            </div></template
+                          >
                         </div>
-                        <h1 class="text-xl font-bold">Welcome to your Git server</h1>
-                        <template if="canWrite"
-                          ><p class="mt-2 text-sm text-gray-500 dark:text-gray-300">
-                            Start by uploading your first file.
-                          </p></template
-                        >
-                        <template if="!canWrite"
-                          ><p class="mt-2 text-sm text-gray-500 dark:text-gray-300">
-                            This repository is empty. Ask your Git Store administrator to enable repository write access
-                            (repo:write) to add files.
-                          </p></template
-                        >
-                        <template if="dragging"
-                          ><p class="mt-2 text-sm font-medium text-brand dark:text-green-300">
-                            Drop files to upload.
-                          </p></template
-                        >
-                        <template if="canWrite"
-                          ><label for="repo-file-input" class="sr-only">Select files to upload</label>
-                          <input
-                            id="repo-file-input"
-                            class="sr-only"
-                            type="file"
-                            multiple
-                            on-change="handleFileSelect($event.target.files)"
-                        /></template>
-                        <template if="errorMessage"
-                          ><p class="mt-2 text-xs text-red-600 dark:text-red-400" role="alert">
-                            {{ errorMessage }}
-                          </p></template
-                        >
-                      </div>
-                      <div
-                        bind-class="{ 'border-brand': dragging, 'bg-[#f1f7f1]': dragging, 'dark:bg-[#23362a]': dragging }"
-                        class="mt-8 flex min-h-[120px] w-full max-w-3xl shrink-0 flex-col items-center justify-center rounded-[9px] border-2 border-dashed border-[#e1e6e2] p-6 text-sm text-gray-500 dark:border-[#3a4940] dark:text-gray-300"
-                      >
-                        <lucide-icon icon="upload" size="24" class="mb-2 text-gray-400"></lucide-icon>
-                        <span>Drop files here to upload them unstaged</span>
-                        <template if="canWrite"
-                          ><label
-                            for="repo-file-input"
-                            class="mt-2 cursor-pointer font-medium text-brand hover:underline"
-                            >Browse files</label
-                          ></template
-                        >
-                      </div>
+                      </template>
+                      <template if="commits.length === 0">
+                        <div class="flex min-h-0 flex-1 flex-col items-center justify-center p-6 text-center">
+                          <div class="mx-auto w-full max-w-md">
+                            <div
+                              class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-app-bg text-brand dark:bg-[#23362a] dark:text-[#a4d1ae]"
+                            >
+                              <lucide-icon icon="git-branch" size="24"></lucide-icon>
+                            </div>
+                            <h1 class="text-xl font-bold">Welcome to your Git server</h1>
+                            <template if="canWrite"
+                              ><p class="mt-2 text-sm text-gray-500 dark:text-gray-300">
+                                Start by uploading your first file.
+                              </p></template
+                            >
+                            <template if="!canWrite"
+                              ><p class="mt-2 text-sm text-gray-500 dark:text-gray-300">
+                                This repository is empty. Ask your Git Store administrator to enable repository write
+                                access (repo:write) to add files.
+                              </p></template
+                            >
+                            <template if="dragging"
+                              ><p class="mt-2 text-sm font-medium text-brand dark:text-green-300">
+                                Drop files to upload.
+                              </p></template
+                            >
+                            <template if="canWrite"
+                              ><label for="repo-file-input" class="sr-only">Select files to upload</label>
+                              <input
+                                id="repo-file-input"
+                                class="sr-only"
+                                type="file"
+                                multiple
+                                on-change="handleFileSelect($event.target.files)"
+                            /></template>
+                            <template if="errorMessage"
+                              ><p class="mt-2 text-xs text-red-600 dark:text-red-400" role="alert">
+                                {{ errorMessage }}
+                              </p></template
+                            >
+                          </div>
+                          <div
+                            bind-class="{ 'border-brand': dragging, 'bg-[#f1f7f1]': dragging, 'dark:bg-[#23362a]': dragging }"
+                            class="mt-8 flex min-h-[120px] w-full max-w-3xl shrink-0 flex-col items-center justify-center rounded-[9px] border-2 border-dashed border-[#e1e6e2] p-6 text-sm text-gray-500 dark:border-[#3a4940] dark:text-gray-300"
+                          >
+                            <lucide-icon icon="upload" size="24" class="mb-2 text-gray-400"></lucide-icon>
+                            <span>Drop files here to upload them unstaged</span>
+                            <template if="canWrite"
+                              ><label
+                                for="repo-file-input"
+                                class="mt-2 cursor-pointer font-medium text-brand hover:underline"
+                                >Browse files</label
+                              ></template
+                            >
+                          </div>
+                        </div>
+                      </template>
                     </div>
                   </template>
                   <template if="previewPath"
-                    ><div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 md:p-10">
-                      <section
-                        class="flex h-full w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-gray-200 bg-white text-gray-900 shadow-2xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-                        role="dialog"
-                        aria-modal="true"
-                        aria-label="File preview"
-                      >
-                        <header
-                          class="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-800"
-                        >
-                          <div class="font-medium">{{ previewPath }}</div>
-                          <button
-                            on-click="closePreview()"
-                            class="rounded px-2 py-1 text-gray-500 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
-                            aria-label="Close preview"
-                          >
-                            <lucide-icon icon="x" size="16"></lucide-icon>
-                          </button>
-                        </header>
-                        <template if="previewLoading"
-                          ><p class="flex-1 p-4 text-center text-gray-500" role="status">Loading preview…</p></template
-                        >
-                        <template if="!previewLoading && previewUrl"
-                          ><img
-                            attr-src="previewUrl"
-                            alt="Image preview"
-                            class="max-h-full max-w-full self-center object-contain p-4"
-                        /></template>
-                        <template if="!previewLoading && !previewUrl">
-                          <pre class="flex-1 overflow-auto p-4 text-xs leading-5">{{ fileContent }}</pre>
-                        </template>
-                      </section>
-                    </div></template
-                  >
+                    ><file-preview
+                      class="flex min-h-0 flex-1"
+                      bind-path="previewPath"
+                      bind-content="fileContent"
+                      bind-image-url="previewUrl"
+                      bind-loading="previewLoading"
+                      bind-language="previewLanguage"
+                      bind-icon="previewIcon"
+                      bind-dark-mode="darkMode"
+                      on-back="closePreview()"
+                    ></file-preview
+                  ></template>
                 </div>
               </template>
             </template>
@@ -806,6 +797,8 @@
               const directory = ref("");
               const directorySegments = ref([]);
               const previewPath = ref("");
+              const previewLanguage = ref("plaintext");
+              const previewIcon = ref("file");
               const fileContent = ref("");
               const previewUrl = ref("");
               const previewLoading = ref(false);
@@ -817,6 +810,78 @@
               const addFileError = ref("");
               const hasUncommitted = computed(() => entries.value.some((entry) => entry.uncommitted));
               const url = () => new URL(window.location.href);
+              const fileExtension = (name) =>
+                String(name || "")
+                  .split("/")
+                  .at(-1)
+                  .toLowerCase()
+                  .split(".")
+                  .at(-1);
+              const codeExtensions = [
+                "c",
+                "cc",
+                "cpp",
+                "cs",
+                "css",
+                "go",
+                "h",
+                "hpp",
+                "java",
+                "js",
+                "jsx",
+                "mjs",
+                "py",
+                "rb",
+                "rs",
+                "scss",
+                "sh",
+                "ts",
+                "tsx",
+              ];
+              const imageExtensions = ["avif", "gif", "jpeg", "jpg", "png", "svg", "webp"];
+              const textExtensions = ["csv", "log", "md", "markdown", "pdf", "rst", "txt"];
+              const entryIcon = (entry) => {
+                if (entry.type === "directory") return "folder";
+                const extension = fileExtension(entry.name);
+                if (codeExtensions.includes(extension)) return "file-code";
+                if (imageExtensions.includes(extension)) return "file-image";
+                if (textExtensions.includes(extension)) return "file-text";
+                return "file";
+              };
+              const fileLanguage = (name) => {
+                const extension = fileExtension(name);
+                const languages = {
+                  c: "c",
+                  cc: "cpp",
+                  cpp: "cpp",
+                  cs: "csharp",
+                  css: "css",
+                  go: "go",
+                  h: "c",
+                  hpp: "cpp",
+                  html: "html",
+                  htm: "html",
+                  java: "java",
+                  js: "javascript",
+                  jsx: "javascript",
+                  json: "json",
+                  md: "markdown",
+                  markdown: "markdown",
+                  mjs: "javascript",
+                  py: "python",
+                  rb: "ruby",
+                  rs: "rust",
+                  scss: "scss",
+                  sh: "bash",
+                  sql: "sql",
+                  ts: "typescript",
+                  tsx: "typescript",
+                  xml: "xml",
+                  yaml: "yaml",
+                  yml: "yaml",
+                };
+                return languages[extension] || "plaintext";
+              };
               let navigationRequest = 0;
               let loadRequest = 0;
               let previewRequest = 0;
@@ -861,7 +926,14 @@
                 });
                 if (requestId === navigationRequest) await load();
               };
-              const closePreview = () => navigate(rootHref.value);
+              const closePreview = () => {
+                const current = url();
+                const parentDirectory = (current.searchParams.get("path") || "").split("/").slice(0, -1).join("/");
+                current.searchParams.delete("path");
+                current.searchParams.delete("dir");
+                if (parentDirectory) current.searchParams.set("dir", parentDirectory);
+                return navigate(`${current.pathname}${current.search}${current.hash}`);
+              };
               const base = () =>
                 `/api/v1/orgs/${encodeURIComponent(new URL(window.location.href).searchParams.get("org"))}/repos/${encodeURIComponent(repo.value.repo)}`;
               const rootHref = computed(
@@ -1028,6 +1100,8 @@
                   path: directoryParts.slice(0, index + 1).join("/"),
                 }));
                 previewPath.value = current.searchParams.get("path") || "";
+                previewLanguage.value = fileLanguage(previewPath.value);
+                previewIcon.value = entryIcon({ type: "file", name: previewPath.value });
                 fileContent.value = "";
                 previewLoading.value = Boolean(previewPath.value);
                 releasePreview();
@@ -1495,6 +1569,7 @@
                 repoHref,
                 repositoryNavHref,
                 directorySegments,
+                entryIcon,
                 folderHref,
                 isSelected,
                 openSettings,
@@ -1517,6 +1592,8 @@
                 commits,
                 directory,
                 previewPath,
+                previewLanguage,
+                previewIcon,
                 fileContent,
                 previewUrl,
                 previewLoading,
