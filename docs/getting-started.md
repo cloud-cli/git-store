@@ -59,9 +59,9 @@ set `OIDC_BROWSER_SCOPES` explicitly if browser users should be able to access r
 Create a client/application in your identity provider (for example, Auth Lab or Keycloak)
 with the authorization-code flow enabled. Configure its exact redirect URI as
 `https://<git-store-host>/ui/auth/callback` (or set `OIDC_REDIRECT_URI` to that URL), and
-use the provider's issuer URL for `OIDC_ISSUER`. The client must support PKCE with `S256`;
-Git Store requests the standard OIDC scopes `openid profile email` and uses the client ID
-and secret from `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`.
+use the provider's issuer URL for `OIDC_ISSUER`. The client must support PKCE with `S256`
+and the refresh-token grant; Git Store requests `openid profile email offline_access` and
+uses the client ID and secret from `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`.
 
 For the browser UI, **do not configure `repo:read` or `repo:write` as identity-provider
 scopes**. Git Store grants these application permissions to its cookie-backed browser

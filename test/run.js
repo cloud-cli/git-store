@@ -952,6 +952,11 @@ async function run() {
       preferred_username: "browser-user",
     };
     let oidcIdClaims = { sub: "browser-subject" };
+    let oidcAccessToken = "browser-session-token";
+    let oidcRefreshToken = "browser-refresh-token";
+    let oidcExpiresIn = 3600;
+    let oidcNextRefreshExpiresIn = 3600;
+    let oidcRefreshCount = 0;
     app.locals.oidcClientOverride = {
       authorizationUrl(options) {
         authorizationOptions = options;
@@ -968,8 +973,24 @@ async function run() {
         assert.strictEqual(checks.nonce, undefined, "the issuer's supported PKCE flow does not issue a nonce claim");
         assert.ok(redirectUri.endsWith(expectedCallbackPath));
         return {
-          access_token: "browser-session-token",
-          expires_in: 3600,
+          access_token: oidcAccessToken,
+          refresh_token: oidcRefreshToken,
+          expires_in: oidcExpiresIn,
+          claims: () => oidcIdClaims,
+        };
+      },
+      async refresh(refreshToken) {
+        assert.strictEqual(refreshToken, oidcRefreshToken, "refresh uses the latest rotated token");
+        oidcRefreshCount += 1;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        oidcAccessToken = "browser-refreshed-token";
+        oidcRefreshToken = `rotated-browser-refresh-token-${oidcRefreshCount}`;
+        const expiresIn = oidcNextRefreshExpiresIn;
+        oidcNextRefreshExpiresIn = 3600;
+        return {
+          access_token: oidcAccessToken,
+          refresh_token: oidcRefreshToken,
+          expires_in: expiresIn,
           claims: () => oidcIdClaims,
         };
       },
@@ -980,7 +1001,7 @@ async function run() {
     const nativeFetch = global.fetch;
     global.fetch = async (url, options) => {
       assert.strictEqual(String(url), "https://issuer.example.test/userinfo");
-      assert.strictEqual(options.headers.Authorization, "Bearer browser-session-token");
+      assert.strictEqual(options.headers.Authorization, `Bearer ${oidcAccessToken}`);
       return {
         ok: true,
         json: async () => oidcUserInfo,
@@ -988,7 +1009,7 @@ async function run() {
     };
     const login = await request(port, "GET", "/ui/auth/login?returnTo=%2F%3Frepo%3Dresume");
     assert.strictEqual(login.status, 302);
-    assert.strictEqual(authorizationOptions.scope, "openid profile email");
+    assert.strictEqual(authorizationOptions.scope, "openid profile email offline_access");
     const authorizationUrl = new URL(login.headers.location);
     const loginCookies = login.headers["set-cookie"].map((cookie) => cookie.split(";")[0]).join("; ");
     const callback = await request(
@@ -1012,6 +1033,7 @@ async function run() {
     const encryptedSessionStore = fs.readFileSync(sessionStorePath, "utf8");
     assert.ok(!encryptedSessionStore.includes("browser-subject"), "persisted session identities are encrypted at rest");
     assert.ok(!encryptedSessionStore.includes("browser-session-token"), "access tokens are never persisted");
+    assert.ok(!encryptedSessionStore.includes("browser-refresh-token"), "refresh tokens are encrypted at rest");
     app.locals.reloadBrowserSessions();
     const restoredPage = await request(port, "GET", "/ui/?org=team-one&repo=shared-repo", undefined, undefined, {
       Cookie: sessionCookie,
@@ -1026,6 +1048,57 @@ async function run() {
       profile: { sub: "browser-subject", id: "browser-subject", name: "Signed In" },
       canWrite: true,
     });
+    oidcAccessToken = "short-lived-browser-token";
+    oidcRefreshToken = "short-lived-browser-refresh-token";
+    oidcExpiresIn = 0.001;
+    oidcNextRefreshExpiresIn = 60;
+    const refreshLogin = await request(port, "GET", "/ui/auth/login");
+    const refreshAuthorization = new URL(refreshLogin.headers.location);
+    const refreshLoginCookies = refreshLogin.headers["set-cookie"].map((cookie) => cookie.split(";")[0]).join("; ");
+    const refreshCallback = await request(
+      port,
+      "GET",
+      `/ui/auth/callback?code=mock-code&state=${encodeURIComponent(refreshAuthorization.searchParams.get("state"))}`,
+      undefined,
+      undefined,
+      { Cookie: refreshLoginCookies },
+    );
+    assert.strictEqual(refreshCallback.status, 303);
+    const refreshSessionCookie = refreshCallback.headers["set-cookie"]
+      .find((cookie) => cookie.startsWith("git_store_session="))
+      .split(";")[0];
+    assert.ok(
+      refreshCallback.headers["set-cookie"].some((cookie) => cookie.includes("Max-Age=2592000")),
+      "sessions with a refresh token receive a renewable 30-day cookie",
+    );
+    const refreshedResponses = await Promise.all(
+      [1, 2].map(() =>
+        request(port, "GET", "/ui/session", undefined, undefined, {
+          Cookie: refreshSessionCookie,
+          Origin: `http://127.0.0.1:${port}`,
+        }),
+      ),
+    );
+    for (const response of refreshedResponses) {
+      assert.strictEqual(response.status, 200);
+      assert.strictEqual(JSON.parse(response.body).authenticated, true);
+      assert.ok(
+        response.headers["set-cookie"]?.some((cookie) => cookie.startsWith("git_store_session=")),
+        "a successful refresh renews the browser cookie",
+      );
+    }
+    assert.strictEqual(oidcRefreshCount, 1, "parallel requests share a single refresh-token exchange");
+    const rotatedStore = fs.readFileSync(sessionStorePath, "utf8");
+    assert.ok(!rotatedStore.includes("short-lived-browser-refresh-token"));
+    assert.ok(!rotatedStore.includes("rotated-browser-refresh-token-1"));
+    app.locals.reloadBrowserSessions();
+    const restoredRefreshSession = await request(port, "GET", "/ui/session", undefined, undefined, {
+      Cookie: refreshSessionCookie,
+      Origin: `http://127.0.0.1:${port}`,
+    });
+    assert.strictEqual(JSON.parse(restoredRefreshSession.body).authenticated, true);
+    assert.strictEqual(oidcRefreshCount, 2, "the rotated refresh token survives encrypted-store restoration");
+
     const cancelledLogin = await request(port, "GET", "/ui/auth/login");
     const cancelledAuthorization = new URL(cancelledLogin.headers.location);
     const cancelledCookies = cancelledLogin.headers["set-cookie"].map((cookie) => cookie.split(";")[0]).join("; ");

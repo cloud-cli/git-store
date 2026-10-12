@@ -93,11 +93,14 @@ repository/file navigation across reloads. The UI uses refs, computed values, li
 hooks, and event bindings. Framework reference:
 https://li3.static.apphor.de/docs.html.
 The signed-out user card starts OIDC authorization-code + PKCE sign-in; signed-in users
-can open `${OIDC_ISSUER}/me`. The app keeps only a short-lived, validated identity and
-scope snapshot in an opaque signed session; access tokens are discarded after sign-in.
-Session snapshots are encrypted under `DATA_PATH` so sessions survive container restarts
-until their original token lifetime expires. Keep `OIDC_CLIENT_SECRET` stable across
-restarts and persist `DATA_PATH` to retain both repositories and browser sessions.
+can open `${OIDC_ISSUER}/me`. The app requests `offline_access` and keeps a validated
+identity and scope snapshot in an opaque signed session. When the provider grants a
+refresh token, it is stored only in the encrypted session store under `DATA_PATH` and
+rotated server-side as access tokens approach expiry; the browser never receives either
+token. These sessions use a renewable 30-day cookie. If the provider does not grant
+refresh tokens, the session remains limited to the access-token lifetime. Keep
+`OIDC_CLIENT_SECRET` stable across restarts and persist `DATA_PATH` to retain both
+repositories and browser sessions.
 The topbar presents an explicit Sign in button for guests; its light/dark control updates
 the root theme state using Tailwind v4's class-based variant.
 The repository plus button opens an anchored HTML popover. Empty repositories offer a file upload that creates the initial commit;

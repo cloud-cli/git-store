@@ -32,12 +32,15 @@ endpoints, and short Git paths are not supported.
 Organization slugs cannot be renamed, and repositories cannot be moved between
 organizations in this MVP.
 
-The browser UI signs in through `/ui/auth/login` using authorization code + PKCE. The callback
-validates state, ID-token claims, and the token's userinfo subject before issuing a signed
-HttpOnly same-origin cookie. Access tokens stay server-side. Browser-session scopes come
-from `OIDC_BROWSER_SCOPES`; cookie-authenticated repository writes require same-origin
-requests. Profile nicknames and display names never determine repository ownership. Other
-applications can use scoped opaque bearer tokens validated through OIDC introspection.
+The browser UI signs in through `/ui/auth/login` using authorization code + PKCE and requests
+`offline_access`. The callback validates state, ID-token claims, and the token's userinfo
+subject before issuing a signed HttpOnly same-origin cookie. When the provider grants a
+refresh token, Git Store stores it in the encrypted `DATA_PATH` session store, rotates it
+server-side as access tokens approach expiry, and renews the cookie for an active session.
+Neither access nor refresh tokens are sent to the browser. Browser-session scopes come from
+`OIDC_BROWSER_SCOPES`; cookie-authenticated repository writes require same-origin requests.
+Profile nicknames and display names never determine repository ownership. Other applications
+can use scoped opaque bearer tokens validated through OIDC introspection.
 
 Git Smart HTTP uses HTTP Basic authentication at `/git/{org}/{repo}.git`. The username is
 ignored; the password must be an active OIDC access token with a non-empty subject.
@@ -89,7 +92,9 @@ GET /ui/config
 ### GET /ui/session
 
 Return `{ "authenticated": true, "profile": { ... } }` when the current OIDC session
-cookie is valid, otherwise `{ "authenticated": false, "profile": null }`.
+cookie is valid, otherwise `{ "authenticated": false, "profile": null }`. If the provider
+granted a refresh token and the access token is near expiry, this server-side request can
+refresh the token grant and renew the session cookie without an interactive sign-in.
 
 ```http
 GET /ui/session
@@ -99,14 +104,15 @@ The endpoint can also identify an active bearer token passed in the `Authorizati
 
 ### GET /ui/auth/login
 
-Start the OIDC authorization-code flow with PKCE. The service saves short-lived state
-and verifier cookies and redirects to the configured issuer. An optional same-origin
-`returnTo` path is restored after sign-in.
+Start the OIDC authorization-code flow with PKCE and the `offline_access` scope. The
+service saves short-lived state and verifier cookies and redirects to the configured
+issuer. An optional same-origin `returnTo` path is restored after sign-in.
 
 ### GET /ui/auth/callback
 
 Configured OIDC redirect URI. Validates state and the PKCE exchange, exchanges the authorization code,
-confirms the access token and subject, then establishes the local HttpOnly browser session.
+confirms the access token and subject, then establishes the local HttpOnly browser session. If the provider
+grants a refresh token, Git Store retains it only in the encrypted server-side session store.
 The legacy `/auth/callback` path remains available for OIDC clients that have not yet
 migrated their registered callback URI to `/ui/auth/callback`.
 

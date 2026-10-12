@@ -21,8 +21,11 @@ const PORT = process.env.PORT || 3000;
 let oidcClient;
 let oidcReady = false;
 const browserSessions = new Map();
+const browserSessionRefreshes = new Map();
 const sessionCookieName = "git_store_session";
 const browserSessionStorePath = process.env.DATA_PATH ? path.join(process.env.DATA_PATH, ".browser-sessions") : null;
+const browserSessionMaxAge = 30 * 24 * 60 * 60 * 1000;
+const accessTokenRefreshSkew = 60 * 1000;
 
 // Tests may install an in-process token verifier on app.locals before serving.
 // This is not an HTTP feature: production requests always use OIDC validation.
@@ -84,6 +87,10 @@ function isValidBrowserSession(session) {
     session &&
     typeof session.sub === "string" &&
     typeof session.scope === "string" &&
+    (session.accessTokenExpiresAt === undefined ||
+      (Number.isFinite(session.accessTokenExpiresAt) && session.accessTokenExpiresAt > 0)) &&
+    (session.refreshToken === undefined ||
+      (typeof session.refreshToken === "string" && session.refreshToken.length > 0)) &&
     Number.isFinite(session.expiresAt) &&
     session.expiresAt > Date.now() &&
     session.profile &&
@@ -144,7 +151,71 @@ function persistBrowserSessions() {
   fs.renameSync(temporaryPath, browserSessionStorePath);
 }
 
-function getBrowserSession(req) {
+async function refreshBrowserSession(id, session) {
+  const existingRefresh = browserSessionRefreshes.get(id);
+  if (existingRefresh) {
+    return existingRefresh;
+  }
+  const client = getOidcClient();
+  if (!client || typeof client.refresh !== "function" || !session.refreshToken) {
+    return null;
+  }
+
+  const refresh = Promise.resolve().then(async () => {
+    const tokenSet = await client.refresh(session.refreshToken);
+    const accessToken = tokenSet.access_token;
+    const idClaims = typeof tokenSet.claims === "function" ? tokenSet.claims() : null;
+    const expiresIn = Number(tokenSet.expires_in);
+    if (
+      typeof accessToken !== "string" ||
+      !accessToken ||
+      typeof idClaims?.sub !== "string" ||
+      idClaims.sub !== session.sub ||
+      !Number.isFinite(expiresIn) ||
+      expiresIn <= 0
+    ) {
+      throw new Error("OIDC refresh response did not match the browser session");
+    }
+
+    const now = Date.now();
+    const refreshedSession = {
+      ...session,
+      accessTokenExpiresAt: now + expiresIn * 1000,
+      expiresAt: now + browserSessionMaxAge,
+      refreshToken:
+        typeof tokenSet.refresh_token === "string" && tokenSet.refresh_token
+          ? tokenSet.refresh_token
+          : session.refreshToken,
+    };
+    browserSessions.set(id, refreshedSession);
+    persistBrowserSessions();
+    return { id, ...refreshedSession };
+  });
+  browserSessionRefreshes.set(id, refresh);
+  try {
+    return await refresh;
+  } finally {
+    if (browserSessionRefreshes.get(id) === refresh) {
+      browserSessionRefreshes.delete(id);
+    }
+  }
+}
+
+function renewBrowserSessionCookie(req, res, session) {
+  if (!res) {
+    return;
+  }
+  try {
+    const redirectUri = getOidcRedirectUri(req);
+    const maxAge = Math.max(0, session.expiresAt - Date.now());
+    res.cookie(sessionCookieName, `${session.id}.${signSessionId(session.id)}`, cookieOptions(redirectUri, maxAge));
+    res.set("Cache-Control", "no-store");
+  } catch {
+    // A refreshed in-memory session remains usable even if this request cannot renew its cookie.
+  }
+}
+
+async function getBrowserSession(req, res, { refresh = true } = {}) {
   if (!process.env.OIDC_CLIENT_SECRET) {
     return null;
   }
@@ -164,9 +235,46 @@ function getBrowserSession(req) {
   if (providedBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(providedBuffer, expectedBuffer)) {
     return null;
   }
-  const session = browserSessions.get(id);
+  let session = browserSessions.get(id);
   if (!session || session.expiresAt <= Date.now()) {
     browserSessions.delete(id);
+    try {
+      persistBrowserSessions();
+    } catch {
+      // The expired session is removed from memory even if the encrypted store cannot be updated.
+    }
+    return null;
+  }
+
+  const accessTokenExpiresAt = Number.isFinite(session.accessTokenExpiresAt)
+    ? session.accessTokenExpiresAt
+    : session.expiresAt;
+  if (refresh && session.refreshToken && accessTokenExpiresAt <= Date.now() + accessTokenRefreshSkew) {
+    try {
+      const refreshedSession = await refreshBrowserSession(id, session);
+      if (refreshedSession) {
+        session = refreshedSession;
+        renewBrowserSessionCookie(req, res, session);
+      }
+    } catch {
+      // Keep a still-valid access session during transient refresh failures; expired sessions fail closed below.
+      const updatedSession = browserSessions.get(id);
+      if (updatedSession && updatedSession !== session) {
+        session = updatedSession;
+        renewBrowserSessionCookie(req, res, { id, ...session });
+      }
+    }
+  }
+  const currentAccessTokenExpiresAt = Number.isFinite(session.accessTokenExpiresAt)
+    ? session.accessTokenExpiresAt
+    : session.expiresAt;
+  if (currentAccessTokenExpiresAt <= Date.now()) {
+    browserSessions.delete(id);
+    try {
+      persistBrowserSessions();
+    } catch {
+      // The expired session is removed from memory even if the encrypted store cannot be updated.
+    }
     return null;
   }
   return { id, ...session };
@@ -175,14 +283,14 @@ function getBrowserSession(req) {
 loadBrowserSessions();
 app.locals.reloadBrowserSessions = loadBrowserSessions;
 
-app.get(["/ui/", "/ui/index.html"], (req, res, next) => {
+app.get(["/ui/", "/ui/index.html"], async (req, res, next) => {
   let html;
   try {
     html = fs.readFileSync(path.join(__dirname, "public", "index.html"), "utf8");
   } catch (error) {
     return next(error);
   }
-  const session = getBrowserSession(req);
+  const session = await getBrowserSession(req, res);
   const bootstrap = session
     ? {
         checked: true,
@@ -306,9 +414,9 @@ async function requireAuthentication(req, res, next) {
     }
   }
 
-  // Browser sessions use an opaque signed cookie backed by a short-lived snapshot of the
-  // validated OIDC subject and scopes. Access tokens are never retained after sign-in.
-  const session = getBrowserSession(req);
+  // Browser sessions use a signed cookie backed by an encrypted subject/scope snapshot and
+  // optional rotating refresh token. Access tokens are never retained after sign-in.
+  const session = isSameOriginRequest(req) ? await getBrowserSession(req, res) : null;
   if (session && isSameOriginRequest(req)) {
     req.user = {
       sub: session.sub,
@@ -981,7 +1089,7 @@ app.get("/ui/session", async (req, res) => {
     return res.json({ authenticated: false, profile: null });
   }
   try {
-    const browserSession = getBrowserSession(req);
+    const browserSession = isSameOriginRequest(req) ? await getBrowserSession(req, res) : null;
     if (browserSession && isSameOriginRequest(req)) {
       res.set("Cache-Control", "no-store");
       return res.json({
@@ -1047,7 +1155,7 @@ app.get("/ui/auth/login", (req, res) => {
     const authorizationUrl = client.authorizationUrl({
       response_type: "code",
       redirect_uri: redirectUri,
-      scope: "openid profile email",
+      scope: "openid profile email offline_access",
       state,
       code_challenge: codeChallenge,
       code_challenge_method: "S256",
@@ -1118,8 +1226,19 @@ const handleOidcCallback = async (req, res) => {
     const profile = sanitizeUserProfile(userInfo, idClaims.sub);
 
     const id = crypto.randomBytes(32).toString("base64url");
-    const expiresIn = Number(tokenSet.expires_in * 1000 || idClaims.exp * 1000 - Date.now()) || 3600_000;
-    const maxAge = Math.max(60_000, Math.min(expiresIn, 24 * 60 * 60 * 1000));
+    const now = Date.now();
+    const expiresInSeconds = Number(tokenSet.expires_in);
+    const accessTokenExpiresIn =
+      Number.isFinite(expiresInSeconds) && expiresInSeconds > 0
+        ? expiresInSeconds * 1000
+        : Number.isFinite(idClaims.exp) && idClaims.exp * 1000 > now
+          ? idClaims.exp * 1000 - now
+          : 3600_000;
+    const refreshToken =
+      typeof tokenSet.refresh_token === "string" && tokenSet.refresh_token ? tokenSet.refresh_token : null;
+    const maxAge = refreshToken
+      ? browserSessionMaxAge
+      : Math.max(60_000, Math.min(accessTokenExpiresIn, 24 * 60 * 60 * 1000));
     const browserScopes = (process.env.OIDC_BROWSER_SCOPES || "")
       .split(/[\s,]+/)
       .filter((scope) => scope === "repo:read" || scope === "repo:write");
@@ -1127,7 +1246,9 @@ const handleOidcCallback = async (req, res) => {
       sub: idClaims.sub,
       profile,
       scope: browserScopes.join(" "),
-      expiresAt: Date.now() + maxAge,
+      expiresAt: now + maxAge,
+      accessTokenExpiresAt: now + accessTokenExpiresIn,
+      ...(refreshToken ? { refreshToken } : {}),
     });
     try {
       persistBrowserSessions();
@@ -1168,8 +1289,8 @@ app.get("/ui/auth/callback", handleOidcCallback);
 // registered redirect URI can be migrated to /ui/auth/callback.
 app.get("/auth/callback", handleOidcCallback);
 
-app.post("/ui/auth/logout", (req, res) => {
-  const session = getBrowserSession(req);
+app.post("/ui/auth/logout", async (req, res) => {
+  const session = await getBrowserSession(req, res, { refresh: false });
   if (session) {
     browserSessions.delete(session.id);
     try {
