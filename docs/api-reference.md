@@ -211,12 +211,17 @@ POST /api/v1/orgs/{org}/repos/{repo}
 Fetch the repository log.
 
 ```http
-GET /api/v1/orgs/{org}/repos/{repo}/log
+GET /api/v1/orgs/{org}/repos/{repo}/log?limit=1
 ```
+
+The optional `limit` query parameter must be between 1 and 1000. When omitted, the full
+repository log is returned.
 
 **Response (200)** – JSON array of commit objects (may be empty).
 
 **Response (404)** – repository not found.
+
+**Response (400)** – invalid `limit` value.
 
 ### GET /api/v1/orgs/{org}/repos/{repo}/tree
 

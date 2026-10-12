@@ -4,9 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Git Store</title>
+    <!-- git-store-session-bootstrap -->
     <script type="importmap">
       { "imports": { "@li3/": "https://cdn.li3.dev/@li3/" } }
     </script>
+    <link rel="component" href="https://sodium.static.apphor.de/lucide-icon.html" />
+    <link rel="component" href="/ui/components/commit-hash.html" />
     <link rel="component" href="/ui/components/organization-landing.html" />
     <link rel="component" href="/ui/components/organization-settings.html" />
     <link rel="component" href="/ui/components/sign-in-landing.html" />
@@ -17,7 +20,6 @@
       document.documentElement.classList.toggle("dark", window.matchMedia("(prefers-color-scheme: dark)").matches);
     </script>
     <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
-    <script src="https://unpkg.com/@phosphor-icons/web"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -28,389 +30,17 @@
         --color-brand: #3b714b;
         --color-brand-hover: #2f563b;
         --color-text-main: #1c201e;
-      }
-    </style>
-    <style>
-      html,
-      body {
-        width: 100%;
-        height: 100%;
-        margin: 0;
-      }
-      body {
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-        background: #eef2ec;
-        color: #1c201e;
-        font-family: Inter, sans-serif;
-      }
-      html.dark body {
-        background: #111713;
-        color: #e5e9e5;
-      }
-      .flow-topbar {
-        height: 88px;
-        border: 0;
-        background: #eef2ec;
-        padding: 16px 24px;
-      }
-      .dark .flow-topbar {
-        background: #111713;
-      }
-      .home-indicator {
-        display: block;
-        width: 24px;
-        height: 24px;
-        flex: 0 0 auto;
-        border-radius: 999px;
-        background: #3b714b;
-      }
-      .flow-user-card {
-        min-height: 56px;
-        border: 1px solid #e5e7eb;
-        border-radius: 12px;
-        background: #fff;
-        padding: 6px 14px 6px 8px;
-        box-shadow: 0 1px 2px rgb(28 32 30 / 8%);
-      }
-      .dark .flow-user-card {
-        border-color: #344039;
-        background: #1a231d;
-      }
-      .flow-avatar {
-        display: inline-flex;
-        width: 40px;
-        height: 40px;
-        flex: 0 0 auto;
-        align-items: center;
-        justify-content: center;
-        border-radius: 999px;
-        background: #d6ecc9;
-        color: #2c533c;
-        font-size: 18px;
-        font-weight: 700;
-      }
-      .flow-workspace {
-        gap: 24px;
-        padding: 8px 24px 24px;
-        background: #eef2ec;
-      }
-      .flow-repo-breadcrumb {
-        display: inline;
-      }
-      html.dark .flow-workspace {
-        background: #111713;
-      }
-      .flow-repo-sidebar {
-        border: 0;
-        background: transparent;
-      }
-      .dark .flow-repo-sidebar {
-        background: #111713;
-      }
-      .flow-sidebar-section {
-        position: relative;
-        border-top: 1px solid #dfe5e0;
-        padding-bottom: 4px;
-      }
-      .flow-sidebar-section:first-child {
-        border-top: 0;
-      }
-      .flow-sidebar-heading {
-        display: flex;
-        min-height: 34px;
-        align-items: center;
-        gap: 7px;
-        padding: 0 36px 0 8px;
-        color: #65736a;
-        cursor: pointer;
-        font-size: 11px;
-        font-weight: 700;
-        letter-spacing: 0.08em;
-        list-style: none;
-        text-transform: uppercase;
-      }
-      .flow-sidebar-heading::-webkit-details-marker {
-        display: none;
-      }
-      .flow-sidebar-heading .flow-disclosure-icon {
-        color: #89958c;
-        font-size: 13px;
-        transition: transform 120ms ease;
-      }
-      .flow-sidebar-section details[open] > .flow-sidebar-heading {
-        margin-bottom: 4px;
-        border-bottom: 1px solid #e8ece9;
-      }
-      .flow-sidebar-section details[open] > .flow-sidebar-heading .flow-disclosure-icon {
-        transform: rotate(90deg);
-      }
-      .dark .flow-sidebar-section {
-        border-color: #303b33;
-      }
-      .dark .flow-sidebar-heading {
-        color: #aab6ac;
-      }
-      .dark .flow-sidebar-section details[open] > .flow-sidebar-heading {
-        border-color: #29342c;
-      }
-      .flow-sidebar-action {
-        position: absolute;
-        top: 3px;
-        right: 4px;
-        display: inline-flex;
-        width: 26px;
-        height: 26px;
-        align-items: center;
-        justify-content: center;
-        border-radius: 6px;
-        color: #66746a;
-      }
-      .flow-sidebar-action:hover {
-        background: rgb(255 255 255 / 75%);
-        color: #3b714b;
-      }
-      .flow-sidebar-readonly {
-        position: absolute;
-        top: 9px;
-        right: 8px;
-        color: #87938a;
-        font-size: 10px;
-      }
-      .flow-sidebar-content {
-        padding: 4px 4px 8px;
-      }
-      .flow-sidebar-item {
-        min-height: 32px;
-        border: 1px solid transparent;
-        border-radius: 6px;
-        color: #525e56;
-        font-size: 13px;
-        padding: 5px 8px;
-      }
-      .flow-sidebar-item:hover {
-        background: rgb(255 255 255 / 55%);
-      }
-      .flow-sidebar-item.selected {
-        border-color: #cdded0;
-        background: #fff;
-        color: #3b714b;
-        font-weight: 600;
-      }
-      .dark .flow-sidebar-action {
-        color: #aab6ac;
-      }
-      .dark .flow-sidebar-action:hover {
-        background: #202a23;
-        color: #a4d1ae;
-      }
-      .dark .flow-sidebar-item {
-        color: #c1cbc3;
-      }
-      .dark .flow-sidebar-item.selected {
-        border-color: #3d5844;
-        background: #1a231d;
-        color: #a4d1ae;
-      }
-      .flow-sidebar-empty {
-        padding: 4px 8px;
-        color: #7a877e;
-        font-size: 12px;
-      }
-      .dark .flow-sidebar-empty {
-        color: #9aa69c;
-      }
-      .flow-main {
-        background: transparent;
-      }
-      .flow-main-content {
-        background: transparent;
-        padding: 0;
-      }
-      .flow-repo-page {
-        display: flex;
-        min-height: 0;
-        flex: 1 1 auto;
-        flex-direction: column;
-      }
-      organization-landing,
-      organization-settings,
-      sign-in-landing {
-        display: flex;
-        min-height: 0;
-        flex: 1 1 auto;
-      }
-      .flow-repository-card {
-        min-height: 0;
-        border: 1px solid #e5e7eb;
-        border-radius: 12px;
-        background: #fff;
-        box-shadow: 0 1px 2px rgb(28 32 30 / 8%);
-      }
-      .dark .flow-repository-card {
-        border-color: #344039;
-        background: #171e19;
-      }
-      .flow-commit-header {
-        min-height: 64px;
-        border-color: #e5e7eb;
-        background: rgb(248 250 249 / 86%);
-      }
-      .dark .flow-commit-header {
-        border-color: #344039;
-        background: #1d2620;
-      }
-      .flow-file-row {
-        min-height: 45px;
-        border-color: #eef0ee;
-      }
-      .dark .flow-file-row {
-        border-color: #303b33;
-      }
-      .flow-dropzone {
-        min-height: 120px;
-        border: 2px dashed #e1e6e2;
-        border-radius: 9px;
-      }
-      .flow-dropzone.dragging {
-        border-color: #3b714b;
-        background: #f1f7f1;
-      }
-      .dark .flow-dropzone {
-        border-color: #3a4940;
-      }
-      .flow-onboarding-card {
-        border: 1px solid #e1e5e1;
-        border-radius: 12px;
-        background: #fff;
-        box-shadow: 0 1px 2px rgb(28 32 30 / 10%);
-      }
-      .dark .flow-onboarding-card {
-        border-color: #344039;
-        background: #1a231d;
-      }
-      .flow-icon-badge {
-        background: #eef2ec;
-        color: #3b714b;
-      }
-      .dark .flow-icon-badge {
-        background: #23362a;
-        color: #a4d1ae;
-      }
-      .flow-action {
-        background: #3b714b;
-        transition: background-color 150ms ease;
-      }
-      .flow-action:hover {
-        background: #2f563b;
-      }
-      .flow-input {
-        border: 1px solid #d1d5db;
-        border-radius: 8px;
-        background: #fff;
-      }
-      .flow-input:focus {
-        border-color: #3b714b;
-        outline: 2px solid rgb(59 113 75 / 18%);
-        outline-offset: 1px;
-      }
-      .dark .flow-input {
-        border-color: #46544a;
-        background: #111713;
-        color: #e5e9e5;
-      }
-      .dark .flow-input::placeholder {
-        color: #98a49a;
-      }
-      .flow-popover[popover] {
-        position: fixed;
-        inset: auto;
-        margin: 0;
-        top: anchor(bottom);
-        left: anchor(left);
-      }
-      .workspace {
-        display: flex;
-        flex: 1 1 auto;
-        min-height: 0;
-        overflow: hidden;
-      }
-      @media (max-width: 767px) {
-        html,
-        body {
-          height: auto;
-          min-height: 100%;
-        }
-        body {
-          min-height: 100vh;
-          overflow-x: hidden;
-          overflow-y: auto;
-        }
-        .flow-topbar {
-          height: 72px;
-          padding: 12px 16px;
-        }
-        .flow-user-card {
-          min-height: 44px;
-          gap: 8px;
-          padding: 4px 8px;
-        }
-        .flow-avatar {
-          width: 34px;
-          height: 34px;
-          font-size: 15px;
-        }
-        .flow-workspace {
-          min-height: calc(100vh - 72px);
-          gap: 16px;
-          padding: 16px;
-        }
-        .flow-repo-sidebar {
-          background: #eef2ec;
-          box-shadow: 0 12px 32px rgb(28 32 30 / 12%);
-        }
-        html.dark .flow-repo-sidebar {
-          background: #111713;
-        }
-        .flow-repo-breadcrumb {
-          display: none;
-        }
-        .workspace {
-          min-height: calc(100vh - 72px);
-          overflow: visible;
-        }
-        .workspace > main,
-        .workspace > main > section {
-          overflow: visible;
-        }
-        .flow-popover[popover]:popover-open {
-          inset: auto;
-          top: anchor(top);
-          left: 16px;
-          width: auto;
-          max-width: calc(100vw - 32px);
-          max-height: calc(100vh - 96px);
-          overflow-y: auto;
-          translate: 0 -100%;
-        }
-      }
-      ::-webkit-scrollbar {
-        width: 6px;
-        height: 6px;
-      }
-      ::-webkit-scrollbar-track {
-        background: transparent;
-      }
-      ::-webkit-scrollbar-thumb {
-        background: #9ca3af;
-        border-radius: 4px;
+        --font-sans: Inter, sans-serif;
       }
     </style>
   </head>
-  <body class="bg-app-bg text-sm text-text-main dark:bg-gray-950 dark:text-gray-100">
+  <body
+    class="m-0 flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-app-bg font-sans text-sm text-text-main [scrollbar-width:thin] [scrollbar-color:#9ca3af_transparent] dark:bg-[#111713] dark:text-gray-100 max-md:h-auto max-md:min-h-dvh max-md:overflow-x-hidden max-md:overflow-y-auto"
+  >
     <template app>
-      <header class="flow-topbar relative z-30 flex flex-shrink-0 items-center justify-between">
+      <header
+        class="relative z-30 flex h-[88px] shrink-0 items-center justify-between bg-app-bg px-6 py-4 dark:bg-[#111713] max-md:h-[72px] max-md:px-4 max-md:py-3"
+      >
         <div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden md:gap-3">
           <template if="showWorkspace && !settings"
             ><button
@@ -418,10 +48,14 @@
               on-click="toggleSidebar()"
               aria-label="Toggle repositories"
             >
-              <i class="ph ph-list text-lg"></i></button
+              <lucide-icon icon="menu" size="20"></lucide-icon></button
           ></template>
-          <a href="/" class="flex flex-shrink-0 items-center" aria-label="Home"
-            ><span class="home-indicator" aria-hidden="true"></span
+          <a href="/" class="flex shrink-0 items-center" aria-label="Home"
+            ><span
+              data-testid="home-indicator"
+              class="block size-6 shrink-0 rounded-full bg-brand"
+              aria-hidden="true"
+            ></span
           ></a>
           <template if="profile && org && !settings"
             ><template if="showWorkspace"
@@ -435,11 +69,11 @@
             ></template
           >
           <template if="profile && repoLabel && !settings"
-            ><span class="flow-repo-breadcrumb flex-shrink-0 text-gray-400">/</span
+            ><span class="max-md:hidden shrink-0 text-gray-400">/</span
             ><a
               attr-href="repoHref"
               attr-title="repo"
-              class="flow-repo-breadcrumb max-w-[20vw] truncate text-sm font-medium hover:text-brand md:max-w-80"
+              class="max-md:hidden max-w-[20vw] truncate text-sm font-medium hover:text-brand md:max-w-80"
               >{{ repoLabel }}</a
             ></template
           >
@@ -450,16 +84,20 @@
             on-click="toggleTheme()"
             aria-label="Toggle theme"
           >
-            <i class="ph text-xl" bind-class="{ 'ph-sun': darkMode, 'ph-moon': !darkMode }"></i>
+            <lucide-icon attr-icon="darkMode ? 'sun' : 'moon'" size="20"></lucide-icon>
           </button>
           <template if="authStatus === 'authenticated' && profile"
             ><button
               on-click="openSettings()"
               type="button"
-              class="flow-user-card flex items-center gap-3"
+              class="flex min-h-14 items-center gap-3 rounded-xl border border-gray-200 bg-white py-1.5 pl-2 pr-3 shadow-[0_1px_2px_rgba(28,32,30,0.08)] dark:border-[#344039] dark:bg-[#1a231d] max-md:min-h-11 max-md:gap-2 max-md:px-2 max-md:py-1"
               title="Settings"
             >
-              <span class="flow-avatar" aria-hidden="true">{{ userInitial }}</span>
+              <span
+                class="inline-flex size-10 shrink-0 items-center justify-center rounded-full bg-[#d6ecc9] text-[18px] font-bold text-[#2c533c] max-md:size-[34px] max-md:text-[15px]"
+                aria-hidden="true"
+                >{{ userInitial }}</span
+              >
               <span class="hidden text-right leading-tight sm:block"
                 ><span class="block font-medium">{{ userAlias }}</span
                 ><span class="block text-xs text-gray-500 dark:text-gray-400">{{ userEmail }}</span></span
@@ -470,48 +108,74 @@
             ><a
               attr-href="userUrl"
               title="Sign in with OIDC"
-              class="flow-action inline-flex items-center gap-2 rounded-lg px-4 py-2 font-medium text-white transition-colors"
+              class="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 font-medium text-white transition-colors hover:bg-brand-hover"
             >
-              <i class="ph ph-arrow-right-to-line"></i>
+              <lucide-icon icon="log-in" size="18"></lucide-icon>
               <span>Sign in</span>
             </a></template
           >
         </div>
       </header>
-      <div class="flow-workspace workspace">
+      <div
+        class="flex min-h-0 flex-1 gap-6 overflow-hidden bg-app-bg px-6 pb-6 pt-2 dark:bg-[#111713] max-md:min-h-[calc(100dvh-72px)] max-md:gap-4 max-md:overflow-visible max-md:p-4"
+      >
         <template if="showWorkspace && orgRepositories.length > 0 && !settings">
           <aside
-            class="flow-repo-sidebar fixed inset-y-[72px] left-0 z-40 flex h-[calc(100vh-72px)] w-56 min-h-0 flex-shrink-0 -translate-x-full flex-col overflow-y-auto transition-transform md:relative md:inset-y-auto md:h-auto md:translate-x-0"
+            data-testid="repository-sidebar"
+            class="fixed inset-y-[72px] left-0 z-40 flex h-[calc(100dvh-72px)] w-56 min-h-0 shrink-0 -translate-x-full flex-col overflow-y-auto bg-transparent transition-transform dark:bg-[#111713] max-md:bg-app-bg max-md:shadow-[0_12px_32px_rgba(28,32,30,0.12)] dark:max-md:bg-[#111713] md:relative md:inset-y-auto md:h-full md:min-h-0 md:max-h-full md:translate-x-0"
             class-translate-x-0="menuOpen"
           >
-            <div class="flow-sidebar-section flow-sidebar-repositories">
-              <details open>
-                <summary class="flow-sidebar-heading">
-                  <i class="ph ph-caret-right flow-disclosure-icon"></i><span>Repositories</span>
+            <div class="relative pb-1">
+              <details class="group open:[&>summary>lucide-icon]:rotate-90" open>
+                <summary
+                  data-testid="sidebar-section-heading"
+                  class="flex min-h-[34px] cursor-pointer list-none items-center gap-[7px] border-b border-[#e8ece9] py-0 pl-2 pr-9 text-[11px] font-bold uppercase tracking-[0.08em] text-[#65736a] marker:content-none dark:border-[#29342c] dark:text-[#aab6ac] [&::-webkit-details-marker]:hidden"
+                >
+                  <lucide-icon
+                    icon="chevron-right"
+                    size="14"
+                    class="block shrink-0 text-[#89958c] transition-transform"
+                  ></lucide-icon
+                  ><span>Repositories</span>
                 </summary>
-                <nav class="flow-sidebar-content flex flex-col gap-1">
+                <nav
+                  data-testid="organization-repository-list"
+                  class="flex max-h-[min(50dvh,28rem)] flex-col gap-1 overflow-y-auto px-1 pb-2 pt-1 [scrollbar-gutter:stable]"
+                >
                   <template for="repo of orgRepositories"
-                    ><a
-                      attr-href="repositoryNavHref(repo)"
-                      class="flow-sidebar-item flex items-center gap-2 transition-colors"
+                    ><div
+                      class="flex min-h-14 items-center gap-2 rounded-md border border-transparent px-2 py-2 transition-colors hover:bg-white/55 dark:hover:bg-white/10 [&.selected]:border-[#cdded0] [&.selected]:bg-white dark:[&.selected]:border-[#3d5844] dark:[&.selected]:bg-[#1a231d]"
                       class-selected="isSelected(repo)"
-                      on-click="closeMenu()"
-                      ><i class="ph ph-book-bookmark text-sm text-gray-400"></i>{{ repo.repo }}</a
-                    ></template
-                  >
+                    >
+                      <a
+                        attr-href="repositoryNavHref(repo)"
+                        class="flex min-w-0 flex-1 items-center gap-2 text-[#525e56] dark:text-[#c1cbc3] [&.selected]:font-semibold [&.selected]:text-brand dark:[&.selected]:text-[#a4d1ae]"
+                        on-click="closeMenu()"
+                      >
+                        <lucide-icon icon="bookmark" size="16" class="shrink-0 text-gray-400"></lucide-icon>
+                        <span class="min-w-0 flex-1">
+                          <span class="block truncate text-[13px] font-bold">{{ repo.repo }}</span>
+                          <span class="block truncate text-xs text-gray-500 dark:text-gray-400"
+                            >{{ repo.latestCommitMessage }}</span
+                          >
+                        </span>
+                      </a>
+                      <commit-hash bind-hash="repo.latestCommitHash"></commit-hash></div
+                  ></template>
                 </nav>
               </details>
               <template if="canWrite"
                 ><button
                   popovertarget="create-repo-popover"
-                  style="anchor-name: --create-repository-anchor"
-                  class="flow-sidebar-action"
+                  class="[anchor-name:--create-repository-anchor] absolute right-1 top-[3px] inline-flex size-[26px] items-center justify-center rounded-md text-[#66746a] hover:bg-white/75 hover:text-brand dark:text-[#aab6ac] dark:hover:bg-[#202a23] dark:hover:text-[#a4d1ae]"
                   aria-label="Create repository"
                 >
-                  <i class="ph ph-plus"></i></button
+                  <lucide-icon icon="plus" size="16"></lucide-icon></button
               ></template>
               <template if="!canWrite"
-                ><span class="flow-sidebar-readonly" title="Repository write access is required"
+                ><span
+                  class="absolute right-2 top-[9px] text-[10px] text-[#87938a]"
+                  title="Repository write access is required"
                   >Read-only</span
                 ></template
               >
@@ -519,14 +183,13 @@
                 ><div
                   popover="auto"
                   id="create-repo-popover"
-                  style="position-anchor: --create-repository-anchor"
-                  class="flow-popover w-56 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                  class="[position:fixed] inset-auto m-0 [position-anchor:--create-repository-anchor] [top:anchor(bottom)] [left:anchor(left)] open:max-md:[top:anchor(top)] open:max-md:left-4 open:max-md:w-auto open:max-md:max-w-[calc(100vw-32px)] open:max-md:max-h-[calc(100dvh-96px)] open:max-md:overflow-y-auto open:max-md:[translate:0_-100%] w-56 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                 >
                   <form on-submit.prevent="createRepository()" class="space-y-4">
                     <h2 class="text-lg font-semibold">Create repository</h2>
                     <label class="block text-sm text-gray-600 dark:text-gray-300"
                       >Repository name<input
-                        class="flow-input mt-1 w-full px-3 py-2"
+                        class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 focus:border-brand focus:outline-2 focus:outline-brand/20 focus:outline-offset-1 dark:border-[#46544a] dark:bg-[#111713] dark:text-[#e5e9e5] dark:placeholder:text-[#98a49a]"
                         placeholder="my-project"
                         required
                         on-input="setRepoName($event.target.value)"
@@ -543,7 +206,10 @@
                       >
                         Cancel
                       </button>
-                      <button class="flow-action rounded-lg px-3 py-2 font-medium text-white" type="submit">
+                      <button
+                        class="rounded-lg bg-brand px-3 py-2 font-medium text-white transition-colors hover:bg-brand-hover"
+                        type="submit"
+                      >
                         Create
                       </button>
                     </div>
@@ -552,26 +218,36 @@
               >
             </div>
             <template if="authStatus === 'authenticated' && repo && !settings">
-              <div class="flow-sidebar-section">
-                <details>
-                  <summary class="flow-sidebar-heading">
-                    <i class="ph ph-caret-right flow-disclosure-icon"></i><span>Branches</span>
+              <div class="relative border-t border-[#dfe5e0] pb-1 dark:border-[#303b33]">
+                <details class="group open:[&>summary>lucide-icon]:rotate-90">
+                  <summary
+                    data-testid="sidebar-section-heading"
+                    class="flex min-h-[34px] cursor-pointer list-none items-center gap-[7px] border-b border-[#e8ece9] py-0 pl-2 pr-9 text-[11px] font-bold uppercase tracking-[0.08em] text-[#65736a] marker:content-none dark:border-[#29342c] dark:text-[#aab6ac] [&::-webkit-details-marker]:hidden"
+                  >
+                    <lucide-icon
+                      icon="chevron-right"
+                      size="14"
+                      class="block shrink-0 text-[#89958c] transition-transform"
+                    ></lucide-icon
+                    ><span>Branches</span>
                   </summary>
-                  <ul class="flow-sidebar-content space-y-0.5">
+                  <ul class="space-y-0.5 px-1 pb-2 pt-1">
                     <template for="branch of branches"
                       ><li>
-                        <a attr-href="refHref(branch)" class="flow-sidebar-item block transition-colors"
+                        <a
+                          attr-href="refHref(branch)"
+                          class="block min-h-8 rounded-md border border-transparent px-2 py-[5px] text-[13px] text-[#525e56] transition-colors hover:bg-white/55 dark:text-[#c1cbc3] dark:hover:bg-white/10"
                           >{{ branch }}</a
                         >
                       </li></template
                     >
                     <template if="!branches.length"
-                      ><li class="flow-sidebar-empty">
+                      ><li class="px-2 py-1 text-xs text-[#7a877e] dark:text-[#9aa69c]">
                         No branches.
                         <template if="canWrite"
                           ><button
                             type="button"
-                            class="text-brand hover:text-green-800 dark:text-green-300 dark:hover:text-green-200"
+                            class="text-brand hover:text-brand-hover dark:text-green-300 dark:hover:text-green-200"
                             popovertarget="branch-popover"
                           >
                             Create one
@@ -584,24 +260,22 @@
                 <template if="canWrite"
                   ><button
                     popovertarget="branch-popover"
-                    style="anchor-name: --branch-popover-anchor"
-                    class="flow-sidebar-action"
+                    class="[anchor-name:--branch-popover-anchor] absolute right-1 top-[3px] inline-flex size-[26px] items-center justify-center rounded-md text-[#66746a] hover:bg-white/75 hover:text-brand dark:text-[#aab6ac] dark:hover:bg-[#202a23] dark:hover:text-[#a4d1ae]"
                     aria-label="Create branch"
                   >
-                    <i class="ph ph-plus"></i></button
+                    <lucide-icon icon="plus" size="16"></lucide-icon></button
                 ></template>
                 <template if="canWrite"
                   ><div
                     popover="auto"
                     id="branch-popover"
-                    style="position-anchor: --branch-popover-anchor"
-                    class="flow-popover w-48 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                    class="[position:fixed] inset-auto m-0 [position-anchor:--branch-popover-anchor] [top:anchor(bottom)] [left:anchor(left)] open:max-md:[top:anchor(top)] open:max-md:left-4 open:max-md:w-auto open:max-md:max-w-[calc(100vw-32px)] open:max-md:max-h-[calc(100dvh-96px)] open:max-md:overflow-y-auto open:max-md:[translate:0_-100%] w-48 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                   >
                     <form on-submit.prevent="createBranch()" class="space-y-4">
                       <h3 class="text-sm font-semibold">Create branch</h3>
                       <label class="block text-xs text-gray-600 dark:text-gray-300"
                         >Branch name<input
-                          class="flow-input mt-1 w-full px-3 py-2"
+                          class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 focus:border-brand focus:outline-2 focus:outline-brand/20 focus:outline-offset-1 dark:border-[#46544a] dark:bg-[#111713] dark:text-[#e5e9e5] dark:placeholder:text-[#98a49a]"
                           placeholder="main"
                           required
                           on-input="setBranchName($event.target.value)"
@@ -618,7 +292,10 @@
                         >
                           Cancel
                         </button>
-                        <button class="flow-action rounded-lg px-2 py-1 text-sm font-medium text-white" type="submit">
+                        <button
+                          class="rounded-lg bg-brand px-2 py-1 text-sm font-medium text-white transition-colors hover:bg-brand-hover"
+                          type="submit"
+                        >
                           Create
                         </button>
                       </div>
@@ -626,26 +303,36 @@
                   </div></template
                 >
               </div>
-              <div class="flow-sidebar-section">
-                <details>
-                  <summary class="flow-sidebar-heading">
-                    <i class="ph ph-caret-right flow-disclosure-icon"></i><span>Tags</span>
+              <div class="relative border-t border-[#dfe5e0] pb-1 dark:border-[#303b33]">
+                <details class="group open:[&>summary>lucide-icon]:rotate-90">
+                  <summary
+                    data-testid="sidebar-section-heading"
+                    class="flex min-h-[34px] cursor-pointer list-none items-center gap-[7px] border-b border-[#e8ece9] py-0 pl-2 pr-9 text-[11px] font-bold uppercase tracking-[0.08em] text-[#65736a] marker:content-none dark:border-[#29342c] dark:text-[#aab6ac] [&::-webkit-details-marker]:hidden"
+                  >
+                    <lucide-icon
+                      icon="chevron-right"
+                      size="14"
+                      class="block shrink-0 text-[#89958c] transition-transform"
+                    ></lucide-icon
+                    ><span>Tags</span>
                   </summary>
-                  <ul class="flow-sidebar-content space-y-0.5">
+                  <ul class="space-y-0.5 px-1 pb-2 pt-1">
                     <template for="tag of tags"
                       ><li>
-                        <a attr-href="refHref(tag)" class="flow-sidebar-item flex items-center gap-2 transition-colors"
-                          ><i class="ph ph-tag text-xs text-gray-400"></i>{{ tag }}</a
+                        <a
+                          attr-href="refHref(tag)"
+                          class="flex min-h-8 items-center gap-2 rounded-md border border-transparent px-2 py-[5px] text-[13px] text-[#525e56] transition-colors hover:bg-white/55 dark:text-[#c1cbc3] dark:hover:bg-white/10"
+                          ><lucide-icon icon="tag" size="14" class="shrink-0 text-gray-400"></lucide-icon>{{ tag }}</a
                         >
                       </li></template
                     >
                     <template if="!tags.length"
-                      ><li class="flow-sidebar-empty">
+                      ><li class="px-2 py-1 text-xs text-[#7a877e] dark:text-[#9aa69c]">
                         No tags.
                         <template if="canWrite"
                           ><button
                             type="button"
-                            class="text-brand hover:text-green-800 dark:text-green-300 dark:hover:text-green-200"
+                            class="text-brand hover:text-brand-hover dark:text-green-300 dark:hover:text-green-200"
                             popovertarget="tag-popover"
                           >
                             Create one
@@ -658,24 +345,22 @@
                 <template if="canWrite"
                   ><button
                     popovertarget="tag-popover"
-                    style="anchor-name: --tag-popover-anchor"
-                    class="flow-sidebar-action"
+                    class="[anchor-name:--tag-popover-anchor] absolute right-1 top-[3px] inline-flex size-[26px] items-center justify-center rounded-md text-[#66746a] hover:bg-white/75 hover:text-brand dark:text-[#aab6ac] dark:hover:bg-[#202a23] dark:hover:text-[#a4d1ae]"
                     aria-label="Create tag"
                   >
-                    <i class="ph ph-plus"></i></button
+                    <lucide-icon icon="plus" size="16"></lucide-icon></button
                 ></template>
                 <template if="canWrite"
                   ><div
                     popover="auto"
                     id="tag-popover"
-                    style="position-anchor: --tag-popover-anchor"
-                    class="flow-popover w-48 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                    class="[position:fixed] inset-auto m-0 [position-anchor:--tag-popover-anchor] [top:anchor(bottom)] [left:anchor(left)] open:max-md:[top:anchor(top)] open:max-md:left-4 open:max-md:w-auto open:max-md:max-w-[calc(100vw-32px)] open:max-md:max-h-[calc(100dvh-96px)] open:max-md:overflow-y-auto open:max-md:[translate:0_-100%] w-48 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                   >
                     <form on-submit.prevent="createTag()" class="space-y-4">
                       <h3 class="text-sm font-semibold">Create tag</h3>
                       <label class="block text-xs text-gray-600 dark:text-gray-300"
                         >Tag name<input
-                          class="flow-input mt-1 w-full px-3 py-2"
+                          class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 focus:border-brand focus:outline-2 focus:outline-brand/20 focus:outline-offset-1 dark:border-[#46544a] dark:bg-[#111713] dark:text-[#e5e9e5] dark:placeholder:text-[#98a49a]"
                           placeholder="v1.0.0"
                           required
                           on-input="setTagName($event.target.value)"
@@ -692,7 +377,10 @@
                         >
                           Cancel
                         </button>
-                        <button class="flow-action rounded-lg px-2 py-1 text-sm font-medium text-white" type="submit">
+                        <button
+                          class="rounded-lg bg-brand px-2 py-1 text-sm font-medium text-white transition-colors hover:bg-brand-hover"
+                          type="submit"
+                        >
                           Create
                         </button>
                       </div>
@@ -703,12 +391,12 @@
             </template>
           </aside>
           <template if="menuOpen"
-            ><div class="fixed inset-0 z-30 bg-black/40 md:hidden" on-click="closeMenu()"></div
+            ><div class="fixed inset-x-0 bottom-0 top-[72px] z-30 bg-black/40 md:hidden" on-click="closeMenu()"></div
           ></template>
         </template>
-        <main class="flow-main flex min-w-0 flex-1 flex-col overflow-hidden md:flex-row">
+        <main class="flex min-w-0 flex-1 flex-col overflow-hidden bg-transparent md:flex-row max-md:overflow-visible">
           <section
-            class="flow-main-content flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto"
+            class="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-transparent p-0 max-md:overflow-visible"
             on-dragover.prevent="setDragging(true)"
             on-dragleave="setDragging(false)"
             on-drop.prevent="upload($event)"
@@ -737,6 +425,7 @@
               >
               <template if="authStatus === 'authenticated' && settings"
                 ><organization-settings
+                  class="flex min-h-0 flex-1"
                   bind-can-write="canWrite"
                   bind-organizations="orgs"
                   bind-created="orgCreated"
@@ -755,6 +444,7 @@
               >
               <template if="authStatus === 'authenticated' && !repo && !repoLoadError && !settings"
                 ><organization-landing
+                  class="flex min-h-0 flex-1"
                   bind-org="org"
                   bind-can-write="canWrite"
                   bind-organizations="orgs"
@@ -769,19 +459,46 @@
                 ></organization-landing
               ></template>
               <template if="repo && !settings"
-                ><div class="flow-repo-page" data-repository-view>
+                ><div class="flex min-h-0 flex-1 flex-col" data-repository-view>
+                  <template if="commits.length > 0"
+                    ><div
+                      data-testid="latest-commit-header"
+                      class="mb-2 flex min-h-16 shrink-0 items-center justify-between gap-3 rounded-t-xl border border-gray-200 bg-[#f8faf9]/90 p-4 dark:border-[#344039] dark:bg-[#1d2620]"
+                    >
+                      <div class="flex min-w-0 items-center gap-3">
+                        <div
+                          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                        >
+                          <lucide-icon icon="git-commit-horizontal" size="18"></lucide-icon>
+                        </div>
+                        <span class="truncate text-sm font-semibold">{{ commits[0].message }}</span>
+                      </div>
+                      <commit-hash bind-hash="commits[0].hash"></commit-hash></div
+                  ></template>
                   <div
-                    class="mb-4 flex items-center justify-between gap-2 text-sm font-medium text-gray-600 dark:text-gray-300"
+                    class="mb-4 flex min-h-10 shrink-0 items-center justify-between gap-3 text-xs font-medium text-gray-600 dark:text-gray-300"
                   >
-                    <a attr-href="rootHref" class="hover:text-brand dark:hover:text-green-300">Repository root</a
-                    ><span>/</span><span>{{ directory || 'Root' }}</span>
+                    <nav
+                      aria-label="Folder path"
+                      class="flex min-w-0 items-center gap-1 overflow-x-auto whitespace-nowrap"
+                    >
+                      <a attr-href="rootHref" class="hover:text-brand dark:hover:text-green-300">Root</a>
+                      <template for="segment of directorySegments"
+                        ><span aria-hidden="true" class="text-gray-400">/</span>
+                        <a
+                          attr-href="folderHref(segment.path)"
+                          class="max-w-48 truncate hover:text-brand dark:hover:text-green-300"
+                          >{{ segment.name }}</a
+                        ></template
+                      >
+                    </nav>
                     <template if="canWrite"
                       ><button
                         popovertarget="add-file-popover"
-                        style="anchor-name: --add-file-anchor"
-                        class="ml-2 text-sm font-semibold text-brand hover:underline dark:text-green-300"
+                        class="[anchor-name:--add-file-anchor] inline-flex shrink-0 items-center gap-1 rounded-md border border-gray-300 bg-gray-200/80 px-2.5 py-1 font-mono text-xs text-gray-700 transition-colors hover:bg-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                       >
-                        + Add file
+                        <lucide-icon icon="plus" size="14"></lucide-icon>
+                        Add file
                       </button></template
                     >
                   </div>
@@ -794,14 +511,13 @@
                     ><div
                       popover="auto"
                       id="add-file-popover"
-                      style="position-anchor: --add-file-anchor"
-                      class="flow-popover w-64 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                      class="[position:fixed] inset-auto m-0 max-h-[calc(100dvh-2rem)] overflow-y-auto [position-anchor:--add-file-anchor] [top:anchor(bottom)] [left:auto] [right:anchor(right)] [position-try-fallbacks:flip-block] open:max-md:[top:anchor(top)] open:max-md:left-4 open:max-md:[right:auto] open:max-md:w-auto open:max-md:max-w-[calc(100vw-32px)] open:max-md:max-h-[calc(100dvh-96px)] open:max-md:overflow-y-auto open:max-md:[translate:0_-100%] w-64 rounded-lg border border-gray-200 bg-white p-4 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                     >
                       <form on-submit.prevent="addFileToRepo()" class="space-y-4">
                         <h3 class="text-sm font-semibold">Add file</h3>
                         <label class="block text-xs text-gray-600 dark:text-gray-300"
                           >Full relative path<input
-                            class="flow-input mt-1 w-full px-3 py-2"
+                            class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 focus:border-brand focus:outline-2 focus:outline-brand/20 focus:outline-offset-1 dark:border-[#46544a] dark:bg-[#111713] dark:text-[#e5e9e5] dark:placeholder:text-[#98a49a]"
                             placeholder="src/index.html"
                             required
                             on-input="setAddFilePath($event.target.value)"
@@ -820,7 +536,10 @@
                           >
                             Cancel
                           </button>
-                          <button class="flow-action rounded-lg px-2 py-1 text-sm font-medium text-white" type="submit">
+                          <button
+                            class="rounded-lg bg-brand px-2 py-1 text-sm font-medium text-white transition-colors hover:bg-brand-hover"
+                            type="submit"
+                          >
                             Create
                           </button>
                         </div>
@@ -828,34 +547,23 @@
                     </div></template
                   >
                   <template if="commits.length > 0">
-                    <div class="flow-repository-card flex flex-1 flex-col overflow-hidden">
-                      <div class="flow-commit-header flex shrink-0 items-center justify-between border-b p-4">
-                        <div class="flex min-w-0 items-center gap-3">
-                          <div
-                            class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
-                          >
-                            <i class="ph ph-git-commit text-lg"></i>
-                          </div>
-                          <div class="flex min-w-0 flex-col sm:flex-row sm:items-center sm:gap-2">
-                            <span class="truncate text-sm font-semibold">{{ commits[0].message }}</span>
-                            <span class="text-xs text-gray-500 dark:text-gray-300">{{ commits[0].author_name }}</span>
-                          </div>
-                        </div>
-                        <code
-                          class="ml-3 shrink-0 rounded-md border border-gray-300 bg-gray-200/80 px-2.5 py-1 font-mono text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
-                          >{{ commits[0].hash.slice(0, 7) }}</code
-                        >
-                      </div>
+                    <div
+                      class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-[0_1px_2px_rgba(28,32,30,0.08)] dark:border-[#344039] dark:bg-[#171e19]"
+                    >
                       <template if="hasUncommitted && canWrite"
                         ><form
                           class="flex gap-2 border-b border-gray-100 p-3 dark:border-gray-800"
                           on-submit.prevent="commitChanges()"
                         >
                           <input
-                            class="flow-input min-w-0 flex-1 px-3 py-2"
+                            class="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 focus:border-brand focus:outline-2 focus:outline-brand/20 focus:outline-offset-1 dark:border-[#46544a] dark:bg-[#111713] dark:text-[#e5e9e5] dark:placeholder:text-[#98a49a]"
                             placeholder="Commit message"
                             on-input="setCommitMessage($event.target.value)"
-                          /><button class="flow-action rounded-lg px-3 py-2 font-medium text-white">Commit</button>
+                          /><button
+                            class="rounded-lg bg-brand px-3 py-2 font-medium text-white transition-colors hover:bg-brand-hover"
+                          >
+                            Commit
+                          </button>
                         </form>
                         <template if="errorMessage"
                           ><p
@@ -866,35 +574,21 @@
                           </p></template
                         ></template
                       >
-                      <div
-                        class="flex shrink-0 items-center gap-2 border-b border-gray-100 px-4 py-3 text-sm dark:border-gray-800"
+                      <ul
+                        data-testid="repository-file-list"
+                        class="min-h-0 flex-1 divide-y divide-gray-100 overflow-y-auto dark:divide-gray-800"
                       >
-                        <template if="canWrite"
-                          ><label for="repo-upload-input" class="cursor-pointer font-medium text-brand hover:underline"
-                            >Choose files</label
-                          >
-                          <input
-                            id="repo-upload-input"
-                            class="sr-only"
-                            aria-label="Select files to upload"
-                            type="file"
-                            multiple
-                            on-change="handleFileSelect($event.target.files)"
-                          />
-                          <span class="text-gray-400">No file chosen</span></template
-                        >
-                        <template if="!canWrite"><span class="text-gray-500">Read-only access</span></template>
-                      </div>
-                      <ul class="min-h-0 flex-1 divide-y divide-gray-100 overflow-y-auto dark:divide-gray-800">
                         <template for="entry of entries"
                           ><li
-                            class="flow-file-row flex items-center justify-between px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-900/50"
+                            class="flex min-h-[45px] items-center justify-between border-[#eef0ee] px-4 py-2.5 hover:bg-gray-50 dark:border-[#303b33] dark:hover:bg-gray-900/50"
                           >
                             <a attr-href="entryHref(entry)" class="flex min-w-0 flex-1 items-center gap-3">
-                              <i
-                                class="ph w-4 text-center text-lg text-gray-400"
-                                bind-class="{ 'ph-folder': entry.type === 'directory', 'ph-file': entry.type === 'file', 'text-brand': entry.type === 'directory' }"
-                              ></i>
+                              <lucide-icon
+                                attr-icon="entry.type === 'directory' ? 'folder' : 'file'"
+                                size="18"
+                                class="w-4 shrink-0 text-gray-400"
+                                class-text-brand="entry.type === 'directory'"
+                              ></lucide-icon>
                               <span class="truncate text-sm font-medium text-gray-700 dark:text-gray-200"
                                 >{{ entry.name }}<sup class="ml-1 text-amber-500"
                                   >{{ entry.uncommitted ? '*' : '' }}</sup
@@ -907,24 +601,50 @@
                           </li></template
                         >
                       </ul>
-                      <div
-                        class="flow-dropzone m-6 mt-auto flex shrink-0 flex-col items-center justify-center bg-white p-6 text-center text-sm text-gray-500 transition-colors hover:bg-gray-50 dark:bg-transparent dark:text-gray-300 dark:hover:bg-gray-900/50"
-                        class-dragging="dragging"
+                      <template if="canWrite"
+                        ><input
+                          id="repo-upload-input"
+                          class="sr-only"
+                          aria-label="Select files to upload"
+                          type="file"
+                          multiple
+                          on-change="handleFileSelect($event.target.files)"
+                        />
+                        <div
+                          data-testid="upload-dropzone"
+                          bind-class="{ 'border-brand': dragging, 'bg-[#f1f7f1]': dragging, 'dark:bg-[#23362a]': dragging }"
+                          class="m-6 mt-auto flex min-h-[120px] shrink-0 flex-col items-center justify-center rounded-[9px] border-2 border-dashed border-[#e1e6e2] bg-white p-6 text-center text-sm text-gray-500 transition-colors hover:bg-gray-50 dark:border-[#3a4940] dark:bg-transparent dark:text-gray-300 dark:hover:bg-gray-900/50 max-md:m-3 max-md:min-h-[56px] max-md:flex-row max-md:flex-wrap max-md:gap-x-1 max-md:gap-y-0 max-md:px-2 max-md:py-2"
+                        >
+                          <lucide-icon
+                            icon="upload"
+                            size="22"
+                            class="mb-2 text-gray-400 max-md:mb-0 max-md:hidden"
+                          ></lucide-icon>
+                          <span class="max-md:hidden">Drop files here to upload them unstaged or</span>
+                          <span class="hidden max-md:inline">Drop files or</span>
+                          <label for="repo-upload-input" class="cursor-pointer font-medium text-brand hover:underline"
+                            >click here to upload</label
+                          >
+                        </div></template
                       >
-                        <i class="ph ph-upload-simple mb-2 text-2xl text-gray-400"></i>
-                        <span>Drop files here to upload them unstaged</span>
-                      </div>
+                      <template if="!canWrite"
+                        ><div
+                          class="m-6 mt-auto border-t border-dashed border-gray-300 p-4 text-center text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400 max-md:m-3"
+                        >
+                          Read-only access
+                        </div></template
+                      >
                     </div>
                   </template>
                   <template if="commits.length === 0">
                     <div
-                      class="flow-repository-card flex min-h-0 flex-1 flex-col items-center justify-center p-6 text-center"
+                      class="flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl border border-gray-200 bg-white p-6 text-center shadow-[0_1px_2px_rgba(28,32,30,0.08)] dark:border-[#344039] dark:bg-[#171e19]"
                     >
                       <div class="mx-auto w-full max-w-md">
                         <div
-                          class="flow-icon-badge mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full"
+                          class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-app-bg text-brand dark:bg-[#23362a] dark:text-[#a4d1ae]"
                         >
-                          <i class="ph ph-git-branch text-2xl"></i>
+                          <lucide-icon icon="git-branch" size="24"></lucide-icon>
                         </div>
                         <h1 class="text-xl font-bold">Welcome to your Git server</h1>
                         <template if="canWrite"
@@ -959,10 +679,10 @@
                         >
                       </div>
                       <div
-                        class="flow-dropzone mt-8 flex w-full max-w-3xl shrink-0 flex-col items-center justify-center p-6 text-sm text-gray-500"
-                        class-dragging="dragging"
+                        bind-class="{ 'border-brand': dragging, 'bg-[#f1f7f1]': dragging, 'dark:bg-[#23362a]': dragging }"
+                        class="mt-8 flex min-h-[120px] w-full max-w-3xl shrink-0 flex-col items-center justify-center rounded-[9px] border-2 border-dashed border-[#e1e6e2] p-6 text-sm text-gray-500 dark:border-[#3a4940] dark:text-gray-300"
                       >
-                        <i class="ph ph-upload-simple mb-2 text-2xl text-gray-400"></i>
+                        <lucide-icon icon="upload" size="24" class="mb-2 text-gray-400"></lucide-icon>
                         <span>Drop files here to upload them unstaged</span>
                         <template if="canWrite"
                           ><label
@@ -991,7 +711,7 @@
                             class="rounded px-2 py-1 text-gray-500 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
                             aria-label="Close preview"
                           >
-                            <i class="ph ph-x"></i>
+                            <lucide-icon icon="x" size="16"></lucide-icon>
                           </button>
                         </header>
                         <template if="previewLoading"
@@ -1018,10 +738,13 @@
             import { ref, computed, onInit } from "@li3/web";
             export default function () {
               const org = ref(new URL(window.location.href).searchParams.get("org") || "");
-              const authStatus = ref("loading");
+              const serverSession = window.__gitStoreSession || null;
+              const authStatus = ref(
+                serverSession?.checked ? (serverSession.authenticated ? "authenticated" : "anonymous") : "loading",
+              );
               const settings = ref(new URL(window.location.href).searchParams.get("settings") === "organizations");
-              const profile = ref(null);
-              const canWrite = ref(false);
+              const profile = ref(serverSession?.authenticated ? serverSession.profile : null);
+              const canWrite = ref(serverSession?.authenticated && serverSession.canWrite === true);
               const userUrl = ref("#");
               const darkMode = ref(window.matchMedia("(prefers-color-scheme: dark)").matches);
               const showWorkspace = ref(false);
@@ -1046,6 +769,13 @@
               const repoHref = computed(
                 () => `/?org=${encodeURIComponent(org.value)}&repo=${encodeURIComponent(repoLabel.value)}`,
               );
+              const folderHref = (targetDirectory) => {
+                const current = url();
+                current.searchParams.delete("path");
+                current.searchParams.delete("dir");
+                if (targetDirectory) current.searchParams.set("dir", targetDirectory);
+                return `${current.pathname}${current.search}${current.hash}`;
+              };
               const repositoryNavHref = (item) =>
                 `/?org=${encodeURIComponent(org.value)}&repo=${encodeURIComponent(item.repo)}`;
               const isSelected = (item) => repoLabel.value === item.repo;
@@ -1076,6 +806,7 @@
               const commits = ref([]);
               const repoLoadError = ref("");
               const directory = ref("");
+              const directorySegments = ref([]);
               const previewPath = ref("");
               const fileContent = ref("");
               const previewUrl = ref("");
@@ -1198,18 +929,48 @@
                   return;
                 }
                 orgRepositoriesLoaded.value = false;
-                const response = await fetch(`/api/v1/orgs/${encodeURIComponent(slug)}/repos`);
+                const reposPath = `/api/v1/orgs/${encodeURIComponent(slug)}/repos`;
+                const response = await fetch(reposPath);
                 if (!response.ok) {
                   if (requestId === organizationRequest) orgRepositories.value = [];
                   throw new Error("Unable to load repositories for this organization.");
                 }
                 const result = await response.json().catch(() => ({}));
                 if (requestId !== organizationRequest) return;
-                orgRepositories.value = Array.isArray(result)
-                  ? result
-                  : Array.isArray(result.repos)
-                    ? result.repos
-                    : [];
+                const repositories = Array.isArray(result) ? result : Array.isArray(result.repos) ? result.repos : [];
+                const repositoriesWithCommits = await Promise.all(
+                  repositories.map(async (item) => {
+                    try {
+                      const logResponse = await fetch(`${reposPath}/${encodeURIComponent(item.repo)}/log?limit=1`);
+                      if (!logResponse.ok) {
+                        return {
+                          ...item,
+                          latestCommit: null,
+                          latestCommitHash: "",
+                          latestCommitMessage: "No commits yet",
+                        };
+                      }
+                      const log = await logResponse.json();
+                      const latestCommit = Array.isArray(log) ? log[0] || null : null;
+                      const message = latestCommit?.message || "";
+                      return {
+                        ...item,
+                        latestCommit,
+                        latestCommitHash: latestCommit?.hash || "",
+                        latestCommitMessage: message.split(/\r?\n/, 1)[0] || "No commits yet",
+                      };
+                    } catch {
+                      return {
+                        ...item,
+                        latestCommit: null,
+                        latestCommitHash: "",
+                        latestCommitMessage: "No commits yet",
+                      };
+                    }
+                  }),
+                );
+                if (requestId !== organizationRequest) return;
+                orgRepositories.value = repositoriesWithCommits;
                 orgRepositoriesLoaded.value = true;
                 showWorkspace.value = !settings.value && orgRepositories.value.length > 0;
               };
@@ -1263,6 +1024,11 @@
                 const name = current.searchParams.get("repo");
                 repoLoadError.value = "";
                 directory.value = current.searchParams.get("dir") || "";
+                const directoryParts = directory.value.split("/").filter(Boolean);
+                directorySegments.value = directoryParts.map((segment, index) => ({
+                  name: segment,
+                  path: directoryParts.slice(0, index + 1).join("/"),
+                }));
                 previewPath.value = current.searchParams.get("path") || "";
                 fileContent.value = "";
                 previewLoading.value = Boolean(previewPath.value);
@@ -1646,12 +1412,15 @@
                 userUrl.value = config.oidcLoginUrl
                   ? `${config.oidcLoginUrl}?returnTo=${encodeURIComponent(returnTo)}`
                   : "#";
-                const sessionResponse = await fetch("/ui/session", {
-                  credentials: "same-origin",
-                }).catch(() => null);
-                const session = sessionResponse?.ok
-                  ? await sessionResponse.json().catch(() => ({ authenticated: false }))
-                  : { authenticated: false };
+                let session = serverSession;
+                if (!session?.checked) {
+                  const sessionResponse = await fetch("/ui/session", {
+                    credentials: "same-origin",
+                  }).catch(() => null);
+                  session = sessionResponse?.ok
+                    ? await sessionResponse.json().catch(() => ({ authenticated: false }))
+                    : { authenticated: false };
+                }
                 if (!session.authenticated) {
                   profile.value = null;
                   authStatus.value = "anonymous";
@@ -1727,6 +1496,8 @@
                 repoLabel,
                 repoHref,
                 repositoryNavHref,
+                directorySegments,
+                folderHref,
                 isSelected,
                 openSettings,
                 closePreview,

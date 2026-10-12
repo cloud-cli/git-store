@@ -1,0 +1,40 @@
+<template component="commit-hash">
+  <template if="hash"
+    ><span
+      class="inline-flex shrink-0 items-center overflow-hidden rounded-md border border-gray-300 bg-gray-200/80 font-mono text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+    >
+      <code class="px-2.5 py-1">{{ shortHash }}</code>
+      <button
+        class="inline-flex h-full items-center border-l border-gray-300 px-1.5 text-gray-500 hover:bg-gray-300 hover:text-gray-900 focus-visible:outline-2 focus-visible:outline-brand dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white"
+        type="button"
+        on-click="copyHash()"
+        attr-aria-label="copied ? 'Commit hash copied' : 'Copy commit hash'"
+        title="Copy full commit hash"
+      >
+        <lucide-icon icon="copy" size="12"></lucide-icon>
+      </button>
+      <span class="sr-only" role="status" aria-live="polite">{{ copied ? "Commit hash copied" : "" }}</span>
+    </span></template
+  >
+  <script setup>
+    import { computed, defineProp, ref } from "@li3/web";
+    export default function () {
+      const hash = defineProp("hash", { default: "" });
+      const copied = ref(false);
+      const shortHash = computed(() => String(hash.value || "").slice(0, 7));
+      const copyHash = async () => {
+        if (!hash.value) return;
+        try {
+          await navigator.clipboard.writeText(hash.value);
+          copied.value = true;
+          window.setTimeout(() => {
+            copied.value = false;
+          }, 1200);
+        } catch {
+          copied.value = false;
+        }
+      };
+      return { hash, copied, shortHash, copyHash };
+    }
+  </script>
+</template>

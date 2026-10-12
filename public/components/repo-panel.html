@@ -7,28 +7,19 @@
         <h3
           class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
         >
-          <i class="ph ph-git-branch"></i> Branches
+          <lucide-icon icon="git-branch" size="16"></lucide-icon> Branches
           <button
             popovertarget="branch-popover"
-            style="anchor-name: --branch-popover-anchor"
-            class="rounded p-1 text-brand hover:bg-gray-200/70 dark:text-green-300 dark:hover:bg-gray-800"
+            class="[anchor-name:--branch-popover-anchor] rounded p-1 text-brand hover:bg-gray-200/70 dark:text-green-300 dark:hover:bg-gray-800"
             aria-label="Create branch"
           >
-            +
+            <lucide-icon icon="plus" size="16"></lucide-icon>
           </button>
         </h3>
         <div
           popover="auto"
           id="branch-popover"
-          style="
-            position: fixed;
-            inset: auto;
-            margin: 0;
-            position-anchor: --branch-popover-anchor;
-            top: anchor(bottom);
-            left: anchor(left);
-          "
-          class="text-gray-900 dark:text-gray-100"
+          class="[position:fixed] inset-auto m-0 [position-anchor:--branch-popover-anchor] [top:anchor(bottom)] [left:anchor(left)] open:max-md:left-4 open:max-md:w-auto open:max-md:max-w-[calc(100vw-32px)] open:max-md:max-h-[calc(100dvh-96px)] open:max-md:overflow-y-auto text-gray-900 dark:text-gray-100"
         >
           <form
             on-submit.prevent="createBranch()"
@@ -37,7 +28,7 @@
             <h3 class="text-sm font-semibold">Create branch</h3>
             <label class="block text-xs text-gray-600 dark:text-gray-300"
               >Branch name<input
-                class="flow-input mt-1 w-full px-3 py-2"
+                class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 focus:border-brand focus:outline-2 focus:outline-brand/20 focus:outline-offset-1 dark:border-[#46544a] dark:bg-[#111713] dark:text-gray-100 dark:placeholder:text-[#98a49a]"
                 placeholder="main"
                 required
                 on-input="setBranchName($event.target.value)"
@@ -52,7 +43,10 @@
               >
                 Cancel
               </button>
-              <button class="flow-action rounded-lg px-2 py-1 text-sm font-medium text-white" type="submit">
+              <button
+                class="rounded-lg bg-brand px-2 py-1 text-sm font-medium text-white transition-colors hover:bg-brand-hover"
+                type="submit"
+              >
                 Create
               </button>
             </div>
@@ -87,28 +81,19 @@
         <h3
           class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
         >
-          <i class="ph ph-tag"></i> Tags
+          <lucide-icon icon="tag" size="16"></lucide-icon> Tags
           <button
             popovertarget="tag-popover"
-            style="anchor-name: --tag-popover-anchor"
-            class="rounded p-1 text-brand hover:bg-gray-200/70 dark:text-green-300 dark:hover:bg-gray-800"
+            class="[anchor-name:--tag-popover-anchor] rounded p-1 text-brand hover:bg-gray-200/70 dark:text-green-300 dark:hover:bg-gray-800"
             aria-label="Create tag"
           >
-            +
+            <lucide-icon icon="plus" size="16"></lucide-icon>
           </button>
         </h3>
         <div
           popover="auto"
           id="tag-popover"
-          style="
-            position: fixed;
-            inset: auto;
-            margin: 0;
-            position-anchor: --tag-popover-anchor;
-            top: anchor(bottom);
-            left: anchor(left);
-          "
-          class="text-gray-900 dark:text-gray-100"
+          class="[position:fixed] inset-auto m-0 [position-anchor:--tag-popover-anchor] [top:anchor(bottom)] [left:anchor(left)] open:max-md:left-4 open:max-md:w-auto open:max-md:max-w-[calc(100vw-32px)] open:max-md:max-h-[calc(100dvh-96px)] open:max-md:overflow-y-auto text-gray-900 dark:text-gray-100"
         >
           <form
             on-submit.prevent="createTag()"
@@ -117,7 +102,7 @@
             <h3 class="text-sm font-semibold">Create tag</h3>
             <label class="block text-xs text-gray-600 dark:text-gray-300"
               >Tag name<input
-                class="flow-input mt-1 w-full px-3 py-2"
+                class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 focus:border-brand focus:outline-2 focus:outline-brand/20 focus:outline-offset-1 dark:border-[#46544a] dark:bg-[#111713] dark:text-gray-100 dark:placeholder:text-[#98a49a]"
                 placeholder="v1.0.0"
                 required
                 on-input="setTagName($event.target.value)"
@@ -132,7 +117,10 @@
               >
                 Cancel
               </button>
-              <button class="flow-action rounded-lg px-2 py-1 text-sm font-medium text-white" type="submit">
+              <button
+                class="rounded-lg bg-brand px-2 py-1 text-sm font-medium text-white transition-colors hover:bg-brand-hover"
+                type="submit"
+              >
                 Create
               </button>
             </div>
@@ -145,7 +133,7 @@
                 href="#"
                 class="flex items-center gap-2 rounded px-2 py-1.5 text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
                 on-click.prevent="selectTag(tag)"
-                ><i class="ph ph-tag text-xs opacity-50"></i>{{ tag }}</a
+                ><lucide-icon icon="tag" size="14" class="opacity-50"></lucide-icon>{{ tag }}</a
               >
             </li></template
           >

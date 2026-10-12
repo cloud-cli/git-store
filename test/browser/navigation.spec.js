@@ -4,8 +4,27 @@ let currentEntries;
 let currentBranches;
 let currentTags;
 let currentCommits;
+let currentRepositories;
+let bootstrapSession;
 let runtimeErrors;
 let imageBytes;
+let tailwindSource;
+let lucideComponentSource;
+const lucideModuleCache = new Map();
+
+test.beforeAll(async () => {
+  const [tailwindResponse, lucideResponse] = await Promise.all([
+    fetch("https://unpkg.com/@tailwindcss/browser@4"),
+    fetch("https://sodium.static.apphor.de/lucide-icon.html"),
+  ]);
+  if (!tailwindResponse.ok || !lucideResponse.ok) {
+    throw new Error(
+      `Failed to fetch browser UI assets (Tailwind ${tailwindResponse.status}, Lucide ${lucideResponse.status})`,
+    );
+  }
+  tailwindSource = await tailwindResponse.text();
+  lucideComponentSource = await lucideResponse.text();
+});
 
 test.beforeEach(async ({ page }) => {
   runtimeErrors = [];
@@ -35,6 +54,8 @@ test.beforeEach(async ({ page }) => {
   currentBranches = ["main"];
   currentTags = [];
   currentCommits = [{ hash: "abcdef123456", message: "Initial commit", author_name: "Browser Tester" }];
+  currentRepositories = [{ repo: "demo" }];
+  bootstrapSession = { checked: true, authenticated: true, canWrite: true, profile: { name: "Browser Tester" } };
   await page.addInitScript(() => {
     window.__documentNavigationCount = 0;
     window.addEventListener("beforeunload", () => {
@@ -50,24 +71,66 @@ test.beforeEach(async ({ page }) => {
     }),
   );
   await page.route("https://unpkg.com/@tailwindcss/browser@4", (route) =>
-    route.fulfill({ status: 200, contentType: "application/javascript", body: "" }),
+    route.fulfill({ status: 200, contentType: "application/javascript", body: tailwindSource }),
   );
+  await page.route("https://sodium.static.apphor.de/lucide-icon.html", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      headers: { "access-control-allow-origin": "*" },
+      body: lucideComponentSource,
+    }),
+  );
+  await page.route("https://unpkg.com/lucide@latest/dist/esm/**", async (route) => {
+    const url = route.request().url();
+    if (!lucideModuleCache.has(url)) {
+      const response = await fetch(url);
+      lucideModuleCache.set(url, {
+        status: response.status,
+        contentType: response.headers.get("content-type") || "application/javascript",
+        body: await response.text(),
+      });
+    }
+    const module = lucideModuleCache.get(url);
+    await route.fulfill({
+      status: module.status,
+      contentType: module.contentType,
+      headers: { "access-control-allow-origin": "*" },
+      body: module.body,
+    });
+  });
   await page.route("https://cdnjs.cloudflare.com/**", (route) =>
     route.fulfill({ status: 200, contentType: "text/css", body: "" }),
   );
+  await page.route("**/ui/**", async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname !== "/ui/" && pathname !== "/ui/index.html") {
+      return route.continue();
+    }
+    const response = await route.fetch();
+    const html = await response.text();
+    const sessionScript = `<script>window.__gitStoreSession=${JSON.stringify(bootstrapSession)};</script>`;
+    return route.fulfill({
+      response,
+      body: html.replace(/<script>window\.__gitStoreSession=[\s\S]*?;<\/script>/, sessionScript),
+    });
+  });
   await page.route("**/ui/session", (route) =>
     route.fulfill({ json: { authenticated: true, canWrite: true, profile: { name: "Browser Tester" } } }),
   );
   await page.route("**/ui/config", (route) => route.fulfill({ json: {} }));
   await page.route("**/api/v1/orgs", (route) => route.fulfill({ json: [{ slug: "example" }] }));
-  await page.route("**/api/v1/orgs/example/repos", (route) => route.fulfill({ json: { repos: [{ repo: "demo" }] } }));
-  await page.route("**/api/v1/orgs/example/repos/demo/**", (route) => {
+  await page.route("**/api/v1/orgs/example/repos", (route) => route.fulfill({ json: { repos: currentRepositories } }));
+  await page.route("**/api/v1/orgs/example/repos/**", (route) => {
     const url = new URL(route.request().url());
     if (url.pathname.endsWith("/tree")) {
       return route.fulfill({ json: currentEntries });
     }
     if (url.pathname.endsWith("/log")) {
-      return route.fulfill({ json: currentCommits });
+      const commits = url.searchParams.has("limit")
+        ? currentCommits.slice(0, Number(url.searchParams.get("limit")))
+        : currentCommits;
+      return route.fulfill({ json: commits });
     }
     if (url.pathname.endsWith("/branches") && route.request().method() === "POST") {
       currentBranches.push(JSON.parse(route.request().postData()).name);
@@ -120,11 +183,26 @@ test.afterEach(() => {
 
 test("uploads and branch, tag, and commit mutations update without document reload", async ({ page }) => {
   await page.goto("/ui/?org=example&repo=demo");
+  const sidebar = page.getByTestId("repository-sidebar");
   if (page.viewportSize().width < 768) {
     await page.getByRole("button", { name: "Toggle repositories" }).click();
+    await expect.poll(() => sidebar.evaluate((element) => element.classList.contains("translate-x-0"))).toBe(true);
   }
   const initialCount = await page.evaluate(() => window.__documentNavigationCount);
-  const sidebar = page.locator(".flow-repo-sidebar");
+
+  await expect(page.getByText("click here to upload", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("upload-dropzone")).toHaveCSS(
+    "min-height",
+    page.viewportSize().width < 768 ? "56px" : "120px",
+  );
+  await expect(page.getByText("Choose files", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("No file chosen", { exact: true })).toHaveCount(0);
+  const uploadInputIsBelowFileList = await page.evaluate(() => {
+    const list = document.querySelector('[data-testid="repository-file-list"]');
+    const input = document.querySelector("#repo-upload-input");
+    return Boolean(list && input && list.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+  expect(uploadInputIsBelowFileList).toBe(true);
 
   await page.locator("#repo-upload-input").setInputFiles({
     name: "uploaded.txt",
@@ -147,15 +225,20 @@ test("uploads and branch, tag, and commit mutations update without document relo
   await sidebar.locator("details").nth(2).locator("summary").click();
   await expect(page.getByRole("link", { name: "v1.0" })).toBeVisible();
 
+  if (page.viewportSize().width < 768) {
+    await page.getByRole("button", { name: "Toggle repositories" }).click();
+    await expect.poll(() => sidebar.evaluate((element) => element.classList.contains("translate-x-0"))).toBe(false);
+  }
   await page.getByRole("link", { name: /uploaded\.txt/ }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByRole("button", { name: "Close preview" }).click();
   await page.getByPlaceholder("Commit message").fill("Save uploaded file");
-  await page.getByRole("button", { name: "Commit" }).click();
-  await expect(page.getByText("Save uploaded file", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Commit", exact: true }).click();
+  await expect(page.getByTestId("latest-commit-header").getByText("Save uploaded file", { exact: true })).toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   expect(new URL(page.url()).searchParams.has("path")).toBe(false);
 
-  await page.getByRole("button", { name: "+ Add file" }).click();
+  await page.getByRole("button", { name: "Add file" }).click();
   await page.locator("#add-file-popover input").fill("src/created.md");
   await page.locator("#add-file-popover button[type=submit]").click();
   await expect(page.getByRole("link", { name: /created\.md/ })).toBeVisible();
@@ -165,14 +248,53 @@ test("uploads and branch, tag, and commit mutations update without document relo
 test("repository sidebar keeps branches and tags compact and collapsed by default", async ({ page }) => {
   await page.goto("/ui/?org=example&repo=demo");
 
-  const sidebar = page.locator(".flow-repo-sidebar");
+  const sidebar = page.getByTestId("repository-sidebar");
   const sections = sidebar.locator("details");
   await expect(sections).toHaveCount(3);
   await expect(sections.nth(0)).toHaveAttribute("open", "");
   await expect(sections.nth(1)).not.toHaveAttribute("open", "");
   await expect(sections.nth(2)).not.toHaveAttribute("open", "");
-  await expect(sidebar.locator(".flow-sidebar-heading")).toHaveCount(3);
-  await expect(page.locator(".flow-panel")).toHaveCount(0);
+  await expect(sidebar.getByTestId("sidebar-section-heading")).toHaveCount(3);
+  await expect(page.locator("repo-panel")).toHaveCount(0);
+});
+
+test("repository cards show the latest commit and the repository list scrolls", async ({ page }) => {
+  currentRepositories = Array.from({ length: 18 }, (_, index) => ({ repo: `project-${index + 1}` }));
+  currentCommits = [
+    { hash: "abcdef1234567890", message: "Repair the navigation\nMore details follow", author_name: "Private Author" },
+  ];
+
+  await page.goto("/ui/?org=example");
+
+  const repositoryList = page.getByTestId("organization-repository-list");
+  await expect(repositoryList.getByText("project-1", { exact: true })).toBeVisible();
+  await expect(repositoryList.getByText("Repair the navigation", { exact: true }).first()).toBeVisible();
+  await expect(repositoryList.getByText("More details follow", { exact: true })).toHaveCount(0);
+  await expect(repositoryList.getByText("Private Author", { exact: true })).toHaveCount(0);
+  await expect(repositoryList.locator("commit-hash")).toHaveCount(18);
+  await expect(repositoryList.getByRole("button", { name: "Copy commit hash" }).first()).toBeVisible();
+  await expect.poll(() => repositoryList.evaluate((list) => list.scrollHeight > list.clientHeight)).toBe(true);
+  await expect(repositoryList).toHaveCSS("overflow-y", "auto");
+});
+
+test("commit hashes copy the full hash and folder path segments navigate", async ({ page }) => {
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto("/ui/?org=example&repo=demo&dir=docs%2Fnested");
+
+  const latestCommit = page.getByTestId("latest-commit-header");
+  await expect(latestCommit.getByText("Browser Tester", { exact: true })).toHaveCount(0);
+  await latestCommit.getByRole("button", { name: "Copy commit hash" }).click();
+  await expect(latestCommit.getByRole("status")).toHaveText("Commit hash copied");
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("abcdef123456");
+
+  const folderPath = page.getByRole("navigation", { name: "Folder path" });
+  await expect(folderPath.getByRole("link", { name: "Root" })).toBeVisible();
+  await expect(folderPath.getByRole("link", { name: "docs" })).toBeVisible();
+  await expect(folderPath.getByRole("link", { name: "nested" })).toBeVisible();
+  await folderPath.getByRole("link", { name: "docs" }).click();
+  await expect(page).toHaveURL(/dir=docs(?:&|$)/);
+  await expect(folderPath.getByRole("link", { name: "nested" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Add file" })).toBeVisible();
 });
 
 test("header uses a generic primary-color home marker", async ({ page }) => {
@@ -181,8 +303,18 @@ test("header uses a generic primary-color home marker", async ({ page }) => {
   const homeLink = page.getByRole("link", { name: "Home" });
   await expect(page).toHaveTitle("Git Store");
   await expect(homeLink).toBeVisible();
-  await expect(homeLink.locator(".home-indicator")).toHaveCSS("background-color", "rgb(59, 113, 75)");
+  await expect(homeLink.getByTestId("home-indicator")).toHaveCSS("background-color", "rgb(59, 113, 75)");
   await expect(page.locator(".flow-logo-mark, .flow-logo-dot")).toHaveCount(0);
+});
+
+test("anonymous landing welcomes returning users", async ({ page }) => {
+  bootstrapSession = { checked: true, authenticated: false, profile: null, canWrite: false };
+  await page.route("**/ui/session", (route) => route.fulfill({ json: { authenticated: false } }));
+  await page.goto("/ui/");
+
+  await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
+  await expect(page.getByText("Sign in to access your organizations and repositories.")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Continue to Git Store" })).toBeVisible();
 });
 
 test("SPA navigation, previews, history, and read-only controls", async ({ page }) => {
@@ -213,19 +345,22 @@ test("organization and repository navigation replaces the displayed page", async
   await expect(page.getByText("notes.txt", { exact: true }).first()).toBeVisible();
 
   await page.getByRole("banner").getByRole("link", { name: "example" }).click();
-  await expect(page.getByText("Repository root", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Folder path" })).toHaveCount(0);
   await expect(page.locator("[data-repository-view]")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Repositories in example" })).toHaveCount(1);
   await expect(page.getByRole("link", { name: "demo" }).first()).toBeVisible();
 
-  await page.getByRole("link", { name: "demo" }).first().click();
-  await expect(page.getByText("Repository root", { exact: true })).toHaveCount(1);
+  await page.getByRole("main").getByRole("link", { name: "demo", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "Folder path" }).getByRole("link", { name: "Root" })).toHaveCount(
+    1,
+  );
   await expect(page.locator("[data-repository-view]")).toHaveCount(1);
   await expect(page.locator("#repo-upload-input")).toHaveCount(1);
   await expect(page.getByText("notes.txt", { exact: true })).toHaveCount(1);
 });
 
 test("read-only UI hides write controls", async ({ page }) => {
+  bootstrapSession = { checked: true, authenticated: true, canWrite: false, profile: { name: "Reader" } };
   await page.route("**/ui/session", (route) =>
     route.fulfill({ json: { authenticated: true, canWrite: false, profile: { name: "Reader" } } }),
   );

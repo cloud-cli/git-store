@@ -93,13 +93,19 @@ repository/file navigation across reloads. The UI uses refs, computed values, li
 hooks, and event bindings. Framework reference:
 https://li3.static.apphor.de/docs.html.
 The signed-out user card starts OIDC authorization-code + PKCE sign-in; signed-in users
-can open `${OIDC_ISSUER}/me`. Access tokens stay server-side in an opaque signed session.
+can open `${OIDC_ISSUER}/me`. The app keeps only a short-lived, validated identity and
+scope snapshot in an opaque signed session; access tokens are discarded after sign-in.
+Session snapshots are encrypted under `DATA_PATH` so sessions survive container restarts
+until their original token lifetime expires. Keep `OIDC_CLIENT_SECRET` stable across
+restarts and persist `DATA_PATH` to retain both repositories and browser sessions.
 The topbar presents an explicit Sign in button for guests; its light/dark control updates
 the root theme state using Tailwind v4's class-based variant.
 The repository plus button opens an anchored HTML popover. Empty repositories offer a file upload that creates the initial commit;
 files dropped into or selected for an existing repository remain unstaged and are marked
 with `*`. Branch and tag empty states provide matching create popovers.
-The topbar reads the current session profile from `/ui/session`; username claims are omitted from the profile UI.
+The server validates the session cookie before serving `/ui/` and embeds the session profile
+in that uncached page response, avoiding a signed-out loading flash. Username claims are
+omitted from the profile UI. `/ui/session` remains available to clients that need a session check.
 
 The service reads configuration only from process environment variables; it does not load
 `.env` files. Browser sign-in uses `/ui/auth/login` and requires the OIDC client callback URI
@@ -108,17 +114,17 @@ compatibility endpoint for deployments whose OIDC client still has that URI regi
 
 ## Configuration
 
-| Variable              | Default                          | Purpose                                                         |
-| --------------------- | -------------------------------- | --------------------------------------------------------------- |
-| `DATA_PATH`           | `/data` in the image             | Repository storage root                                         |
-| `PORT`                | `3000`                           | HTTP listen port                                                |
-| `OIDC_ISSUER`         | unset                            | OIDC discovery issuer                                           |
-| `OIDC_CLIENT_ID`      | unset                            | OIDC client identifier                                          |
-| `OIDC_CLIENT_SECRET`  | unset                            | OIDC introspection credential                                   |
-| `OIDC_REDIRECT_URI`   | derived                          | Registered `/ui/auth/callback` URL (recommended)                |
-| `PUBLIC_URL`          | derived                          | Public origin used to derive the callback URL                   |
-| `OIDC_JWKS_URI`       | issuer metadata                  | Same-issuer JWKS override for incorrect discovery metadata      |
-| `OIDC_BROWSER_SCOPES` | `repo:read repo:write` in Docker | Scopes granted to validated browser sessions; can be overridden |
+| Variable              | Default                          | Purpose                                                           |
+| --------------------- | -------------------------------- | ----------------------------------------------------------------- |
+| `DATA_PATH`           | `/data` in the image             | Repository storage root                                           |
+| `PORT`                | `3000`                           | HTTP listen port                                                  |
+| `OIDC_ISSUER`         | unset                            | OIDC discovery issuer                                             |
+| `OIDC_CLIENT_ID`      | unset                            | OIDC client identifier                                            |
+| `OIDC_CLIENT_SECRET`  | unset                            | OIDC client credential and browser-session signing/encryption key |
+| `OIDC_REDIRECT_URI`   | derived                          | Registered `/ui/auth/callback` URL (recommended)                  |
+| `PUBLIC_URL`          | derived                          | Public origin used to derive the callback URL                     |
+| `OIDC_JWKS_URI`       | issuer metadata                  | Same-issuer JWKS override for incorrect discovery metadata        |
+| `OIDC_BROWSER_SCOPES` | `repo:read repo:write` in Docker | Scopes granted to validated browser sessions; can be overridden   |
 
 When OIDC variables are absent, repository requests fail closed with `401`.
 The Docker image defaults browser sessions to `repo:read repo:write` so signed-in users

@@ -13,7 +13,11 @@
               class="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900"
               placeholder="my-first-repository"
               on-input="setRepositoryName($event.target.value)"
-            /><button class="flow-action rounded-lg px-4 py-2 font-medium text-white">Create</button>
+            /><button
+              class="rounded-lg bg-brand px-4 py-2 font-medium text-white transition-colors hover:bg-brand-hover"
+            >
+              Create
+            </button>
           </form>
         </div>
       </div>
@@ -27,7 +31,7 @@
             <div
               class="flex h-8 w-8 items-center justify-center rounded-full bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
             >
-              <i class="ph ph-git-commit"></i>
+              <lucide-icon icon="git-commit-horizontal" size="16"></lucide-icon>
             </div>
             <div class="flex-1">
               <div class="font-medium">{{ commits[0].message }}</div>
@@ -52,7 +56,12 @@
                 type="file"
                 multiple
               />
-              <button type="submit" class="flow-action rounded-lg px-4 py-2 font-medium text-white">Upload</button>
+              <button
+                type="submit"
+                class="rounded-lg bg-brand px-4 py-2 font-medium text-white transition-colors hover:bg-brand-hover"
+              >
+                Upload
+              </button>
             </form>
           </div>
         </div>
@@ -63,7 +72,9 @@
             class="min-w-0 flex-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 dark:border-amber-800 dark:bg-amber-950/30"
             placeholder="Commit message"
             on-input="setCommitMessage($event.target.value)"
-          /><button class="flow-action rounded-lg px-3 py-2 font-medium text-white">Commit</button>
+          /><button class="rounded-lg bg-brand px-3 py-2 font-medium text-white transition-colors hover:bg-brand-hover">
+            Commit
+          </button>
         </form></template
       >
       <template if="commits.length > 0"
@@ -86,7 +97,7 @@
               on-change="upload($event.target.files)"
             />
             <button type="button" class="rounded px-2 py-1" aria-label="Upload files" on-click="openFilePicker()">
-              <i class="ph ph-upload-simple"></i>
+              <lucide-icon icon="upload" size="16"></lucide-icon>
             </button>
           </div>
           <ul class="divide-y divide-gray-100 dark:divide-gray-800">
@@ -96,10 +107,13 @@
                 on-click="selectEntry(entry)"
               >
                 <div class="flex items-center gap-3">
-                  <i
-                    class="ph w-4 text-center text-base"
-                    bind-class="{ 'ph-folder': entry.type === 'directory', 'ph-file': entry.type === 'file', 'text-brand': entry.type === 'directory', 'text-gray-400': entry.type === 'file' }"
-                  ></i
+                  <lucide-icon
+                    attr-icon="entry.type === 'directory' ? 'folder' : 'file'"
+                    size="16"
+                    class="w-4"
+                    class-text-brand="entry.type === 'directory'"
+                    class-text-gray-400="entry.type === 'file'"
+                  ></lucide-icon
                   ><span
                     >{{ entry.name }}<sup class="ml-1 text-amber-500">{{ entry.uncommitted ? '*' : '' }}</sup></span
                   >
@@ -111,8 +125,8 @@
             >
           </ul>
           <div
+            bind-class="{ 'bg-green-50': dragging, 'dark:bg-green-950': dragging }"
             class="mt-auto border-t border-dashed border-gray-300 p-4 text-center text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400"
-            class-dragging="dragging"
           >
             Drop files here to upload them unstaged
           </div>

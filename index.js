@@ -11,7 +11,6 @@ const getGit = (repoPath) => simpleGit.simpleGit(repoPath);
 
 const app = express();
 app.use(express.json({ limit: "20mb" }));
-app.use("/ui", express.static(path.join(__dirname, "public")));
 app.get("/", (req, res) => {
   const query = req.url.slice(1);
   return res.redirect(302, `/ui/${query}`);
@@ -23,6 +22,7 @@ let oidcClient;
 let oidcReady = false;
 const browserSessions = new Map();
 const sessionCookieName = "git_store_session";
+const browserSessionStorePath = process.env.DATA_PATH ? path.join(process.env.DATA_PATH, ".browser-sessions") : null;
 
 // Tests may install an in-process token verifier on app.locals before serving.
 // This is not an HTTP feature: production requests always use OIDC validation.
@@ -74,6 +74,76 @@ function signSessionId(id) {
   return crypto.createHmac("sha256", process.env.OIDC_CLIENT_SECRET).update(id).digest("base64url");
 }
 
+function browserSessionStoreKey() {
+  const secret = process.env.OIDC_CLIENT_SECRET;
+  return secret ? crypto.createHash("sha256").update("git-store-browser-sessions\0").update(secret).digest() : null;
+}
+
+function isValidBrowserSession(session) {
+  return (
+    session &&
+    typeof session.sub === "string" &&
+    typeof session.scope === "string" &&
+    Number.isFinite(session.expiresAt) &&
+    session.expiresAt > Date.now() &&
+    session.profile &&
+    typeof session.profile === "object"
+  );
+}
+
+function loadBrowserSessions() {
+  browserSessions.clear();
+  const key = browserSessionStoreKey();
+  if (!browserSessionStorePath || !key) {
+    return;
+  }
+
+  try {
+    const stored = JSON.parse(fs.readFileSync(browserSessionStorePath, "utf8"));
+    if (stored.version !== 1 || typeof stored.iv !== "string" || typeof stored.tag !== "string") {
+      return;
+    }
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(stored.iv, "base64url"));
+    decipher.setAuthTag(Buffer.from(stored.tag, "base64url"));
+    const plaintext = Buffer.concat([
+      decipher.update(Buffer.from(stored.data, "base64url")),
+      decipher.final(),
+    ]).toString("utf8");
+    const sessions = JSON.parse(plaintext);
+    if (!Array.isArray(sessions)) {
+      return;
+    }
+    for (const [id, session] of sessions) {
+      if (typeof id === "string" && isValidBrowserSession(session)) {
+        browserSessions.set(id, session);
+      }
+    }
+  } catch {
+    // A missing or invalid store fails closed; a successful OIDC callback will replace it.
+  }
+}
+
+function persistBrowserSessions() {
+  const key = browserSessionStoreKey();
+  if (!browserSessionStorePath || !key) {
+    return;
+  }
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const sessions = [...browserSessions.entries()].filter(([, session]) => isValidBrowserSession(session));
+  const encrypted = Buffer.concat([cipher.update(JSON.stringify(sessions), "utf8"), cipher.final()]);
+  const stored = JSON.stringify({
+    version: 1,
+    iv: iv.toString("base64url"),
+    tag: cipher.getAuthTag().toString("base64url"),
+    data: encrypted.toString("base64url"),
+  });
+  fs.mkdirSync(path.dirname(browserSessionStorePath), { recursive: true, mode: 0o700 });
+  const temporaryPath = `${browserSessionStorePath}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`;
+  fs.writeFileSync(temporaryPath, stored, { mode: 0o600 });
+  fs.renameSync(temporaryPath, browserSessionStorePath);
+}
+
 function getBrowserSession(req) {
   if (!process.env.OIDC_CLIENT_SECRET) {
     return null;
@@ -101,6 +171,34 @@ function getBrowserSession(req) {
   }
   return { id, ...session };
 }
+
+loadBrowserSessions();
+app.locals.reloadBrowserSessions = loadBrowserSessions;
+
+app.get(["/ui/", "/ui/index.html"], (req, res, next) => {
+  let html;
+  try {
+    html = fs.readFileSync(path.join(__dirname, "public", "index.html"), "utf8");
+  } catch (error) {
+    return next(error);
+  }
+  const session = getBrowserSession(req);
+  const bootstrap = session
+    ? {
+        checked: true,
+        authenticated: true,
+        profile: session.profile,
+        canWrite: session.scope.split(/\s+/).includes("repo:write"),
+      }
+    : { checked: true, authenticated: false, profile: null, canWrite: false };
+  const serialized = JSON.stringify(bootstrap).replace(/[<>&\u2028\u2029]/g, (character) => {
+    return `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`;
+  });
+  const bootstrapScript = `<script>window.__gitStoreSession=${serialized};</script>`;
+  res.set("Cache-Control", "no-store");
+  return res.type("html").send(html.replace("<!-- git-store-session-bootstrap -->", bootstrapScript));
+});
+app.use("/ui", express.static(path.join(__dirname, "public")));
 
 async function introspectAccessToken(token) {
   if (app.locals.verifyToken) {
@@ -208,8 +306,8 @@ async function requireAuthentication(req, res, next) {
     }
   }
 
-  // Browser sessions are represented by an opaque, signed local cookie. Tokens stay
-  // server-side and the validated OIDC subject/scopes are held for the short token lifetime.
+  // Browser sessions use an opaque signed cookie backed by a short-lived snapshot of the
+  // validated OIDC subject and scopes. Access tokens are never retained after sign-in.
   const session = getBrowserSession(req);
   if (session && isSameOriginRequest(req)) {
     req.user = {
@@ -578,11 +676,20 @@ async function getRepoLog(req, res) {
     return res.status(404).json({ error: "Repository not found" });
   }
 
+  const limit = req.query.limit;
+  let logOptions;
+  if (limit !== undefined) {
+    if (typeof limit !== "string" || !/^[1-9]\d*$/.test(limit) || Number(limit) > 1000) {
+      return res.status(400).json({ error: "Limit must be an integer between 1 and 1000." });
+    }
+    logOptions = { maxCount: Number(limit) };
+  }
+
   // Check that the repo belongs to the authenticated subject
   // (the path already ensures this since we use the hashed sub)
 
   try {
-    const log = await getGit(repoPath).log();
+    const log = await getGit(repoPath).log(logOptions);
     return res.json(log.all);
   } catch (error) {
     if (error.message.includes("does not have any commits yet")) {
@@ -1022,6 +1129,12 @@ const handleOidcCallback = async (req, res) => {
       scope: browserScopes.join(" "),
       expiresAt: Date.now() + maxAge,
     });
+    try {
+      persistBrowserSessions();
+    } catch (error) {
+      browserSessions.delete(id);
+      throw error;
+    }
     callbackStage = "browser-session cookie creation";
     res.cookie(sessionCookieName, `${id}.${signSessionId(id)}`, {
       ...cookieOptions(redirectUri, maxAge),
@@ -1059,6 +1172,13 @@ app.post("/ui/auth/logout", (req, res) => {
   const session = getBrowserSession(req);
   if (session) {
     browserSessions.delete(session.id);
+    try {
+      persistBrowserSessions();
+    } catch {
+      const { id, ...storedSession } = session;
+      browserSessions.set(id, storedSession);
+      return res.status(500).send("Unable to end the session. Please try again.");
+    }
   }
   let redirectUri;
   try {
@@ -1479,12 +1599,15 @@ function makeApiSpec() {
         ),
       },
       "/api/v1/repos/{repo}/log": {
-        get: operation(
-          "Fetch the repository log",
-          { 200: { description: "Commit array" }, 404: notFound },
-          null,
-          pathParametersRepo,
-        ),
+        get: operation("Fetch the repository log", { 200: { description: "Commit array" }, 404: notFound }, null, [
+          ...pathParametersRepo,
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            schema: { type: "integer", minimum: 1, maximum: 1000 },
+          },
+        ]),
       },
       "/api/v1/repos/{repo}/stage": {
         post: operation(

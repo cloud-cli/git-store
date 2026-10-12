@@ -128,7 +128,7 @@ async function run() {
   assert.ok(ui.includes('if="profile && repoLabel && !settings"'), "selected repository appears in the shared topbar");
   assert.ok(ui.includes('bind-repositories="orgRepositories"'), "landing pages receive root-owned repository state");
   assert.ok(ui.includes('on-createrepo="createFirstRepository($event.detail)"'), "landing actions update root state");
-  assert.ok(!ui.includes("{{ repo.repo }}</h1>"), "repository name is not repeated below the breadcrumb");
+  assert.ok(!/{{\s*repo\.repo\s*}}\s*<\/h1>/.test(ui), "repository name is not repeated below the breadcrumb");
   assert.ok(ui.includes("Welcome to your Git server"), "empty repository welcome uses the Git server wording");
   assert.ok(organizationLanding.includes("Your organizations"), "organization home is a dedicated Li³ component");
   assert.ok(
@@ -138,7 +138,23 @@ async function run() {
   assert.ok(organizationLanding.includes('defineEvent("createrepo")'), "landing emits repository creation to the root");
   assert.ok(organizationSettings.includes('href="/?settings=organizations"'), "settings is a dedicated Li³ component");
   assert.ok(organizationSettings.includes('defineEvent("createorg")'), "settings emits org creation to the root");
-  assert.ok(signInLanding.includes("Sign in to get started"), "anonymous landing is a dedicated Li³ component");
+  assert.ok(signInLanding.includes("Welcome back"), "anonymous landing welcomes returning users");
+  const publicMarkup = [ui, organizationLanding, organizationSettings, signInLanding];
+  for (const componentName of ["file-preview", "repo-sidebar", "repo-panel", "repo-viewer"]) {
+    publicMarkup.push(fs.readFileSync(path.join(__dirname, `../public/components/${componentName}.html`), "utf8"));
+  }
+  assert.ok(
+    publicMarkup.every((markup) => !/\sstyle=/.test(markup)),
+    "public UI has no inline custom styles",
+  );
+  assert.ok(
+    publicMarkup.every((markup) => !/<i\b/.test(markup)),
+    "public UI uses component-based icons",
+  );
+  assert.ok(
+    publicMarkup.every((markup) => !/\bflow-[a-z]/.test(markup)),
+    "public UI uses Tailwind utilities over custom classes",
+  );
   assert.ok(ui.includes("Your account does not have repository write access (repo:write)."));
   assert.ok(ui.includes("session.canWrite === true"), "write capability comes from the browser-session response");
   assert.ok(ui.includes('result.error || "Upload failed."'), "upload errors preserve backend diagnostics");
@@ -635,6 +651,26 @@ async function run() {
     assert.strictEqual(commit.status, 200);
     const log = await request(port, "GET", "/api/v1/repos/shared-repo/log", undefined, "token-a");
     assert.strictEqual(JSON.parse(log.body).length, 1);
+    fs.writeFileSync(path.join(repoA, "history-check.txt"), "second commit\n");
+    await git(["-C", repoA, "-c", "user.name=Test", "-c", "user.email=test@example.test", "add", "history-check.txt"]);
+    await git([
+      "-C",
+      repoA,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.test",
+      "commit",
+      "-m",
+      "second commit",
+    ]);
+    const limitedLog = await request(port, "GET", "/api/v1/repos/shared-repo/log?limit=1", undefined, "token-a");
+    assert.strictEqual(JSON.parse(limitedLog.body).length, 1, "the log endpoint honors its commit limit");
+    assert.strictEqual(JSON.parse(limitedLog.body)[0].message, "second commit");
+    const completeLog = await request(port, "GET", "/api/v1/repos/shared-repo/log", undefined, "token-a");
+    assert.strictEqual(JSON.parse(completeLog.body).length, 2, "omitting the limit preserves the full log");
+    const invalidLogLimit = await request(port, "GET", "/api/v1/repos/shared-repo/log?limit=0", undefined, "token-a");
+    assert.strictEqual(invalidLogLimit.status, 400, "invalid log limits are rejected");
     const history = await request(
       port,
       "GET",
@@ -866,6 +902,12 @@ async function run() {
     }
     assert.deepStrictEqual(Object.keys(spec.paths).sort(), Object.keys(expectedMethods).sort());
     assert.ok(
+      spec.paths["/api/v1/orgs/{org}/repos/{repo}/log"].get.parameters.some(
+        (parameter) => parameter.name === "limit" && parameter.in === "query",
+      ),
+      "the repository log limit is documented in OpenAPI",
+    );
+    assert.ok(
       Object.keys(spec.paths).every(
         (specPath) => specPath === "/api" || specPath.startsWith("/api/v1/") || specPath.startsWith("/git/"),
       ),
@@ -966,6 +1008,24 @@ async function run() {
       !sessionCookie.includes("browser-session-token"),
       "the access token must not be stored in the browser cookie",
     );
+    const sessionStorePath = path.join(dataPath, ".browser-sessions");
+    const encryptedSessionStore = fs.readFileSync(sessionStorePath, "utf8");
+    assert.ok(!encryptedSessionStore.includes("browser-subject"), "persisted session identities are encrypted at rest");
+    assert.ok(!encryptedSessionStore.includes("browser-session-token"), "access tokens are never persisted");
+    app.locals.reloadBrowserSessions();
+    const restoredPage = await request(port, "GET", "/ui/?org=team-one&repo=shared-repo", undefined, undefined, {
+      Cookie: sessionCookie,
+    });
+    assert.strictEqual(restoredPage.status, 200);
+    assert.strictEqual(restoredPage.headers["cache-control"], "no-store");
+    const sessionBootstrap = restoredPage.body.match(/<script>window\.__gitStoreSession=([\s\S]*?);<\/script>/);
+    assert.ok(sessionBootstrap, "the page embeds the server-validated session before rendering");
+    assert.deepStrictEqual(JSON.parse(sessionBootstrap[1]), {
+      checked: true,
+      authenticated: true,
+      profile: { sub: "browser-subject", id: "browser-subject", name: "Signed In" },
+      canWrite: true,
+    });
     const cancelledLogin = await request(port, "GET", "/ui/auth/login");
     const cancelledAuthorization = new URL(cancelledLogin.headers.location);
     const cancelledCookies = cancelledLogin.headers["set-cookie"].map((cookie) => cookie.split(";")[0]).join("; ");
@@ -1214,6 +1274,7 @@ async function run() {
     assert.strictEqual((uiResponse.body.match(/<template app>/g) || []).length, 1);
     assert.strictEqual((uiResponse.body.match(/<script setup>/g) || []).length, 1);
     for (const componentPath of [
+      "/ui/components/commit-hash.html",
       "/ui/components/organization-landing.html",
       "/ui/components/organization-settings.html",
       "/ui/components/sign-in-landing.html",
@@ -1226,10 +1287,10 @@ async function run() {
     assert.strictEqual(welcomeResponse.status, 200);
     assert.ok(welcomeResponse.body.includes("Build your workspace"));
     assert.strictEqual((await request(port, "GET", "/welcome.svg")).status, 404);
-    assert.ok(uiResponse.body.includes("{{ repo.repo }}"));
+    assert.ok(/{{\s*repo\.repo\s*}}/.test(uiResponse.body));
     assert.ok(uiResponse.body.includes("repo=${encodeURIComponent(item.repo)}"));
     assert.ok(!uiResponse.body.includes("{{ repo.owner }}"));
-    assert.ok(uiResponse.body.includes("fixed inset-0 z-30 bg-black/40 md:hidden"));
+    assert.ok(uiResponse.body.includes("fixed inset-x-0 bottom-0 top-[72px] z-30 bg-black/40 md:hidden"));
     assert.ok(uiResponse.body.includes('on-click="closeMenu()"'));
     assert.ok(uiResponse.body.includes('popover="auto"'));
     assert.ok(uiResponse.body.includes('popovertargetaction="hide"'));
@@ -1245,7 +1306,7 @@ async function run() {
     assert.ok(uiResponse.body.includes("organization-settings"));
     assert.ok(uiResponse.body.includes("sign-in-landing"));
     assert.ok(uiResponse.body.includes("Welcome to your Git server"));
-    assert.ok(!uiResponse.body.includes("{{ repo.repo }}</h1>"));
+    assert.ok(!/{{\s*repo\.repo\s*}}\s*<\/h1>/.test(uiResponse.body));
     assert.ok(uiResponse.body.includes("await refreshOrganizations()"));
     assert.ok(uiResponse.body.includes('if="profile && org && !settings"'));
     assert.strictEqual((uiResponse.body.match(/fetch\("\/ui\/session"/g) || []).length, 1);

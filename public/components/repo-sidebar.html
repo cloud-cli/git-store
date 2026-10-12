@@ -8,11 +8,10 @@
       <h2 class="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">Repositories</h2>
       <button
         popovertarget="create-repo-popover"
-        style="anchor-name: --create-repository-anchor"
-        class="text-gray-400"
+        class="[anchor-name:--create-repository-anchor] rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-brand dark:hover:bg-gray-800"
         aria-label="Create repository"
       >
-        <i class="ph ph-plus"></i>
+        <lucide-icon icon="plus" size="16"></lucide-icon>
       </button>
     </div>
     <div class="flex-1 space-y-1 overflow-y-auto p-2">
@@ -25,9 +24,9 @@
         ><a
           href="#"
           on-click.prevent="$$emit('select', item)"
-          class="flex items-center gap-2 rounded-md px-3 py-2 text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+          class="flex items-center gap-2 rounded-md px-3 py-2 text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800 [&.selected]:bg-green-50 [&.selected]:text-brand dark:[&.selected]:bg-green-950 dark:[&.selected]:text-green-300"
           class-selected="selected && selected.repo === item.repo"
-          ><i class="ph ph-book-bookmark text-base text-gray-400"></i>{{ item.repo }}</a
+          ><lucide-icon icon="bookmark" size="16" class="text-gray-400"></lucide-icon>{{ item.repo }}</a
         ></template
       >
     </div>
@@ -36,15 +35,7 @@
   <div
     popover="auto"
     id="create-repo-popover"
-    style="
-      position: fixed;
-      inset: auto;
-      margin: 0;
-      position-anchor: --create-repository-anchor;
-      top: anchor(bottom);
-      left: anchor(left);
-    "
-    class="text-gray-900 dark:text-gray-100"
+    class="[position:fixed] inset-auto m-0 [position-anchor:--create-repository-anchor] [top:anchor(bottom)] [left:anchor(left)] open:max-md:left-4 open:max-md:w-auto open:max-md:max-w-[calc(100vw-32px)] open:max-md:max-h-[calc(100dvh-96px)] open:max-md:overflow-y-auto text-gray-900 dark:text-gray-100"
   >
     <form
       on-submit.prevent="submitCreate()"
@@ -53,7 +44,7 @@
       <h2 class="text-lg font-semibold">Create repository</h2>
       <p class="mt-1 text-sm text-gray-500 dark:text-gray-300">Choose a name for your first repository.</p>
       <input
-        class="flow-input mt-4 w-full px-3 py-2"
+        class="mt-4 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 focus:border-brand focus:outline-2 focus:outline-brand/20 focus:outline-offset-1 dark:border-[#46544a] dark:bg-[#111713] dark:text-gray-100 dark:placeholder:text-[#98a49a]"
         placeholder="repository-name"
         on-input="setRepoName($event.target.value)"
         required
@@ -67,7 +58,12 @@
         >
           Cancel
         </button>
-        <button class="flow-action rounded-lg px-3 py-2 font-medium text-white" type="submit">Create</button>
+        <button
+          class="rounded-lg bg-brand px-3 py-2 font-medium text-white transition-colors hover:bg-brand-hover"
+          type="submit"
+        >
+          Create
+        </button>
       </div>
     </form>
   </div>
