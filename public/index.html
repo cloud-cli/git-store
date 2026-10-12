@@ -139,29 +139,20 @@
                   ><span>Repositories</span>
                 </summary>
                 <nav
-                  data-testid="organization-repository-list"
-                  class="flex max-h-[min(50dvh,28rem)] flex-col gap-1 overflow-y-auto px-1 pb-2 pt-1 [scrollbar-gutter:stable]"
+                  data-testid="repository-sidebar-list"
+                  class="flex max-h-[min(50dvh,28rem)] flex-col gap-0.5 overflow-y-auto px-1 pb-2 pt-1 [scrollbar-gutter:stable]"
                 >
                   <template for="repo of orgRepositories"
-                    ><div
-                      class="flex min-h-14 items-center gap-2 rounded-md border border-transparent px-2 py-2 transition-colors hover:bg-white/55 dark:hover:bg-white/10 [&.selected]:border-[#cdded0] [&.selected]:bg-white dark:[&.selected]:border-[#3d5844] dark:[&.selected]:bg-[#1a231d]"
+                    ><a
+                      attr-href="repositoryNavHref(repo)"
+                      class="flex min-h-8 items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-[13px] text-[#525e56] transition-colors hover:bg-white/55 dark:text-[#c1cbc3] dark:hover:bg-white/10 [&.selected]:border-[#cdded0] [&.selected]:bg-white [&.selected]:font-semibold [&.selected]:text-brand dark:[&.selected]:border-[#3d5844] dark:[&.selected]:bg-[#1a231d] dark:[&.selected]:text-[#a4d1ae]"
                       class-selected="isSelected(repo)"
+                      on-click="closeMenu()"
                     >
-                      <a
-                        attr-href="repositoryNavHref(repo)"
-                        class="flex min-w-0 flex-1 items-center gap-2 text-[#525e56] dark:text-[#c1cbc3] [&.selected]:font-semibold [&.selected]:text-brand dark:[&.selected]:text-[#a4d1ae]"
-                        on-click="closeMenu()"
-                      >
-                        <lucide-icon icon="bookmark" size="16" class="shrink-0 text-gray-400"></lucide-icon>
-                        <span class="min-w-0 flex-1">
-                          <span class="block truncate text-[13px] font-bold">{{ repo.repo }}</span>
-                          <span class="block truncate text-xs text-gray-500 dark:text-gray-400"
-                            >{{ repo.latestCommitMessage }}</span
-                          >
-                        </span>
-                      </a>
-                      <commit-hash bind-hash="repo.latestCommitHash"></commit-hash></div
-                  ></template>
+                      <lucide-icon icon="bookmark" size="16" class="shrink-0 text-gray-400"></lucide-icon>
+                      <span class="truncate">{{ repo.repo }}</span></a
+                    ></template
+                  >
                 </nav>
               </details>
               <template if="canWrite"
@@ -476,13 +467,20 @@
                       <commit-hash bind-hash="commits[0].hash"></commit-hash></div
                   ></template>
                   <div
-                    class="mb-4 flex min-h-10 shrink-0 items-center justify-between gap-3 text-xs font-medium text-gray-600 dark:text-gray-300"
+                    data-testid="folder-path-toolbar"
+                    class="mb-4 flex min-h-11 shrink-0 items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-600 shadow-[0_1px_2px_rgba(28,32,30,0.06)] dark:border-[#344039] dark:bg-[#171e19] dark:text-gray-300 sm:px-4"
                   >
                     <nav
                       aria-label="Folder path"
-                      class="flex min-w-0 items-center gap-1 overflow-x-auto whitespace-nowrap"
+                      class="flex min-w-0 items-center gap-1.5 overflow-x-auto whitespace-nowrap"
                     >
-                      <a attr-href="rootHref" class="hover:text-brand dark:hover:text-green-300">Root</a>
+                      <a
+                        attr-href="rootHref"
+                        aria-label="Root"
+                        title="Root directory"
+                        class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-brand dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-green-300"
+                        ><lucide-icon icon="house" size="15"></lucide-icon><span class="sr-only">Root</span></a
+                      >
                       <template for="segment of directorySegments"
                         ><span aria-hidden="true" class="text-gray-400">/</span>
                         <a

@@ -273,8 +273,17 @@ test("repository cards show the latest commit and the repository list scrolls", 
   await expect(repositoryList.getByText("Private Author", { exact: true })).toHaveCount(0);
   await expect(repositoryList.locator("commit-hash")).toHaveCount(18);
   await expect(repositoryList.getByRole("button", { name: "Copy commit hash" }).first()).toBeVisible();
-  await expect.poll(() => repositoryList.evaluate((list) => list.scrollHeight > list.clientHeight)).toBe(true);
-  await expect(repositoryList).toHaveCSS("overflow-y", "auto");
+  if (page.viewportSize().width >= 768) {
+    await expect.poll(() => repositoryList.evaluate((list) => list.scrollHeight > list.clientHeight)).toBe(true);
+    await expect(repositoryList).toHaveCSS("overflow-y", "auto");
+  } else {
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollHeight > innerHeight)).toBe(true);
+  }
+
+  const sidebarList = page.getByTestId("repository-sidebar-list");
+  await expect(sidebarList.getByRole("link", { name: "project-1", exact: true })).toBeVisible();
+  await expect(sidebarList.locator("commit-hash")).toHaveCount(0);
+  await expect(sidebarList.getByText("Repair the navigation", { exact: true })).toHaveCount(0);
 });
 
 test("commit hashes copy the full hash and folder path segments navigate", async ({ page }) => {
@@ -288,13 +297,16 @@ test("commit hashes copy the full hash and folder path segments navigate", async
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("abcdef123456");
 
   const folderPath = page.getByRole("navigation", { name: "Folder path" });
-  await expect(folderPath.getByRole("link", { name: "Root" })).toBeVisible();
+  await expect(folderPath.getByRole("link", { name: "Root" }).locator("lucide-icon")).toHaveAttribute("icon", "house");
   await expect(folderPath.getByRole("link", { name: "docs" })).toBeVisible();
   await expect(folderPath.getByRole("link", { name: "nested" })).toBeVisible();
+  await expect(page.getByTestId("folder-path-toolbar")).toHaveCSS("background-color", "rgb(255, 255, 255)");
   await folderPath.getByRole("link", { name: "docs" }).click();
   await expect(page).toHaveURL(/dir=docs(?:&|$)/);
   await expect(folderPath.getByRole("link", { name: "nested" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Add file" })).toBeVisible();
+  await folderPath.getByRole("link", { name: "Root" }).click();
+  await expect(page).not.toHaveURL(/dir=/);
 });
 
 test("header uses a generic primary-color home marker", async ({ page }) => {
@@ -350,7 +362,7 @@ test("organization and repository navigation replaces the displayed page", async
   await expect(page.getByRole("heading", { name: "Repositories in example" })).toHaveCount(1);
   await expect(page.getByRole("link", { name: "demo" }).first()).toBeVisible();
 
-  await page.getByRole("main").getByRole("link", { name: "demo", exact: true }).click();
+  await page.getByTestId("organization-repository-list").getByRole("link", { name: /^demo/ }).click();
   await expect(page.getByRole("navigation", { name: "Folder path" }).getByRole("link", { name: "Root" })).toHaveCount(
     1,
   );
