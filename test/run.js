@@ -15,6 +15,15 @@ process.env.OIDC_CLIENT_SECRET = "test-client-secret";
 
 const app = require("../index");
 require("../organizations").create("introspected-subject", "introspected-org");
+const auditEvents = [];
+app.locals.auditStore = {
+  async append(event) {
+    auditEvents.push({ id: `event-${auditEvents.length + 1}`, occurredAt: new Date().toISOString(), ...event });
+  },
+  async list(org, limit, offset) {
+    return auditEvents.filter((event) => event.org === org).slice(offset, offset + limit);
+  },
+};
 const readWriteScopes = ["repo:read", "repo:write"];
 const tokenSubjects = new Map([
   [
@@ -209,6 +218,19 @@ async function run() {
     assert.deepStrictEqual(JSON.parse((await request(port, "GET", "/api/v1/orgs", undefined, "token-b")).body), {
       orgs: [{ slug: "team-two" }],
     });
+    const ownEvents = await request(port, "GET", "/api/v1/orgs/team-one/events", undefined, "token-a");
+    assert.strictEqual(ownEvents.status, 200, "organization owners can read their event stream");
+    assert.strictEqual(ownEvents.headers["cache-control"], "no-store", "audit events are not cached by browsers");
+    assert.strictEqual(
+      (await request(port, "GET", "/api/v1/orgs/team-one/events?limit=101", undefined, "token-a")).status,
+      400,
+      "audit event page size is bounded",
+    );
+    assert.strictEqual(
+      (await request(port, "GET", "/api/v1/orgs/team-one/events", undefined, "token-b")).status,
+      404,
+      "users cannot read another organization's event stream",
+    );
     const organizationMetadata = fs.readFileSync(path.join(dataPath, "orgs", "team-one", ".organization.json"), "utf8");
     assert.ok(!organizationMetadata.includes("oidc-subject-a"), "organization metadata must not persist raw subjects");
     assert.match(JSON.parse(organizationMetadata).ownerHash, /^[a-f0-9]{64}$/);
@@ -319,6 +341,15 @@ async function run() {
       "origin",
       "HEAD:refs/heads/from-org-http",
     ]);
+    assert.ok(
+      auditEvents.some(
+        (event) =>
+          event.org === "team-one" &&
+          event.event === "git.branch.created" &&
+          event.object.endsWith("@refs/heads/from-org-http"),
+      ),
+      "Git pushes create per-ref audit entries",
+    );
     assert.strictEqual(
       (await git(["--git-dir", path.join(orgRepoPath, ".git"), "show", "from-org-http:pushed.txt"])).stdout,
       "organization push\n",
@@ -399,7 +430,22 @@ async function run() {
       "push",
       "origin",
       "HEAD:refs/heads/from-http",
+      "HEAD:refs/tags/push-tag",
     ]);
+    assert.ok(
+      auditEvents.some(
+        (event) => event.event === "git.branch.created" && event.object.endsWith("@refs/heads/from-http"),
+      ),
+      "push events include the changed ref",
+    );
+    assert.ok(
+      auditEvents.some((event) => event.event === "git.tag.created" && event.object.endsWith("@refs/tags/push-tag")),
+      "one push can produce a distinct tag event alongside branch changes",
+    );
+    assert.ok(
+      auditEvents.every((event) => event.tokenFingerprint !== "token-a"),
+      "raw bearer tokens are never stored",
+    );
     const pushedFile = await git(["--git-dir", path.join(gitRepoPath, ".git"), "show", "from-http:pushed.txt"]);
     assert.strictEqual(pushedFile.stdout, "push works\n");
     const missingGitAuth = await request(port, "GET", "/git/git-http.git/info/refs?service=git-upload-pack");
@@ -849,6 +895,7 @@ async function run() {
       "/api/v1/health": ["get"],
       "/api": ["get"],
       "/api/v1/orgs": ["get", "post"],
+      "/api/v1/orgs/{org}/events": ["get"],
       "/api/v1/orgs/{org}/repos": ["get"],
       "/api/v1/orgs/{org}/repos/{repo}": ["post"],
       "/api/v1/orgs/{org}/repos/{repo}/log": ["get"],
@@ -914,7 +961,7 @@ async function run() {
     );
     for (const [specPath, methods] of Object.entries(expectedMethods)) {
       assert.deepStrictEqual(Object.keys(spec.paths[specPath]).sort(), methods.sort(), `methods for ${specPath}`);
-      if (specPath.startsWith("/api/v1/orgs/{org}/repos")) {
+      if (specPath.startsWith("/api/v1/orgs/{org}/")) {
         for (const method of methods) {
           assert.ok(spec.paths[specPath][method].security, `${method} ${specPath} must be authenticated`);
         }
@@ -1048,6 +1095,7 @@ async function run() {
       profile: { sub: "browser-subject", id: "browser-subject", name: "Signed In" },
       canWrite: true,
     });
+
     oidcAccessToken = "short-lived-browser-token";
     oidcRefreshToken = "short-lived-browser-refresh-token";
     oidcExpiresIn = 0.001;

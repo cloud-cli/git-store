@@ -128,11 +128,31 @@ compatibility endpoint for deployments whose OIDC client still has that URI regi
 | `PUBLIC_URL`          | derived                          | Public origin used to derive the callback URL                     |
 | `OIDC_JWKS_URI`       | issuer metadata                  | Same-issuer JWKS override for incorrect discovery metadata        |
 | `OIDC_BROWSER_SCOPES` | `repo:read repo:write` in Docker | Scopes granted to validated browser sessions; can be overridden   |
+| `DATABASE_URL`        | unset                            | Base URL for the d0 SQLite database used by the audit stream      |
+| `DB_AUTH_TOKEN`       | unset                            | Bearer credential for the database API, when required             |
 
 When OIDC variables are absent, repository requests fail closed with `401`.
 The Docker image defaults browser sessions to `repo:read repo:write` so signed-in users
 can manage their own organizations and repositories. Override `OIDC_BROWSER_SCOPES` to
 `repo:read` for read-only browser sessions; non-Docker runs default to no browser scopes.
+
+When `DATABASE_URL` is configured, the server creates the append-only `audit_events` table
+and its organization/time index on first use. Set it to the database service base URL (for
+example `https://db.apphor.de/db~<database>/`); configure `DB_AUTH_TOKEN` with the database
+API credential when the endpoint requires bearer authentication. Events are retained indefinitely.
+`GET /api/v1/orgs/{org}/events`
+returns a descending, paginated stream (`limit` up to 100, `offset` non-negative) and applies
+the same ownership and `repo:read` checks as other organization resources.
+
+Recorded events include successful repository/API changes, individual Git branch/tag ref
+changes from pushes, and authenticated/unauthenticated access denials where an organization
+can be identified. Clones and fetches are intentionally omitted. Each event stores the
+validated OIDC subject (and issuer), the authentication origin, request metadata, and a
+keyed fingerprint of token-authenticated requests; raw bearer tokens are never stored.
+The stable subject and an optional name snapshot are stored separately so the UI can
+change its actor presentation without rewriting events. The stream currently prefers the
+name snapshot, then the current browser profile for the signed-in actor, and otherwise
+shows the stable subject identifier.
 
 ## Tests and quality checks
 

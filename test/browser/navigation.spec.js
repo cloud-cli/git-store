@@ -5,6 +5,7 @@ let currentBranches;
 let currentTags;
 let currentCommits;
 let currentRepositories;
+let currentEvents;
 let bootstrapSession;
 let runtimeErrors;
 let imageBytes;
@@ -82,6 +83,17 @@ test.beforeEach(async ({ page }) => {
   currentTags = [];
   currentCommits = [{ hash: "abcdef123456", message: "Initial commit", author_name: "Browser Tester" }];
   currentRepositories = [{ repo: "demo" }];
+  currentEvents = [
+    {
+      id: "event-1",
+      occurredAt: "2026-01-01T00:00:00.000Z",
+      subject: "oidc-subject",
+      actorName: "Browser Tester",
+      event: "git.branch.created",
+      object: "example/demo@refs/heads/main",
+      origin: "git-token",
+    },
+  ];
   bootstrapSession = { checked: true, authenticated: true, canWrite: true, profile: { name: "Browser Tester" } };
   await page.addInitScript(() => {
     window.__documentNavigationCount = 0;
@@ -172,6 +184,17 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/ui/config", (route) => route.fulfill({ json: {} }));
   await page.route("**/api/v1/orgs", (route) => route.fulfill({ json: [{ slug: "example" }] }));
   await page.route("**/api/v1/orgs/example/repos", (route) => route.fulfill({ json: { repos: currentRepositories } }));
+  await page.route("**/api/v1/orgs/example/events**", (route) => {
+    const url = new URL(route.request().url());
+    const limit = Number(url.searchParams.get("limit") || 50);
+    const offset = Number(url.searchParams.get("offset") || 0);
+    return route.fulfill({
+      json: {
+        events: currentEvents.slice(offset, offset + limit),
+        hasMore: offset + limit < currentEvents.length,
+      },
+    });
+  });
   await page.route("**/api/v1/orgs/example/repos/**", (route) => {
     const url = new URL(route.request().url());
     if (url.pathname.endsWith("/tree")) {
@@ -313,32 +336,36 @@ test("repository sidebar keeps branches and tags compact and collapsed by defaul
   await expect(page.locator("repo-panel")).toHaveCount(0);
 });
 
-test("repository cards show the latest commit and the repository list scrolls", async ({ page }) => {
-  currentRepositories = Array.from({ length: 18 }, (_, index) => ({ repo: `project-${index + 1}` }));
-  currentCommits = [
-    { hash: "abcdef1234567890", message: "Repair the navigation\nMore details follow", author_name: "Private Author" },
-  ];
+test("organization event stream displays actors, actions, and objects", async ({ page }) => {
+  currentEvents = Array.from({ length: 55 }, (_, index) => ({
+    id: `event-${index + 1}`,
+    occurredAt: "2026-01-01T00:00:00.000Z",
+    subject: `subject-${index + 1}`,
+    actorName: `Actor ${index + 1}`,
+    event: "git.branch.created",
+    object: `example/project-${index + 1}@refs/heads/main`,
+    origin: "git-token",
+  }));
 
   await page.goto("/ui/?org=example");
 
-  const repositoryList = page.getByTestId("organization-repository-list");
-  await expect(repositoryList.getByText("project-1", { exact: true })).toBeVisible();
-  await expect(repositoryList.getByText("Repair the navigation", { exact: true }).first()).toBeVisible();
-  await expect(repositoryList.getByText("More details follow", { exact: true })).toHaveCount(0);
-  await expect(repositoryList.getByText("Private Author", { exact: true })).toHaveCount(0);
-  await expect(repositoryList.locator("commit-hash")).toHaveCount(18);
-  await expect(repositoryList.getByRole("button", { name: "Copy commit hash" }).first()).toBeVisible();
+  const eventStream = page.getByTestId("organization-event-stream");
+  await expect(eventStream.getByText("Actor 1", { exact: true })).toBeVisible();
+  await expect(eventStream.getByText("git.branch.created", { exact: true }).first()).toBeVisible();
+  await expect(eventStream.getByText("example/project-1@refs/heads/main", { exact: true })).toBeVisible();
+  await expect(eventStream.locator("li")).toHaveCount(50);
+  await page.getByRole("button", { name: "Load more events" }).click();
+  await expect(eventStream.locator("li")).toHaveCount(55);
   if (page.viewportSize().width >= 768) {
-    await expect.poll(() => repositoryList.evaluate((list) => list.scrollHeight > list.clientHeight)).toBe(true);
-    await expect(repositoryList).toHaveCSS("overflow-y", "auto");
+    await expect.poll(() => eventStream.evaluate((list) => list.scrollHeight > list.clientHeight)).toBe(true);
+    await expect(eventStream).toHaveCSS("overflow-y", "auto");
   } else {
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollHeight > innerHeight)).toBe(true);
   }
 
   const sidebarList = page.getByTestId("repository-sidebar-list");
-  await expect(sidebarList.getByRole("link", { name: "project-1", exact: true })).toBeVisible();
+  await expect(sidebarList.getByRole("link", { name: "demo", exact: true })).toBeVisible();
   await expect(sidebarList.locator("commit-hash")).toHaveCount(0);
-  await expect(sidebarList.getByText("Repair the navigation", { exact: true })).toHaveCount(0);
 });
 
 test("commit hashes copy the full hash and folder path segments navigate", async ({ page }) => {
@@ -432,10 +459,13 @@ test("organization and repository navigation replaces the displayed page", async
   await page.getByRole("banner").getByRole("link", { name: "example" }).click();
   await expect(page.getByRole("navigation", { name: "Folder path" })).toHaveCount(0);
   await expect(page.locator("[data-repository-view]")).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Repositories in example" })).toHaveCount(1);
-  await expect(page.getByRole("link", { name: "demo" }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Event stream" })).toHaveCount(1);
+  await expect(page.getByTestId("organization-event-stream")).toBeVisible();
 
-  await page.getByTestId("organization-repository-list").getByRole("link", { name: /^demo/ }).click();
+  if (page.viewportSize().width < 768) {
+    await page.getByRole("button", { name: "Toggle repositories" }).click();
+  }
+  await page.getByTestId("repository-sidebar-list").getByRole("link", { name: "demo" }).click();
   await expect(page.getByRole("navigation", { name: "Folder path" }).getByRole("link", { name: "Root" })).toHaveCount(
     1,
   );

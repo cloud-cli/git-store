@@ -6,10 +6,22 @@ const crypto = require("crypto");
 const { spawn } = require("child_process");
 const { validateRepoName, getSubjectHash } = require("./storage");
 const organizations = require("./organizations");
+const { createDatabaseClient, createAuditStore, createTokenFingerprint } = require("./audit");
 
 const getGit = (repoPath) => simpleGit.simpleGit(repoPath);
 
 const app = express();
+app.locals.auditStore = createAuditStore(createDatabaseClient(process.env.DATABASE_URL, process.env.DB_AUTH_TOKEN));
+app.use((req, res, next) => {
+  req.requestId = crypto.randomUUID();
+  res.set("X-Request-Id", req.requestId);
+  res.once("finish", () => {
+    if (res.statusCode >= 400 && !req.auditFailureRecorded) {
+      auditSecurityFailure(req, "security.request.denied", { status: res.statusCode });
+    }
+  });
+  next();
+});
 app.use(express.json({ limit: "20mb" }));
 app.get("/", (req, res) => {
   const query = req.url.slice(1);
@@ -56,6 +68,44 @@ async function initializeOidc() {
   }
 }
 initializeOidc();
+
+function auditOrgFromRequest(req) {
+  const slug = req.organization?.slug || req.organizationSlug || req.params?.org;
+  return typeof slug === "string" && organizations.get(slug) ? organizations.get(slug).slug : null;
+}
+
+async function recordAuditEvent(req, event, object = "", details = {}, org = auditOrgFromRequest(req)) {
+  const store = app.locals.auditStore;
+  if (!store || !org) {
+    return;
+  }
+  const actorName = [req.user?.name, req.user?.preferred_username, req.user?.profile?.name].find(
+    (value) => typeof value === "string" && value.trim(),
+  );
+  try {
+    await store.append({
+      org,
+      issuer: process.env.OIDC_ISSUER || null,
+      subject: typeof req.user?.sub === "string" ? req.user.sub : null,
+      actorName: actorName?.trim().slice(0, 200) || null,
+      event,
+      object,
+      origin: req.authType || (req.auditToken ? "token" : "unknown"),
+      tokenFingerprint: createTokenFingerprint(req.auditToken, process.env.OIDC_CLIENT_SECRET),
+      requestId: req.requestId,
+      ipAddress: req.socket?.remoteAddress || null,
+      userAgent: req.get?.("user-agent") || null,
+      details,
+    });
+  } catch (error) {
+    process.stderr.write(`[audit] event persistence failed: ${error.message}\n`);
+  }
+}
+
+function auditSecurityFailure(req, event, details = {}) {
+  req.auditFailureRecorded = true;
+  void recordAuditEvent(req, event, req.path, { method: req.method, ...details });
+}
 
 function getOidcClient() {
   return app.locals.oidcClientOverride || (oidcReady ? oidcClient : null);
@@ -291,13 +341,15 @@ app.get(["/ui/", "/ui/index.html"], async (req, res, next) => {
     return next(error);
   }
   const session = await getBrowserSession(req, res);
+  // Keep the ternary object's indentation aligned with the project's ESLint rule.
+  // prettier-ignore
   const bootstrap = session
     ? {
-        checked: true,
-        authenticated: true,
-        profile: session.profile,
-        canWrite: session.scope.split(/\s+/).includes("repo:write"),
-      }
+      checked: true,
+      authenticated: true,
+      profile: session.profile,
+      canWrite: session.scope.split(/\s+/).includes("repo:write"),
+    }
     : { checked: true, authenticated: false, profile: null, canWrite: false };
   const serialized = JSON.stringify(bootstrap).replace(/[<>&\u2028\u2029]/g, (character) => {
     return `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`;
@@ -398,18 +450,22 @@ async function requireAuthentication(req, res, next) {
   const header = req.headers.authorization || "";
   if (/^Bearer\s+/i.test(header)) {
     const token = header.slice(7).trim();
+    req.auditToken = token;
     try {
       const claims = await introspectAccessToken(token);
       if (!claims || !claims.active) {
+        auditSecurityFailure(req, "security.auth.denied", { reason: "inactive_token" });
         return res.status(401).json({ error: "Unauthorized: inactive token" });
       }
       if (typeof claims.sub !== "string" || !claims.sub.trim()) {
+        auditSecurityFailure(req, "security.auth.denied", { reason: "missing_subject" });
         return res.status(401).json({ error: "Unauthorized: missing subject claim" });
       }
       req.user = claims;
       req.authType = "bearer";
       return next();
     } catch {
+      auditSecurityFailure(req, "security.auth.denied", { reason: "invalid_token" });
       return res.status(401).json({ error: "Unauthorized: invalid token" });
     }
   }
@@ -422,11 +478,13 @@ async function requireAuthentication(req, res, next) {
       sub: session.sub,
       scope: session.scope,
       active: true,
+      profile: session.profile,
     };
     req.authType = "session";
     return next();
   }
 
+  auditSecurityFailure(req, "security.auth.denied", { reason: "missing_or_invalid_credentials" });
   return res.status(401).json({ error: "Unauthorized" });
 }
 
@@ -457,6 +515,7 @@ function requireScope(scope) {
     const allowed =
       scope === "repo:read" ? scopes.has("repo:read") || scopes.has("repo:write") : scopes.has("repo:write");
     if (!allowed) {
+      auditSecurityFailure(req, "security.access.denied", { reason: "insufficient_scope", requiredScope: scope });
       return res.status(403).json({ error: `Forbidden: requires ${scope} scope` });
     }
     return next();
@@ -467,6 +526,7 @@ function requireGitBasicAuth(req, res, next) {
   const header = req.headers.authorization || "";
   const match = /^Basic\s+([A-Za-z0-9+/]+=*)$/i.exec(header);
   if (!match) {
+    auditSecurityFailure(req, "security.auth.denied", { reason: "missing_git_credentials" });
     res.set("WWW-Authenticate", 'Basic realm="Git Store", charset="UTF-8"');
     return res.status(401).send("Git HTTP authentication required");
   }
@@ -479,25 +539,45 @@ function requireGitBasicAuth(req, res, next) {
   const separator = decoded.indexOf(":");
   const token = separator < 0 ? "" : decoded.slice(separator + 1);
   if (separator < 0 || !token) {
+    auditSecurityFailure(req, "security.auth.denied", { reason: "missing_git_token" });
     res.set("WWW-Authenticate", 'Basic realm="Git Store", charset="UTF-8"');
     return res.status(401).send("Git HTTP authentication required");
   }
+  req.auditToken = token;
   Promise.resolve(introspectAccessToken(token))
     .then((claims) => {
       if (!claims?.active || typeof claims.sub !== "string" || !claims.sub.trim()) {
+        auditSecurityFailure(req, "security.auth.denied", {
+          reason: claims?.active ? "missing_subject" : "inactive_token",
+        });
         res.set("WWW-Authenticate", 'Basic realm="Git Store", charset="UTF-8"');
         return res.status(401).send("Invalid Git credentials");
       }
       req.user = claims;
+      req.authType = "git-token";
       return next();
     })
     .catch(() => {
+      auditSecurityFailure(req, "security.auth.denied", { reason: "invalid_token" });
       res.set("WWW-Authenticate", 'Basic realm="Git Store", charset="UTF-8"');
       return res.status(401).send("Invalid Git credentials");
     });
 }
 
-function gitSmartHttp(req, res) {
+async function readRepositoryRefs(repoPath) {
+  const stdout = await getGit(repoPath).raw(["for-each-ref", "--format=%(refname)%00%(objectname)"]);
+  return new Map(
+    stdout
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        const separator = line.indexOf("\0");
+        return [line.slice(0, separator), line.slice(separator + 1)];
+      }),
+  );
+}
+
+async function gitSmartHttp(req, res) {
   const match =
     /^\/git\/([A-Za-z0-9](?:[A-Za-z0-9._-]{0,61}[A-Za-z0-9])?)\/([A-Za-z0-9][A-Za-z0-9._-]{0,99})\.git\/(info\/refs|git-upload-pack|git-receive-pack)$/.exec(
       req.path,
@@ -511,8 +591,11 @@ function gitSmartHttp(req, res) {
   const subjectHash = getSubjectHash(req);
   const organization = organizations.get(orgSlug);
   if (!organization || organization.ownerHash !== subjectHash) {
+    auditSecurityFailure(req, "security.access.denied", { reason: "organization_not_accessible" });
     return res.status(404).send("Repository not found");
   }
+  req.organization = organization;
+  req.organizationSlug = organization.slug;
   const repoRoot = path.join(process.env.DATA_PATH, "orgs", organization.slug);
   const service = req.query.service;
   let write;
@@ -530,11 +613,27 @@ function gitSmartHttp(req, res) {
   }
   const scopes = getTokenScopes(req.user);
   if (write ? !scopes.has("repo:write") : !scopes.has("repo:read") && !scopes.has("repo:write")) {
+    if (write) {
+      auditSecurityFailure(req, "security.access.denied", {
+        reason: "insufficient_scope",
+        requiredScope: "repo:write",
+      });
+    }
     return res.status(403).send("Insufficient scope");
   }
   const repoPath = path.join(repoRoot, repo);
   if (!repoPath || !fs.existsSync(path.join(repoPath, ".git"))) {
     return res.status(404).send("Repository not found");
+  }
+  const isPush = operation === "git-receive-pack" && req.method === "POST";
+  let refsBefore = new Map();
+  if (isPush) {
+    try {
+      refsBefore = await readRepositoryRefs(repoPath);
+    } catch (error) {
+      process.stderr.write(`[audit] unable to inspect refs before push: ${error.message}\n`);
+      return res.status(500).send("Unable to inspect repository refs");
+    }
   }
   const queryService = operation === "info/refs" ? service : undefined;
   const env = {
@@ -627,7 +726,32 @@ function gitSmartHttp(req, res) {
     if (code !== 0) {
       process.stderr.write(`[git-http-backend] ${code}: ${stderr.slice(0, 500)}\n`);
     }
-    res.end();
+    const finish = async () => {
+      if (isPush && code === 0) {
+        try {
+          const refsAfter = await readRepositoryRefs(repoPath);
+          const changedRefs = new Set([...refsBefore.keys(), ...refsAfter.keys()]);
+          for (const ref of changedRefs) {
+            const before = refsBefore.get(ref) || null;
+            const after = refsAfter.get(ref) || null;
+            if (before === after) {
+              continue;
+            }
+            const refType = ref.startsWith("refs/heads/") ? "branch" : ref.startsWith("refs/tags/") ? "tag" : "ref";
+            const action = !before ? "created" : !after ? "deleted" : "updated";
+            await recordAuditEvent(req, `git.${refType}.${action}`, `${organization.slug}/${repo}@${ref}`, {
+              ref,
+              before,
+              after,
+            });
+          }
+        } catch (error) {
+          process.stderr.write(`[audit] unable to inspect push refs: ${error.message}\n`);
+        }
+      }
+      res.end();
+    };
+    void finish();
   });
 }
 
@@ -756,6 +880,7 @@ async function createRepo(req, res) {
       await git.addConfig("user.email", "git-store@local");
     }
 
+    await recordAuditEvent(req, "repository.created", `${req.organization.slug}/${repo}`);
     return res.status(201).json({ message: `Repository ${repo} is ready`, repo });
   } catch (error) {
     const code = typeof error.code === "string" ? error.code : "REPO_INITIALIZATION_FAILED";
@@ -898,7 +1023,7 @@ function getRepoFile(req, res) {
  * @param {object} res - Express response object
  * @returns {void}
  */
-function uploadRepoFile(req, res) {
+async function uploadRepoFile(req, res) {
   const repo = req.params.repo;
   const repoPath = getSafeRepoPath(repo, req);
 
@@ -922,6 +1047,7 @@ function uploadRepoFile(req, res) {
   try {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, Buffer.from(req.body.content, "base64"));
+    await recordAuditEvent(req, "repository.file.uploaded", `${req.organization.slug}/${repo}/${req.body.path}`);
     return res.status(201).json({ path: req.body.path, staged: false });
   } catch (error) {
     return res.status(500).json({ error: error.message });
@@ -929,7 +1055,7 @@ function uploadRepoFile(req, res) {
 }
 
 /** Delete exactly one existing, regular repository working-tree file without staging it. */
-function deleteRepoFile(req, res) {
+async function deleteRepoFile(req, res) {
   const repoPath = getSafeRepoPath(req.params.repo, req);
   if (!repoPath) {
     return res.status(400).json({ error: "Invalid repository name" });
@@ -958,6 +1084,11 @@ function deleteRepoFile(req, res) {
       return res.status(400).json({ error: "Path is not a regular file" });
     }
     fs.unlinkSync(filePath);
+    await recordAuditEvent(
+      req,
+      "repository.file.deleted",
+      `${req.organization.slug}/${req.params.repo}/${relativePath}`,
+    );
     return res.json({ path: relativePath, deleted: true, staged: false });
   } catch (error) {
     if (error.code === "ENOENT") {
@@ -1316,7 +1447,7 @@ app.post("/ui/auth/logout", async (req, res) => {
 app.get("/api/v1/orgs", requireAuthentication, requireScope("repo:read"), (req, res) =>
   res.json({ orgs: organizations.listForSubject(req.user.sub) }),
 );
-app.post("/api/v1/orgs", requireAuthentication, requireScope("repo:write"), (req, res) => {
+app.post("/api/v1/orgs", requireAuthentication, requireScope("repo:write"), async (req, res) => {
   const result = organizations.create(req.user.sub, req.body?.slug);
   if (result === null) {
     return res.status(400).json({ error: "Invalid organization slug" });
@@ -1324,7 +1455,42 @@ app.post("/api/v1/orgs", requireAuthentication, requireScope("repo:write"), (req
   if (result === false) {
     return res.status(409).json({ error: "Organization already exists" });
   }
+  await recordAuditEvent(req, "organization.created", result.slug, {}, result.slug);
   return res.status(201).json({ org: result });
+});
+app.get("/api/v1/orgs/:org/events", requireAuthentication, requireScope("repo:read"), async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  if (!organizations.normalizeSlug(req.params.org)) {
+    return res.status(400).json({ error: "Invalid organization slug" });
+  }
+  const organization = organizations.get(req.params.org);
+  if (!organization || organization.ownerHash !== getSubjectHash(req)) {
+    auditSecurityFailure(req, "security.access.denied", { reason: "organization_not_accessible" });
+    return res.status(404).json({ error: "Organization not found" });
+  }
+  const limit = req.query.limit === undefined ? 50 : Number(req.query.limit);
+  const offset = req.query.offset === undefined ? 0 : Number(req.query.offset);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(offset) || offset < 0) {
+    return res.status(400).json({ error: "Limit must be 1–100 and offset must be a non-negative integer." });
+  }
+  const store = app.locals.auditStore;
+  if (!store) {
+    return res.status(503).json({ error: "Audit event storage is not configured" });
+  }
+  try {
+    const rows = await store.list(organization.slug, limit + 1, offset);
+    const hasMore = rows.length > limit;
+    const events = rows.slice(0, limit).map((event) => {
+      try {
+        return { ...event, details: JSON.parse(event.details || "{}") };
+      } catch {
+        return { ...event, details: {} };
+      }
+    });
+    return res.json({ events, hasMore });
+  } catch {
+    return res.status(503).json({ error: "Audit events are temporarily unavailable" });
+  }
 });
 app.use("/api/v1/orgs/:org/repos", requireAuthentication, (req, res, next) => {
   if (!organizations.normalizeSlug(req.params.org)) {
@@ -1332,8 +1498,11 @@ app.use("/api/v1/orgs/:org/repos", requireAuthentication, (req, res, next) => {
   }
   const organization = organizations.get(req.params.org);
   if (!organization || organization.ownerHash !== getSubjectHash(req)) {
+    auditSecurityFailure(req, "security.access.denied", { reason: "organization_not_accessible" });
     return res.status(404).json({ error: "Organization not found" });
   }
+  req.organization = organization;
+  req.organizationSlug = organization.slug;
   req.organizationPath = path.join(process.env.DATA_PATH, "orgs", organization.slug);
   if (req.path === "/" || req.path === "") {
     if (req.method !== "GET") {
@@ -1403,6 +1572,7 @@ app.post("/api/v1/repos/:repo/stage", requireAuthentication, requireScope("repo:
   }
   try {
     await getGit(repoPath).add(req.body.files);
+    await recordAuditEvent(req, "repository.files.staged", `${req.organization.slug}/${repo}`);
     return res.json({ message: "Files staged successfully" });
   } catch (error) {
     return res.status(500).json({ error: error.message });
@@ -1419,6 +1589,7 @@ app.post("/api/v1/repos/:repo/unstage", requireAuthentication, requireScope("rep
   }
   try {
     await getGit(repoPath).reset(["--mixed", ...(req.body.files || [])]);
+    await recordAuditEvent(req, "repository.files.unstaged", `${req.organization.slug}/${repo}`);
     return res.json({ message: "Files unstaged successfully" });
   } catch (error) {
     return res.status(500).json({ error: error.message });
@@ -1439,7 +1610,15 @@ app.post("/api/v1/repos/:repo/commit", requireAuthentication, requireScope("repo
       return res.json({ message: "No changes to commit" });
     }
     const message = req.body.message || "autocommit";
-    await getGit(repoPath).commit(message);
+    const result = await getGit(repoPath).commit(message);
+    await recordAuditEvent(
+      req,
+      "repository.commit.created",
+      `${req.organization.slug}/${repo}@${result.commit || "HEAD"}`,
+      {
+        message,
+      },
+    );
     return res.json({
       message: "Changes committed successfully",
       commit: message,
@@ -1462,6 +1641,11 @@ app.post("/api/v1/repos/:repo/tags", requireAuthentication, requireScope("repo:w
   }
   try {
     await getGit(repoPath).addTag(req.body.name);
+    await recordAuditEvent(
+      req,
+      "repository.tag.created",
+      `${req.organization.slug}/${repo}@refs/tags/${req.body.name}`,
+    );
     return res.json({ message: `Tag ${req.body.name} added` });
   } catch (error) {
     return res.status(500).json({ error: error.message });
@@ -1481,6 +1665,11 @@ app.delete("/api/v1/repos/:repo/tags/:name", requireAuthentication, requireScope
   }
   try {
     await getGit(repoPath).tag(["-d", req.params.name]);
+    await recordAuditEvent(
+      req,
+      "repository.tag.deleted",
+      `${req.organization.slug}/${repo}@refs/tags/${req.params.name}`,
+    );
     return res.json({ message: `Tag ${req.params.name} removed` });
   } catch (error) {
     return res.status(500).json({ error: error.message });
@@ -1501,6 +1690,11 @@ app.post("/api/v1/repos/:repo/branches", requireAuthentication, requireScope("re
   try {
     const args = req.body.startPoint ? [req.body.name, req.body.startPoint] : [req.body.name];
     await getGit(repoPath).branch(args);
+    await recordAuditEvent(
+      req,
+      "repository.branch.created",
+      `${req.organization.slug}/${repo}@refs/heads/${req.body.name}`,
+    );
     return res.json({ message: `Branch ${req.body.name} created` });
   } catch (error) {
     return res.status(500).json({ error: error.message });
@@ -1524,6 +1718,11 @@ app.delete(
     }
     try {
       await getGit(repoPath).branch(["-D", req.params.name]);
+      await recordAuditEvent(
+        req,
+        "repository.branch.deleted",
+        `${req.organization.slug}/${repo}@refs/heads/${req.params.name}`,
+      );
       return res.json({ message: `Branch ${req.params.name} removed` });
     } catch (error) {
       return res.status(500).json({ error: error.message });
@@ -1635,6 +1834,29 @@ function makeApiSpec() {
                 required: true,
                 schema: { type: "string" },
               },
+            ],
+          ),
+          security: [{ bearerAuth: [] }],
+          "x-required-scope": "repo:read or repo:write",
+        },
+      },
+      "/api/v1/orgs/{org}/events": {
+        get: {
+          ...operation(
+            "List audit events in an owned organization",
+            {
+              200: { description: "Audit event stream" },
+              400: { description: "Invalid pagination parameters" },
+              401: unauthorized,
+              403: { description: "Insufficient scope" },
+              404: { description: "Organization not found" },
+              503: { description: "Audit storage unavailable" },
+            },
+            null,
+            [
+              { name: "org", in: "path", required: true, schema: { type: "string" } },
+              { name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 100 } },
+              { name: "offset", in: "query", required: false, schema: { type: "integer", minimum: 0 } },
             ],
           ),
           security: [{ bearerAuth: [] }],

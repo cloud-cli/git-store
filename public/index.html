@@ -439,15 +439,21 @@
                 ><organization-landing
                   class="flex min-h-0 flex-1"
                   bind-org="org"
+                  bind-profile="profile"
                   bind-can-write="canWrite"
                   bind-organizations="orgs"
                   bind-organizations-loaded="organizationsLoaded"
                   bind-repositories="orgRepositories"
                   bind-repositories-loaded="orgRepositoriesLoaded"
+                  bind-events="orgEvents"
+                  bind-events-loaded="orgEventsLoaded"
+                  bind-events-error="orgEventsError"
+                  bind-has-more-events="orgEventsHasMore"
                   bind-org-error="orgError"
                   bind-error-message="errorMessage"
                   on-createorg="createOrganization($event.detail)"
                   on-createrepo="createFirstRepository($event.detail)"
+                  on-loadmore="loadMoreEvents()"
                   on-retry="retryOrganizationLoad()"
                 ></organization-landing
               ></template>
@@ -742,6 +748,10 @@
               const organizationsLoaded = ref(false);
               const orgRepositories = ref([]);
               const orgRepositoriesLoaded = ref(false);
+              const orgEvents = ref([]);
+              const orgEventsLoaded = ref(false);
+              const orgEventsError = ref("");
+              const orgEventsHasMore = ref(false);
               const orgCreated = ref(false);
               const branches = ref([]);
               const tags = ref([]);
@@ -996,9 +1006,15 @@
                 if (!slug) {
                   orgRepositories.value = [];
                   orgRepositoriesLoaded.value = true;
+                  orgEvents.value = [];
+                  orgEventsLoaded.value = true;
+                  orgEventsError.value = "";
+                  orgEventsHasMore.value = false;
                   return;
                 }
                 orgRepositoriesLoaded.value = false;
+                orgEventsLoaded.value = false;
+                orgEventsError.value = "";
                 const reposPath = `/api/v1/orgs/${encodeURIComponent(slug)}/repos`;
                 const response = await fetch(reposPath);
                 if (!response.ok) {
@@ -1043,6 +1059,47 @@
                 orgRepositories.value = repositoriesWithCommits;
                 orgRepositoriesLoaded.value = true;
                 showWorkspace.value = !settings.value && orgRepositories.value.length > 0;
+                try {
+                  const eventsResponse = await fetch(`/api/v1/orgs/${encodeURIComponent(slug)}/events?limit=50`);
+                  if (!eventsResponse.ok) throw new Error("Unable to load audit events.");
+                  const eventResult = await eventsResponse.json();
+                  if (requestId === organizationRequest) {
+                    orgEvents.value = Array.isArray(eventResult.events) ? eventResult.events : [];
+                    orgEventsHasMore.value = eventResult.hasMore === true;
+                  }
+                } catch {
+                  if (requestId === organizationRequest) {
+                    orgEvents.value = [];
+                    orgEventsError.value = "Audit events are unavailable. Please try again later.";
+                    orgEventsHasMore.value = false;
+                  }
+                } finally {
+                  if (requestId === organizationRequest) orgEventsLoaded.value = true;
+                }
+              };
+              const loadMoreEvents = async () => {
+                const slug = url().searchParams.get("org");
+                const requestId = organizationRequest;
+                if (!slug || !orgEventsHasMore.value) {
+                  return;
+                }
+                try {
+                  const response = await fetch(
+                    `/api/v1/orgs/${encodeURIComponent(slug)}/events?limit=50&offset=${orgEvents.value.length}`,
+                  );
+                  if (!response.ok) {
+                    throw new Error();
+                  }
+                  const result = await response.json();
+                  if (requestId !== organizationRequest) return;
+                  orgEvents.value = [...orgEvents.value, ...(Array.isArray(result.events) ? result.events : [])];
+                  orgEventsHasMore.value = result.hasMore === true;
+                  orgEventsError.value = "";
+                } catch {
+                  if (requestId === organizationRequest) {
+                    orgEventsError.value = "Unable to load more audit events. Please try again.";
+                  }
+                }
               };
               const retryOrganizationLoad = async () => {
                 orgError.value = "";
@@ -1583,9 +1640,14 @@
                 organizationsLoaded,
                 orgRepositories,
                 orgRepositoriesLoaded,
+                orgEvents,
+                orgEventsLoaded,
+                orgEventsError,
+                orgEventsHasMore,
                 orgCreated,
                 orgHref,
                 retryOrganizationLoad,
+                loadMoreEvents,
                 org,
                 orgError,
                 entries,
