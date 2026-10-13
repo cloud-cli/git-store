@@ -68,11 +68,24 @@
               <lucide-icon icon="menu" size="20"></lucide-icon></button
           ></template>
           <a href="/" class="flex shrink-0 items-center" aria-label="Home"
-            ><span
+            ><svg
               data-testid="home-indicator"
-              class="block size-6 shrink-0 rounded-full bg-brand"
+              xmlns="http://www.w3.org/2000/svg"
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
               aria-hidden="true"
-            ></span
+            >
+              <rect width="24" height="24" fill="#263d32" stroke="none" />
+              <path d="M15 6a9 9 0 0 0-9 9V3" stroke="#c8e6a8" />
+              <circle cx="18" cy="6" r="3" stroke="#c8e6a8" />
+              <circle cx="6" cy="18" r="3" stroke="#c8e6a8" />
+            </svg
           ></a>
           <template if="profile && org && !settings"
             ><template if="showWorkspace"
