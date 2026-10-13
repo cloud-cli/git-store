@@ -544,7 +544,7 @@ function requireGitBasicAuth(req, res, next) {
   const match = /^Basic\s+([A-Za-z0-9+/]+=*)$/i.exec(header);
   if (!match) {
     auditSecurityFailure(req, "security.auth.denied", { reason: "missing_git_credentials" });
-    res.set("WWW-Authenticate", 'Basic realm="Git Store", charset="UTF-8"');
+    res.set("WWW-Authenticate", 'Basic realm="GitMini", charset="UTF-8"');
     return res.status(401).send("Git HTTP authentication required");
   }
   let decoded;
@@ -557,7 +557,7 @@ function requireGitBasicAuth(req, res, next) {
   const token = separator < 0 ? "" : decoded.slice(separator + 1);
   if (separator < 0 || !token) {
     auditSecurityFailure(req, "security.auth.denied", { reason: "missing_git_token" });
-    res.set("WWW-Authenticate", 'Basic realm="Git Store", charset="UTF-8"');
+    res.set("WWW-Authenticate", 'Basic realm="GitMini", charset="UTF-8"');
     return res.status(401).send("Git HTTP authentication required");
   }
   req.auditToken = token;
@@ -567,7 +567,7 @@ function requireGitBasicAuth(req, res, next) {
         auditSecurityFailure(req, "security.auth.denied", {
           reason: claims?.active ? "missing_subject" : "inactive_token",
         });
-        res.set("WWW-Authenticate", 'Basic realm="Git Store", charset="UTF-8"');
+        res.set("WWW-Authenticate", 'Basic realm="GitMini", charset="UTF-8"');
         return res.status(401).send("Invalid Git credentials");
       }
       req.user = claims;
@@ -576,7 +576,7 @@ function requireGitBasicAuth(req, res, next) {
     })
     .catch(() => {
       auditSecurityFailure(req, "security.auth.denied", { reason: "invalid_token" });
-      res.set("WWW-Authenticate", 'Basic realm="Git Store", charset="UTF-8"');
+      res.set("WWW-Authenticate", 'Basic realm="GitMini", charset="UTF-8"');
       return res.status(401).send("Invalid Git credentials");
     });
 }
@@ -893,8 +893,8 @@ async function createRepo(req, res) {
 
     if (!fs.existsSync(path.join(repoPath, ".git"))) {
       await git.init(false, ["--initial-branch=main"]);
-      await git.addConfig("user.name", "git-store");
-      await git.addConfig("user.email", "git-store@local");
+      await git.addConfig("user.name", "GitMini");
+      await git.addConfig("user.email", "gitmini@local");
     }
 
     await recordAuditEvent(req, "repository.created", `${req.organization.slug}/${repo}`);
@@ -1774,8 +1774,8 @@ function makeApiSpec() {
 
   const apiSpec = {
     openapi: "3.0.3",
-    info: { title: "Git Store API", version: "1.0.0" },
-    servers: [{ url: "/", description: "This git store server" }],
+    info: { title: "GitMini API", version: "1.0.0" },
+    servers: [{ url: "/", description: "This GitMini server" }],
     paths: {
       "/api/v1/health": {
         get: operation("Health check", { 200: { description: "Healthy" } }, null, []),

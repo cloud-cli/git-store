@@ -33,9 +33,10 @@ Organization slugs cannot be renamed, and repositories cannot be moved between
 organizations in this MVP.
 
 The browser UI signs in through `/ui/auth/login` using authorization code + PKCE and requests
-`offline_access`. The callback validates state, ID-token claims, and the token's userinfo
-subject before issuing a signed HttpOnly same-origin cookie. When the provider grants a
-refresh token, Git Store stores it in the encrypted `DATA_PATH` session store, rotates it
+`offline_access`. `openid-client` validates the callback state and PKCE exchange and the
+ID-token claims; the Auth Node client verifies that the UserInfo subject matches before
+GitMini issues a signed HttpOnly same-origin cookie. When the provider grants a refresh token,
+GitMini stores it in the encrypted `DATA_PATH` session store and rotates it
 server-side as access tokens approach expiry, and renews the cookie for an active session.
 Neither access nor refresh tokens are sent to the browser. Browser-session scopes come from
 `OIDC_BROWSER_SCOPES`; cookie-authenticated repository writes require same-origin requests.
@@ -112,7 +113,7 @@ issuer. An optional same-origin `returnTo` path is restored after sign-in.
 
 Configured OIDC redirect URI. Validates state and the PKCE exchange, exchanges the authorization code,
 confirms the access token and subject, then establishes the local HttpOnly browser session. If the provider
-grants a refresh token, Git Store retains it only in the encrypted server-side session store.
+grants a refresh token, GitMini retains it only in the encrypted server-side session store.
 The legacy `/auth/callback` path remains available for OIDC clients that have not yet
 migrated their registered callback URI to `/ui/auth/callback`.
 

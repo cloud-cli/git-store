@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Git Store is a minimal HTTP API for managing multiple Git repositories on disk.
+GitMini is a minimal HTTP API for managing multiple Git repositories on disk.
 Repositories are stored under the required `DATA_PATH` environment variable (the
 Docker image defaults it to `/home/app/data`). Organization metadata is stored in
 `DATA_PATH/orgs/<slug>/.organization.json`; repositories live beside it under
@@ -13,15 +13,15 @@ Ownership metadata is the SHA-256 hash of the OIDC `sub`.
 
 ```bash
 # Build the image (uses the already‑committed Dockerfile)
-docker build -t git-store .
+docker build -t gitmini .
 
 # Create a persistent Docker volume and start the service
-docker volume create git-store-data
+docker volume create gitmini-data
 docker run -d \
   -p 3000:3000 \
-  -v git-store-data:/home/app/data \
+  -v gitmini-data:/home/app/data \
   -e DATA_PATH=/home/app/data \
-  git-store
+  gitmini
 ```
 
 ## Local development
@@ -58,21 +58,21 @@ set `OIDC_BROWSER_SCOPES` explicitly if browser users should be able to access r
 
 Create a client/application in your identity provider (for example, Auth Lab or Keycloak)
 with the authorization-code flow enabled. Configure its exact redirect URI as
-`https://<git-store-host>/ui/auth/callback` (or set `OIDC_REDIRECT_URI` to that URL), and
+`https://<gitmini-host>/ui/auth/callback` (or set `OIDC_REDIRECT_URI` to that URL), and
 use the provider's issuer URL for `OIDC_ISSUER`. The client must support PKCE with `S256`
-and the refresh-token grant; Git Store requests `openid profile email offline_access` and
+and the refresh-token grant; GitMini requests `openid profile email offline_access` and
 uses the client ID and secret from `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`.
 
 For the browser UI, **do not configure `repo:read` or `repo:write` as identity-provider
-scopes**. Git Store grants these application permissions to its cookie-backed browser
+scopes**. GitMini grants these application permissions to its cookie-backed browser
 session from `OIDC_BROWSER_SCOPES`; the Docker image defaults this to
 `repo:read repo:write`. Override it to `repo:read` for read-only browser access. These
 permissions are enforced within the signed-in subject's own organizations.
 
 This is separate from API clients that send OIDC bearer tokens. For those clients,
-`repo:read` and `repo:write` are Git Store-defined OAuth scopes: configure the provider to
+`repo:read` and `repo:write` are GitMini-defined OAuth scopes: configure the provider to
 issue the required value in the introspected token's `scope`, `scp`, or `scopes` claim, and
-Git Store enforces it on each API operation. Provider-specific role claims are not
+GitMini enforces it on each API operation. Provider-specific role claims are not
 automatically interpreted as these scope values.
 
 ## Basic API calls (using `curl`)
@@ -134,10 +134,13 @@ The server introspects OIDC bearer tokens for API clients. Read operations requi
 Forbidden**; unauthenticated requests return **401 Unauthorized**. Browser UI requests
 instead use the cookie-backed session and its `OIDC_BROWSER_SCOPES` configuration.
 
-The topbar's **Sign in** action starts an OIDC authorization-code flow with PKCE. The
-callback validates state, PKCE, and the ID token, confirms the access token is active,
-then establishes an HttpOnly, SameSite=Lax application session. The access token is kept
-server-side. Register the exact callback URL (preferably configured with
+The topbar's **Sign in** action starts an OIDC authorization-code flow with PKCE. GitMini
+keeps the callback and refresh-token rotation in `openid-client`; the Auth Node client is
+used for UserInfo and introspection. Short-lived HttpOnly cookies bind the callback's state
+and PKCE verifier to the initiating browser. The callback validates state and PKCE, checks
+the ID-token subject against UserInfo, then establishes an HttpOnly, SameSite=Lax application
+session. Access and refresh tokens remain server-side; refresh tokens are encrypted in
+`DATA_PATH` and rotated as access tokens approach expiry. Register the exact callback URL (preferably configured with
 `OIDC_REDIRECT_URI`) with the OIDC client. If that variable is unset, the service derives
 the callback from `PUBLIC_URL` or reverse-proxy forwarded host/protocol headers.
 

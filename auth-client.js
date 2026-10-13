@@ -10,10 +10,19 @@
  * import client from './node.mjs';
  * const profile = await client.getProfile(request);
  */
-import { createHash, createPublicKey, randomBytes, verify } from "node:crypto";
+import { createHash, createPublicKey, randomBytes, timingSafeEqual, verify } from "node:crypto";
 
 const defaultIssuer = "https://auth.api.apphor.de";
 const decodeBase64Url = (value) => Buffer.from(value, "base64url");
+
+function safeStringEqual(left, right) {
+  if (typeof left !== "string" || typeof right !== "string") {
+    return false;
+  }
+  const leftBytes = Buffer.from(left);
+  const rightBytes = Buffer.from(right);
+  return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes);
+}
 
 /** Decode a compact JWT into its header, payload, signature, and signed bytes. @param {string} token @returns {{header: object, payload: object, signature: Buffer, signed: Buffer}} */
 function parseToken(token) {
@@ -106,6 +115,7 @@ export class AuthClient {
     this.jwksExpiresAt = 0;
     this.jwksLastRefreshAt = 0;
     this.jwksRequest = null;
+    this.refreshRequests = new Map();
   }
 
   /** Require a configured OIDC client ID for client-bound operations. @returns {string} */
@@ -220,6 +230,9 @@ export class AuthClient {
     if (typeof payload.exp !== "number" || payload.exp <= now) {
       throw new Error("Expired JWT");
     }
+    if (payload.nbf !== undefined && (typeof payload.nbf !== "number" || !Number.isFinite(payload.nbf))) {
+      throw new Error("Invalid JWT not-before claim");
+    }
     if (typeof payload.nbf === "number" && payload.nbf > now) {
       throw new Error("JWT is not active");
     }
@@ -270,7 +283,7 @@ export class AuthClient {
       allowEmpty: true,
     });
   }
-  /** Build a browser authorization redirect URL plus its state, PKCE verifier, and nonce; no network request is made. Include `offline_access` in `scope` to request a refresh token. @param {{redirectUri: string, scope?: string, nonce?: string}} options @returns {{url: string, state: string, codeVerifier: string, nonce: string}} */
+  /** Build a browser authorization redirect URL plus its state, PKCE verifier, nonce, and exact redirect URI; persist the returned transaction server-side until the callback. Include `offline_access` in `scope` to request a refresh token. @param {{redirectUri: string, scope?: string, nonce?: string}} options @returns {{url: string, state: string, codeVerifier: string, nonce: string, redirectUri: string}} */
   createAuthorizationRequest({
     redirectUri,
     scope = "openid profile email",
@@ -292,9 +305,9 @@ export class AuthClient {
       code_challenge: createHash("sha256").update(codeVerifier).digest("base64url"),
       code_challenge_method: "S256",
     });
-    return { url: String(url), state, codeVerifier, nonce };
+    return { url: String(url), state, codeVerifier, nonce, redirectUri };
   }
-  /** Build only the browser authorization redirect URL (state and PKCE values are not returned). @param {object} options @returns {string} */
+  /** Build only a browser authorization redirect URL; state and PKCE values are not returned, so use createAuthorizationRequest() for a callback flow. @deprecated @param {object} options @returns {string} */
   authorizationUrl(options) {
     return this.createAuthorizationRequest(options).url;
   }
@@ -313,13 +326,129 @@ export class AuthClient {
       },
     });
   }
-  /** Exchange a rotating refresh token at `/token`, optionally narrowing its original scope. This method does not coalesce calls; the caller must serialize refresh attempts per grant to avoid replay detection. @param {{refreshToken: string, scope?: string, clientSecret?: string}} options @returns {Promise<object>} Token response containing the replacement `refresh_token` when offline access continues. */
+  /** Complete an authorization-code callback using its saved transaction: validate callback location/state, exchange with PKCE, and verify the ID token and nonce. The caller must load and consume the transaction from a short-lived browser-bound store. @param {{callbackUrl: string|URL, transaction: {state: string, nonce: string, codeVerifier: string, redirectUri: string}, clientSecret?: string}} options @returns {Promise<{tokens: object, claims: object}>} */
+  async completeAuthorization({ callbackUrl, transaction, clientSecret = this.clientSecret }) {
+    this.requireClientId();
+    if (
+      !transaction ||
+      typeof transaction.state !== "string" ||
+      !transaction.state ||
+      transaction.state.length > 512 ||
+      typeof transaction.nonce !== "string" ||
+      !transaction.nonce ||
+      transaction.nonce.length > 512 ||
+      typeof transaction.codeVerifier !== "string" ||
+      !/^[A-Za-z0-9._~-]{43,128}$/.test(transaction.codeVerifier) ||
+      typeof transaction.redirectUri !== "string"
+    ) {
+      throw new Error("Invalid or incomplete OIDC login transaction");
+    }
+    let callback;
+    let redirectUri;
+    try {
+      callback = new URL(callbackUrl);
+      redirectUri = new URL(transaction.redirectUri);
+    } catch {
+      throw new Error("Invalid OIDC callback URL");
+    }
+    if (
+      callback.protocol !== redirectUri.protocol ||
+      callback.host !== redirectUri.host ||
+      callback.pathname !== redirectUri.pathname ||
+      callback.username ||
+      callback.password ||
+      redirectUri.username ||
+      redirectUri.password ||
+      callback.hash
+    ) {
+      throw new Error("OIDC callback URL does not match the login redirect URI");
+    }
+    for (const name of new Set(redirectUri.searchParams.keys())) {
+      if (["code", "state", "error", "error_description", "error_uri"].includes(name)) {
+        throw new Error("OIDC redirect URI uses a reserved callback parameter");
+      }
+      const expectedValues = redirectUri.searchParams.getAll(name);
+      const actualValues = callback.searchParams.getAll(name);
+      if (
+        expectedValues.length !== actualValues.length ||
+        expectedValues.some((value, index) => value !== actualValues[index])
+      ) {
+        throw new Error("OIDC callback URL does not match the login redirect URI");
+      }
+    }
+    const states = callback.searchParams.getAll("state");
+    if (states.length !== 1 || !safeStringEqual(states[0], transaction.state)) {
+      throw new Error("Invalid OIDC callback state");
+    }
+    if (callback.searchParams.getAll("error").length > 1) {
+      throw new Error("OIDC callback contains duplicate error parameters");
+    }
+    if (callback.searchParams.has("error")) {
+      throw new Error(`OIDC authorization failed: ${callback.searchParams.get("error") || "unknown_error"}`);
+    }
+    const codes = callback.searchParams.getAll("code");
+    if (codes.length !== 1 || !codes[0]) {
+      throw new Error("OIDC callback must contain exactly one authorization code");
+    }
+    const tokens = await this.exchangeCode({
+      code: codes[0],
+      codeVerifier: transaction.codeVerifier,
+      redirectUri: transaction.redirectUri,
+      clientSecret,
+    });
+    if (
+      !tokens ||
+      typeof tokens !== "object" ||
+      typeof tokens.id_token !== "string" ||
+      !tokens.id_token ||
+      typeof tokens.access_token !== "string" ||
+      !tokens.access_token
+    ) {
+      throw new Error("OIDC token response is missing a required ID or access token");
+    }
+    const claims = await this.verifyToken(tokens.id_token);
+    const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+    const now = Math.floor(Date.now() / 1000);
+    if (
+      !safeStringEqual(claims.nonce, transaction.nonce) ||
+      typeof claims.iat !== "number" ||
+      claims.iat > now + 60 ||
+      !claims.sub ||
+      (audiences.length > 1 && claims.azp !== this.clientId) ||
+      (claims.azp !== undefined && claims.azp !== this.clientId)
+    ) {
+      throw new Error("Invalid OIDC ID token claims");
+    }
+    if (claims.at_hash !== undefined) {
+      if (typeof tokens.access_token !== "string") {
+        throw new Error("OIDC token response is missing the access token required to validate at_hash");
+      }
+      const expectedAtHash = createHash("sha256")
+        .update(tokens.access_token)
+        .digest()
+        .subarray(0, 16)
+        .toString("base64url");
+      if (!safeStringEqual(claims.at_hash, expectedAtHash)) {
+        throw new Error("Invalid OIDC ID token at_hash");
+      }
+    }
+    return { tokens, claims };
+  }
+  /** Exchange a rotating refresh token at `/token`. Concurrent calls with the same token/options coalesce within this client instance. Callers using multiple client instances, processes, or replicas must still serialize per RP session and persist the replacement atomically. @param {{refreshToken: string, scope?: string, clientSecret?: string}} options @returns {Promise<object>} Token response containing the replacement `refresh_token` when offline access continues. */
   refreshToken({ refreshToken, scope, clientSecret = this.clientSecret }) {
     this.requireClientId();
     if (!refreshToken) {
       throw new Error("A refresh token is required");
     }
-    return this.request("/token", {
+    const key = createHash("sha256").update(refreshToken).digest("base64url");
+    const existing = this.refreshRequests.get(key);
+    if (existing) {
+      if (existing.scope !== scope || existing.clientSecret !== clientSecret) {
+        throw new Error("A refresh with this token is already in progress with different options");
+      }
+      return existing.promise;
+    }
+    const promise = this.request("/token", {
       method: "POST",
       form: {
         grant_type: "refresh_token",
@@ -328,6 +457,13 @@ export class AuthClient {
         ...(scope !== undefined ? { scope } : {}),
         ...(clientSecret ? { client_secret: clientSecret } : {}),
       },
+    });
+    const entry = { scope, clientSecret, promise };
+    this.refreshRequests.set(key, entry);
+    return promise.finally(() => {
+      if (this.refreshRequests.get(key) === entry) {
+        this.refreshRequests.delete(key);
+      }
     });
   }
   /** Get the profile via `/api/v1/profile` using the user's session cookie; returns null when unauthenticated or denied. @param {Request|object} request @returns {Promise<unknown|null>} */
@@ -472,6 +608,15 @@ export class AuthClient {
       method: "POST",
       auth: "api",
       body: { label, scopes },
+    });
+  }
+  /** Append downstream scopes to this client's scope list with the configured Auth API bearer token. Existing scopes cannot be removed through this operation. @param {string[]} scopes @returns {Promise<{scopes: string[]}>} */
+  addApiTokenScopes(scopes) {
+    this.requireClientId();
+    return this.request(`/api/v1/api-tokens/${encodeURIComponent(this.clientId)}/scopes`, {
+      method: "POST",
+      auth: "api",
+      body: { scopes },
     });
   }
   /** List OIDC clients using the admin session cookie. @param {Request|object} request @returns {Promise<unknown>} */

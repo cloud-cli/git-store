@@ -395,7 +395,7 @@ test("header uses a generic primary-color home marker", async ({ page }) => {
   await page.goto("/ui/?org=example&repo=demo");
 
   const homeLink = page.getByRole("link", { name: "Home" });
-  await expect(page).toHaveTitle("Git Store");
+  await expect(page).toHaveTitle("GitMini");
   await expect(homeLink).toBeVisible();
   await expect(homeLink.getByTestId("home-indicator")).toHaveCSS("background-color", "rgb(59, 113, 75)");
   await expect(page.locator(".flow-logo-mark, .flow-logo-dot")).toHaveCount(0);
@@ -408,7 +408,7 @@ test("anonymous landing welcomes returning users", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
   await expect(page.getByText("Sign in to access your organizations and repositories.")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Continue to Git Store" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Continue to GitMini" })).toBeVisible();
 });
 
 test("SPA navigation, file pages, history, and read-only controls", async ({ page }) => {

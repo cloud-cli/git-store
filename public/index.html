@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Git Store</title>
+    <title>GitMini</title>
     <!-- git-store-session-bootstrap -->
     <script type="importmap">
       { "imports": { "@li3/": "https://cdn.li3.dev/@li3/" } }
@@ -411,7 +411,7 @@
                   class="mb-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100"
                   role="status"
                 >
-                  Read-only access: this session does not have repository write access (repo:write). Ask your Git Store
+                  Read-only access: this session does not have repository write access (repo:write). Ask your GitMini
                   administrator to enable it. You can browse repositories, but cannot create repositories or upload/add
                   files.
                 </div></template
@@ -669,7 +669,7 @@
                             >
                             <template if="!canWrite"
                               ><p class="mt-2 text-sm text-gray-500 dark:text-gray-300">
-                                This repository is empty. Ask your Git Store administrator to enable repository write
+                                This repository is empty. Ask your GitMini administrator to enable repository write
                                 access (repo:write) to add files.
                               </p></template
                             >
@@ -956,7 +956,7 @@
               const createOrganization = async (requestedSlug) => {
                 if (!canWrite.value) {
                   orgError.value =
-                    "Read-only access: ask your Git Store administrator to enable repository write access (repo:write).";
+                    "Read-only access: ask your GitMini administrator to enable repository write access (repo:write).";
                   return;
                 }
                 const slug = String(requestedSlug || "").trim();
@@ -1299,7 +1299,7 @@
               const createBranch = async () => {
                 if (!canWrite.value) {
                   errorMessage.value =
-                    "Read-only access: ask your Git Store administrator to enable repository write access (repo:write).";
+                    "Read-only access: ask your GitMini administrator to enable repository write access (repo:write).";
                   return;
                 }
                 const name = branchName.value.trim();
@@ -1322,7 +1322,7 @@
               const createTag = async () => {
                 if (!canWrite.value) {
                   errorMessage.value =
-                    "Read-only access: ask your Git Store administrator to enable repository write access (repo:write).";
+                    "Read-only access: ask your GitMini administrator to enable repository write access (repo:write).";
                   return;
                 }
                 const name = tagName.value.trim();
@@ -1345,7 +1345,7 @@
               const addFileToRepo = async () => {
                 if (!canWrite.value) {
                   addFileError.value =
-                    "Read-only access: ask your Git Store administrator to enable repository write access (repo:write).";
+                    "Read-only access: ask your GitMini administrator to enable repository write access (repo:write).";
                   return;
                 }
                 const filePath = addFilePath.value.trim();
@@ -1403,7 +1403,7 @@
               const commitChanges = async () => {
                 if (!canWrite.value) {
                   errorMessage.value =
-                    "Read-only access: ask your Git Store administrator to enable repository write access (repo:write).";
+                    "Read-only access: ask your GitMini administrator to enable repository write access (repo:write).";
                   return;
                 }
                 errorMessage.value = "";
@@ -1460,7 +1460,7 @@
                       response.status === 401
                         ? "Your sign-in session expired. Sign in again to upload files."
                         : response.status === 403
-                          ? "Your browser session does not have repository write access (repo:write). Ask your Git Store administrator to enable it."
+                          ? "Your browser session does not have repository write access (repo:write). Ask your GitMini administrator to enable it."
                           : result.error || "Upload failed.";
                     throw new Error(`${message} (${response.status})`);
                   }

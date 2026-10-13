@@ -18,8 +18,8 @@ async function initRepo(repoPath) {
   }
   // Ensure default author identity is configured inside repository
   try {
-    await execGit(["config", "user.name", "git-store"], { cwd: repoPath });
-    await execGit(["config", "user.email", "git-store@local"], { cwd: repoPath });
+    await execGit(["config", "user.name", "GitMini"], { cwd: repoPath });
+    await execGit(["config", "user.email", "gitmini@local"], { cwd: repoPath });
   } catch (err) {
     // ignore config errors if any
   }

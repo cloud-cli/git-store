@@ -1,6 +1,6 @@
-# Git Store
+# GitMini
 
-Git Store is a single-container HTTP service for managing Git repositories.
+GitMini is a single-container HTTP service for managing Git repositories.
 Organization/repository pairs are the primary namespace; OIDC usernames do not
 participate in organization or repository naming.
 
@@ -22,7 +22,7 @@ participate in organization or repository naming.
   token until PAT management is added.
 - Browser sign-in identifies an account by the stable OIDC `sub` claim. Username
   claims have no authentication or naming role and are omitted from the UI profile.
-  Organization slugs are chosen in Git Store and repositories are routed as
+  Organization slugs are chosen in GitMini and repositories are routed as
   `/api/v1/orgs/<org>/repos/<repo>` and `/git/<org>/<repo>.git`.
 - Organization and repository names are short path-only identifiers. The
   authenticated subject's stable hashed `sub` claim is used for organization ownership
@@ -42,13 +42,13 @@ and archived after successful migration.
 ## Run
 
 ```bash
-docker build -t git-store .
+docker build -t gitmini .
 docker run --rm -p 3000:3000 \
   -e DATA_PATH=/home/app/data \
   -e OIDC_ISSUER="$OIDC_ISSUER" \
   -e OIDC_CLIENT_ID="$OIDC_CLIENT_ID" \
   -e OIDC_CLIENT_SECRET="$OIDC_CLIENT_SECRET" \
-  git-store
+  gitmini
 ```
 
 For local development:
@@ -93,14 +93,15 @@ repository/file navigation across reloads. The UI uses refs, computed values, li
 hooks, and event bindings. Framework reference:
 https://li3.static.apphor.de/docs.html.
 The signed-out user card starts OIDC authorization-code + PKCE sign-in; signed-in users
-can open `${OIDC_ISSUER}/me`. The app requests `offline_access` and keeps a validated
-identity and scope snapshot in an opaque signed session. When the provider grants a
-refresh token, it is stored only in the encrypted session store under `DATA_PATH` and
-rotated server-side as access tokens approach expiry; the browser never receives either
-token. These sessions use a renewable 30-day cookie. If the provider does not grant
-refresh tokens, the session remains limited to the access-token lifetime. Keep
-`OIDC_CLIENT_SECRET` stable across restarts and persist `DATA_PATH` to retain both
-repositories and browser sessions.
+can open `${OIDC_ISSUER}/me`. GitMini requests `offline_access` and uses `openid-client`
+for the validated authorization callback and rotating refresh flow. Auth's Node client
+handles UserInfo and token introspection. GitMini keeps a validated identity and scope
+snapshot in an opaque signed session. When the provider grants a refresh token, it is stored
+only in the encrypted session store under `DATA_PATH` and rotated server-side as access
+tokens approach expiry; the browser never receives either token. These sessions use a
+renewable 30-day cookie. If the provider does not grant refresh tokens, the session remains
+limited to the access-token lifetime. Keep `OIDC_CLIENT_SECRET` stable across restarts and
+persist `DATA_PATH` to retain both repositories and browser sessions.
 The topbar presents an explicit Sign in button for guests; its light/dark control updates
 the root theme state using Tailwind v4's class-based variant.
 The repository plus button opens an anchored HTML popover. Empty repositories offer a file upload that creates the initial commit;

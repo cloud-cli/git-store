@@ -33,9 +33,9 @@
 - [x] Add static UI checks for repo-only navigation and outside-click backdrop wiring.
 - [x] Verify mobile sidebar outside-click behavior in Playwright.
 - [x] Verify native upload input and drag/drop feedback in Playwright.
-- [x] Create a disposable Auth Lab OIDC client and configure Git Store to use its issuer/client.
-- [x] Mint and revoke Auth Lab `repo:read`/`repo:write` API tokens and verify scope enforcement against an isolated local Git Store process.
+- [x] Create a disposable Auth Lab OIDC client and configure GitMini to use its issuer/client.
+- [x] Mint and revoke Auth Lab `repo:read`/`repo:write` API tokens and verify scope enforcement against an isolated local GitMini process.
 - [x] Configure JWT signing in disposable Auth Lab and verify its JWKS endpoint.
-- [x] Sign in through Auth Lab's test key, complete the live Git Store OIDC callback, and verify the browser session and scopes.
+- [x] Sign in through Auth Lab's test key, complete the live GitMini OIDC callback, and verify the browser session and scopes.
 - [x] Verify live `repo:read` and `repo:write` API token behavior; revoke temporary test tokens after use.
 - [ ] Fix CI NPM publishing provenance once the runner provides a supported provenance identity; latest failure is `EUSAGE: Automatic provenance generation not supported for provider: null`.
