@@ -353,10 +353,12 @@ test("organization landing renders organizations and recent changes", async ({
   await page.goto("/ui/");
 
   await expect(
-    page.getByRole("heading", { name: "Your organizations" }),
+    page.getByRole("heading", { name: "Organizations" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("link", { name: "example", exact: true }),
+    page
+      .getByRole("navigation", { name: "Organizations" })
+      .getByRole("link", { name: "example", exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Recent changes" }),
@@ -581,15 +583,15 @@ test("commit hashes copy the full hash and folder path segments navigate", async
   await expect(page).not.toHaveURL(/dir=/);
 });
 
-test("header uses a generic primary-color home marker", async ({ page }) => {
+test("header uses the GitMini home logo", async ({ page }) => {
   await page.goto("/ui/?org=example&repo=demo");
 
   const homeLink = page.getByRole("link", { name: "Home" });
   await expect(page).toHaveTitle("GitMini");
   await expect(homeLink).toBeVisible();
-  await expect(homeLink.getByTestId("home-indicator")).toHaveCSS(
-    "background-color",
-    "rgb(59, 113, 75)",
+  await expect(homeLink.getByTestId("home-indicator")).toHaveAttribute(
+    "width",
+    "32",
   );
   await expect(page.locator(".flow-logo-mark, .flow-logo-dot")).toHaveCount(0);
 });

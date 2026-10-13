@@ -67,12 +67,12 @@
             >
               <lucide-icon icon="menu" size="20"></lucide-icon></button
           ></template>
-          <a href="/" class="flex shrink-0 items-center rounded overflow-hidden" aria-label="Home"
+          <a href="/" class="flex shrink-0 items-center rounded-lg overflow-hidden" aria-label="Home"
             ><svg
               data-testid="home-indicator"
               xmlns="http://www.w3.org/2000/svg"
-              width="24"
-              height="24"
+              width="32"
+              height="32"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -93,7 +93,7 @@
               ><a
                 attr-href="orgHref"
                 attr-title="org"
-                class="max-w-[18vw] truncate text-sm font-medium hover:text-brand md:max-w-80"
+                class="max-w-[18vw] truncate text-base font-semibold hover:text-brand md:max-w-80 md:text-lg"
                 >{{ org }}</a
               ></template
             ></template
@@ -103,7 +103,7 @@
             ><a
               attr-href="repoHref"
               attr-title="repo"
-              class="max-md:hidden max-w-[20vw] truncate text-sm font-medium hover:text-brand md:max-w-80"
+              class="max-md:hidden max-w-[20vw] truncate text-base font-semibold hover:text-brand md:max-w-80 md:text-lg"
               >{{ repoLabel }}</a
             ></template
           >
@@ -123,11 +123,11 @@
             ><button
               on-click="openSettings()"
               type="button"
-              class="flex min-h-14 items-center gap-3 rounded-xl border border-gray-200 bg-white py-1.5 pl-2 pr-3 shadow-[0_1px_2px_rgba(28,32,30,0.08)] dark:border-[#344039] dark:bg-[#1a231d] max-md:min-h-11 max-md:gap-2 max-md:px-2 max-md:py-1"
+              class="flex min-h-14 items-center gap-3 rounded-full border border-gray-200 bg-white py-1.5 pl-2 pr-3 shadow-[0_1px_2px_rgba(28,32,30,0.08)] dark:border-[#344039] dark:bg-[#1a231d] max-md:min-h-11 max-md:gap-2 max-md:px-2 max-md:py-1"
               title="Settings"
             >
               <span
-                class="inline-flex size-10 shrink-0 items-center justify-center rounded-full bg-[#d6ecc9] text-[18px] font-bold text-[#2c533c] max-md:size-[34px] max-md:text-[15px]"
+                class="inline-flex size-10 shrink-0 items-center justify-center rounded-full bg-[#263d32] text-[18px] font-bold text-[#c8e6a8] max-md:size-[34px] max-md:text-[15px]"
                 aria-hidden="true"
                 >{{ userInitial }}</span
               >
@@ -137,6 +137,11 @@
                   >{{ userEmail }}</span
                 ></span
               >
+              <lucide-icon
+                icon="chevron-down"
+                size="16"
+                class="shrink-0 text-gray-400"
+              ></lucide-icon>
             </button></template
           >
           <template

@@ -84,70 +84,82 @@
         </section></template
       >
       <template if="!org && organizationsLoaded && organizations.length > 0"
-        ><div class="mx-auto w-full max-w-lg text-left">
-          <h1 class="mb-4 text-2xl font-bold">Your organizations</h1>
-          <ul class="space-y-2">
-            <template for="item of organizations"
-              ><li>
-                <a
+        ><div
+          class="mx-auto flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-2xl border border-[#e1e5e1] bg-white text-left shadow-[0_2px_8px_rgba(28,32,30,0.06)] dark:border-[#344039] dark:bg-[#1a231d] md:flex-row"
+        >
+          <aside
+            class="w-full shrink-0 border-b border-[#e5e9e6] bg-[#f8faf9] p-5 dark:border-[#344039] dark:bg-[#171e19] md:w-64 md:border-b-0 md:border-r"
+          >
+            <h1
+              class="mb-4 px-3 text-xs font-bold uppercase tracking-[0.1em] text-[#78847c] dark:text-[#aab6ac]"
+            >
+              Organizations
+            </h1>
+            <nav aria-label="Organizations" class="space-y-1">
+              <template for="item of organizations"
+                ><a
                   attr-href="organizationHref(item)"
-                  class="flex items-center gap-3 rounded-xl border border-[#e1e5e1] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(28,32,30,0.10)] transition-colors hover:border-green-300 dark:border-[#344039] dark:bg-[#1a231d] dark:hover:border-green-800"
+                  class="flex min-h-11 items-center gap-3 rounded-lg border border-transparent px-3 py-2.5 text-sm font-medium text-[#455149] transition-colors hover:border-[#d7e0d9] hover:bg-white hover:text-[#263d32] dark:text-[#c1cbc3] dark:hover:border-[#344039] dark:hover:bg-[#1a231d] dark:hover:text-[#c8e6a8]"
                   ><lucide-icon
                     icon="building-2"
                     size="18"
-                    class="text-brand"
+                    class="shrink-0 text-[#75857a]"
                   ></lucide-icon
-                  ><span class="font-medium">{{ item.slug }}</span></a
-                >
-              </li></template
+                  ><span class="truncate">{{ item.slug }}</span></a
+                ></template
+              >
+            </nav>
+          </aside>
+          <section class="min-w-0 flex-1 overflow-y-auto p-6 sm:p-8">
+            <header
+              class="mb-7 border-b border-[#e8ece9] pb-5 dark:border-[#344039]"
             >
-          </ul>
-          <section class="mt-6">
-            <h2 class="text-lg font-medium text-gray-700 dark:text-gray-300">
-              Recent changes
-            </h2>
-            <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
-              Last 10 commits across all repositories
-            </p>
-            <div class="mt-3 space-y-3">
-              <template if="!recentCommitsLoaded">
-                <p class="text-gray-400 dark:text-gray-500" role="status">
-                  Loading recent commits…
-                </p>
-              </template>
-              <template if="recentCommitsLoaded && recentCommits.length === 0">
-                <p class="text-gray-400 dark:text-gray-500">
-                  No commits yet.
-                </p>
-              </template>
-              <template if="recentCommitsLoaded && recentCommits.length > 0">
-                <ol class="space-y-2">
-                  <template for="commit of recentCommits">
-                    <li
-                      class="rounded-xl border border-[#e1e5e1] bg-white px-4 py-3 dark:border-[#344039] dark:bg-[#1a231d]"
-                    >
+              <h2 class="text-2xl font-bold tracking-tight text-[#1c201e] dark:text-gray-100">
+                Recent changes
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                The latest commits across your repositories
+              </p>
+            </header>
+            <template if="!recentCommitsLoaded">
+              <p class="text-sm text-gray-500 dark:text-gray-400" role="status">
+                Loading recent changes…
+              </p>
+            </template>
+            <template if="recentCommitsLoaded && recentCommits.length === 0">
+              <p class="py-8 text-sm text-gray-500 dark:text-gray-400">
+                No commits yet.
+              </p>
+            </template>
+            <template if="recentCommitsLoaded && recentCommits.length > 0">
+              <ol class="ml-2 border-l border-[#dce5de] dark:border-[#3a4940]">
+                <template for="commit of recentCommits">
+                  <li class="relative pb-8 pl-7 last:pb-2">
+                    <span
+                      class="absolute -left-[5px] top-1.5 size-[9px] rounded-full bg-brand ring-4 ring-white dark:ring-[#1a231d]"
+                      aria-hidden="true"
+                    ></span>
+                    <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                       <a
                         attr-href="repositoryHref(commit)"
-                        class="font-medium text-brand hover:underline dark:text-green-300"
+                        class="font-semibold text-[#263d32] hover:underline dark:text-[#c8e6a8]"
                       >
-                        {{ commit.org }}/{{ commit.repo }}
+                        {{ commit.message || 'Repository updated' }}
                       </a>
-                      <p
-                        class="mt-1 truncate text-sm text-gray-600 dark:text-gray-300"
-                      >
-                        {{ commit.message || 'No message' }}
-                      </p>
                       <time
-                        class="mt-1 block text-xs text-gray-500 dark:text-gray-400"
+                        class="shrink-0 text-xs text-gray-500 dark:text-gray-400"
                         attr-datetime="commit.date"
                       >
                         {{ formatEventDate(commit.date) }}
                       </time>
-                    </li>
-                  </template>
-                </ol>
-              </template>
-            </div>
+                    </div>
+                    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                      {{ commit.org }}/{{ commit.repo }}
+                    </p>
+                  </li>
+                </template>
+              </ol>
+            </template>
           </section>
         </div>
       </template>
