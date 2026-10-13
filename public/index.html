@@ -123,24 +123,24 @@
             ><button
               on-click="openSettings()"
               type="button"
-              class="flex min-h-14 items-center gap-3 rounded-full border border-gray-200 bg-white py-1.5 pl-2 pr-3 shadow-[0_1px_2px_rgba(28,32,30,0.08)] dark:border-[#344039] dark:bg-[#1a231d] max-md:min-h-11 max-md:gap-2 max-md:px-2 max-md:py-1"
+              class="flex items-center gap-4 rounded-full border border-gray-200 bg-white py-1.5 pl-1.5 pr-4 shadow-sm transition-shadow hover:shadow-md dark:border-[#344039] dark:bg-[#1a231d] max-md:gap-2 max-md:pr-2"
               title="Settings"
             >
               <span
-                class="inline-flex size-10 shrink-0 items-center justify-center rounded-full bg-[#263d32] text-[18px] font-bold text-[#c8e6a8] max-md:size-[34px] max-md:text-[15px]"
+                class="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-brand text-sm font-bold text-white"
                 aria-hidden="true"
                 >{{ userInitial }}</span
               >
-              <span class="hidden text-right leading-tight sm:block"
-                ><span class="block font-medium">{{ userAlias }}</span
-                ><span class="block text-xs text-gray-500 dark:text-gray-400"
+              <span class="hidden flex-col justify-center leading-tight sm:flex"
+                ><span class="text-sm font-semibold text-gray-900 dark:text-gray-100">{{ userAlias }}</span
+                ><span class="text-[10px] text-gray-500 dark:text-gray-400"
                   >{{ userEmail }}</span
                 ></span
               >
               <lucide-icon
                 icon="chevron-down"
                 size="16"
-                class="shrink-0 text-gray-400"
+                class="ml-1 shrink-0 text-gray-400"
               ></lucide-icon>
             </button></template
           >

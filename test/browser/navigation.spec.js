@@ -596,6 +596,12 @@ test("header uses the GitMini home logo", async ({ page }) => {
     "width",
     "32",
   );
+  const userCard = page.locator('button[title="Settings"]');
+  await expect(userCard).toHaveClass(/rounded-full/);
+  await expect(userCard.locator("span[aria-hidden='true']")).toHaveCSS(
+    "width",
+    "32px",
+  );
   await expect(page.locator(".flow-logo-mark, .flow-logo-dot")).toHaveCount(0);
 });
 
