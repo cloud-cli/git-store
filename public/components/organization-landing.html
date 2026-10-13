@@ -1,8 +1,8 @@
 <template component="organization-landing">
   <div
-    class="flex min-h-0 flex-1 items-stretch justify-center py-6 text-center"
+    class="flex min-h-0 w-full flex-1 items-stretch"
   >
-    <div class="mx-auto flex min-h-0 w-full max-w-5xl flex-col p-4 sm:p-8">
+    <div class="flex min-h-0 w-full flex-1 flex-col">
       <template if="orgError"
         ><div class="mx-auto mb-4 max-w-md">
           <p class="mb-2 text-sm text-red-600 dark:text-red-400" role="alert">
@@ -85,7 +85,8 @@
       >
       <template if="!org && organizationsLoaded && organizations.length > 0"
         ><div
-          class="mx-auto flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-2xl border border-[#e1e5e1] bg-white text-left shadow-[0_2px_8px_rgba(28,32,30,0.06)] dark:border-[#344039] dark:bg-[#1a231d] md:flex-row"
+          data-testid="landing-dashboard"
+          class="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden rounded-2xl border border-[#e1e5e1] bg-white text-left shadow-[0_2px_8px_rgba(28,32,30,0.06)] dark:border-[#344039] dark:bg-[#1a231d] md:flex-row"
         >
           <aside
             class="w-full shrink-0 border-b border-[#e5e9e6] bg-[#f8faf9] p-5 dark:border-[#344039] dark:bg-[#171e19] md:w-64 md:border-b-0 md:border-r"

@@ -1,7 +1,26 @@
 import assert from "node:assert/strict";
-import { createAuditStore, createTokenFingerprint } from "../audit.js";
+import {
+  createAuditStore,
+  createDatabaseClient,
+  createTokenFingerprint,
+} from "../audit.js";
 
 async function run() {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl;
+  globalThis.fetch = async (url) => {
+    requestedUrl = String(url);
+    return { ok: true, json: async () => [] };
+  };
+  try {
+    await createDatabaseClient(
+      "https://db.apphor.de/db~audit/index.mjs",
+    ).query("all", "SELECT 1");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.strictEqual(requestedUrl, "https://db.apphor.de/db~audit/query");
+
   const calls = [];
   const client = {
     async query(mode, statement, bindings) {

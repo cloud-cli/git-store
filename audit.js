@@ -13,6 +13,9 @@ function createDatabaseClient(databaseUrl, token = "") {
   if (!/^https?:$/.test(baseUrl.protocol)) {
     throw new Error("DATABASE_URL must use HTTP or HTTPS");
   }
+  if (baseUrl.pathname.endsWith("/index.mjs")) {
+    baseUrl.pathname = baseUrl.pathname.slice(0, -"index.mjs".length);
+  }
   if (!baseUrl.pathname.endsWith("/")) {
     baseUrl.pathname += "/";
   }
