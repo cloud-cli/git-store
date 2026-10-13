@@ -1,5 +1,5 @@
-const assert = require("node:assert/strict");
-const { createAuditStore, createTokenFingerprint } = require("../audit");
+import assert from "node:assert/strict";
+import { createAuditStore, createTokenFingerprint } from "../audit.js";
 
 async function run() {
   const calls = [];

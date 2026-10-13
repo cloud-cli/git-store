@@ -1,5 +1,5 @@
 /* global window */
-const { test, expect } = require("playwright/test");
+import { test, expect } from "playwright/test";
 let currentEntries;
 let currentBranches;
 let currentTags;

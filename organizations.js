@@ -1,7 +1,7 @@
-const fs = require("fs");
-const path = require("path");
-const crypto = require("crypto");
-const { hashSubject, DATA_PATH } = require("./storage");
+import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
+import { hashSubject, DATA_PATH } from "./storage.js";
 
 const organizationsPath = path.join(DATA_PATH, "orgs");
 const registryPath = path.join(DATA_PATH, "organizations.json");
@@ -253,11 +253,4 @@ function create(sub, value) {
 }
 
 reload();
-module.exports = {
-  normalizeSlug,
-  isCanonicalSlug,
-  listForSubject,
-  get,
-  create,
-  reload,
-};
+export { normalizeSlug, isCanonicalSlug, listForSubject, get, create, reload };

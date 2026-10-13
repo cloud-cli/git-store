@@ -1,5 +1,5 @@
-const fs = require("fs");
-const crypto = require("crypto");
+import fs from "node:fs";
+import crypto from "node:crypto";
 
 const DATA_PATH = process.env.DATA_PATH;
 
@@ -65,9 +65,4 @@ function getSubjectHash(req) {
   return hashSubject(req.user.sub);
 }
 
-module.exports = {
-  hashSubject,
-  validateRepoName,
-  getSubjectHash,
-  DATA_PATH,
-};
+export { hashSubject, validateRepoName, getSubjectHash, DATA_PATH };

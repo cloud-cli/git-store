@@ -1,12 +1,17 @@
-const express = require("express");
-const simpleGit = require("simple-git");
-const fs = require("fs");
-const path = require("path");
-const crypto = require("crypto");
-const { spawn } = require("child_process");
-const { validateRepoName, getSubjectHash } = require("./storage");
-const organizations = require("./organizations");
-const { createDatabaseClient, createAuditStore, createTokenFingerprint } = require("./audit");
+import express from "express";
+import * as simpleGit from "simple-git";
+import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { Issuer, generators } from "openid-client";
+import { createAuthClient } from "./auth-client.js";
+import { validateRepoName, getSubjectHash } from "./storage.js";
+import * as organizations from "./organizations.js";
+import { createDatabaseClient, createAuditStore, createTokenFingerprint } from "./audit.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const getGit = (repoPath) => simpleGit.simpleGit(repoPath);
 
@@ -32,6 +37,8 @@ const PORT = process.env.PORT || 3000;
 // OpenID Discovery and Authentication Setup
 let oidcClient;
 let oidcReady = false;
+let authApiClient;
+let authApiClientConfig;
 const browserSessions = new Map();
 const browserSessionRefreshes = new Map();
 const sessionCookieName = "git_store_session";
@@ -47,7 +54,6 @@ async function initializeOidc() {
     return;
   }
   try {
-    const { Issuer } = require("openid-client");
     let issuer = await Issuer.discover(process.env.OIDC_ISSUER);
     if (process.env.OIDC_JWKS_URI) {
       const issuerOrigin = new URL(process.env.OIDC_ISSUER).origin;
@@ -109,6 +115,29 @@ function auditSecurityFailure(req, event, details = {}) {
 
 function getOidcClient() {
   return app.locals.oidcClientOverride || (oidcReady ? oidcClient : null);
+}
+
+function getAuthApiClient() {
+  if (app.locals.authApiClientOverride) {
+    return app.locals.authApiClientOverride;
+  }
+  const config = {
+    issuer: process.env.OIDC_ISSUER || undefined,
+    clientId: process.env.OIDC_CLIENT_ID || undefined,
+    clientSecret: process.env.OIDC_CLIENT_SECRET || undefined,
+    jwksUri: process.env.OIDC_JWKS_URI || undefined,
+  };
+  if (
+    !authApiClient ||
+    authApiClientConfig.issuer !== config.issuer ||
+    authApiClientConfig.clientId !== config.clientId ||
+    authApiClientConfig.clientSecret !== config.clientSecret ||
+    authApiClientConfig.jwksUri !== config.jwksUri
+  ) {
+    authApiClient = createAuthClient(config);
+    authApiClientConfig = config;
+  }
+  return authApiClient;
 }
 
 function parseCookies(header = "") {
@@ -367,19 +396,7 @@ async function introspectAccessToken(token) {
   if (!process.env.OIDC_ISSUER || !process.env.OIDC_CLIENT_ID || !process.env.OIDC_CLIENT_SECRET) {
     return null;
   }
-  const credentials = Buffer.from(`${process.env.OIDC_CLIENT_ID}:${process.env.OIDC_CLIENT_SECRET}`).toString("base64");
-  const response = await fetch(new URL("/oauth/introspect", process.env.OIDC_ISSUER), {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${credentials}`,
-      "content-type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({ token, token_type_hint: "access_token" }),
-  });
-  if (!response.ok) {
-    throw new Error(`OIDC token introspection failed: ${response.status}`);
-  }
-  return response.json();
+  return getAuthApiClient().introspectToken(token);
 }
 
 function isSameOriginRequest(req) {
@@ -1243,14 +1260,8 @@ app.get("/ui/session", async (req, res) => {
       name: claims.name,
     };
     try {
-      const response = await fetch(new URL("/userinfo", issuer), {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "X-Auth-Audience": process.env.OIDC_CLIENT_ID,
-        },
-      });
-      if (response.ok) {
-        const userInfo = await response.json();
+      const userInfo = await getAuthApiClient().getUserInfo(token);
+      if (userInfo && typeof userInfo === "object") {
         const profileSub = userInfo.sub || userInfo.id;
         if (profileSub === claims.sub) {
           profile = { ...profile, ...userInfo, sub: claims.sub };
@@ -1274,7 +1285,6 @@ app.get("/ui/auth/login", (req, res) => {
     return res.status(503).send("OIDC sign-in is not configured.");
   }
   try {
-    const { generators } = require("openid-client");
     const state = generators.state();
     const codeVerifier = generators.codeVerifier();
     const codeChallenge = generators.codeChallenge(codeVerifier);
@@ -1341,16 +1351,10 @@ const handleOidcCallback = async (req, res) => {
     }
 
     callbackStage = "userinfo validation";
-    const userInfoResponse = await fetch(new URL("/userinfo", process.env.OIDC_ISSUER), {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "X-Auth-Audience": process.env.OIDC_CLIENT_ID,
-      },
-    });
-    if (!userInfoResponse.ok) {
+    const userInfo = await getAuthApiClient().getUserInfo(accessToken);
+    if (!userInfo || typeof userInfo !== "object") {
       return res.status(401).send("OIDC sign-in could not verify the access-token profile.");
     }
-    const userInfo = await userInfoResponse.json();
     if ((userInfo.sub || userInfo.id) !== idClaims.sub) {
       return res.status(401).send("OIDC sign-in subject did not match the access-token profile.");
     }
@@ -2234,8 +2238,8 @@ function makeApiSpec() {
   return apiSpec;
 }
 
-if (require.main === module) {
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
 }
 
-module.exports = app;
+export default app;

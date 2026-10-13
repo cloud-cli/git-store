@@ -1,10 +1,14 @@
-const assert = require("assert");
-const fs = require("fs");
-const http = require("http");
-const os = require("os");
-const path = require("path");
-const { execFile } = require("child_process");
-const { promisify } = require("util");
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import http from "node:http";
+import os from "node:os";
+import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
+import { simpleGit } from "simple-git";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
 
 const dataPath = fs.mkdtempSync(path.join(os.tmpdir(), "git-store-test-"));
@@ -13,8 +17,9 @@ process.env.OIDC_ISSUER = "";
 process.env.OIDC_CLIENT_ID = "";
 process.env.OIDC_CLIENT_SECRET = "test-client-secret";
 
-const app = require("../index");
-require("../organizations").create("introspected-subject", "introspected-org");
+const app = (await import("../index.js")).default;
+const organizations = await import("../organizations.js");
+organizations.create("introspected-subject", "introspected-org");
 const auditEvents = [];
 app.locals.auditStore = {
   async append(event) {
@@ -234,18 +239,17 @@ async function run() {
     const organizationMetadata = fs.readFileSync(path.join(dataPath, "orgs", "team-one", ".organization.json"), "utf8");
     assert.ok(!organizationMetadata.includes("oidc-subject-a"), "organization metadata must not persist raw subjects");
     assert.match(JSON.parse(organizationMetadata).ownerHash, /^[a-f0-9]{64}$/);
-    const organizationsModulePath = require.resolve("../organizations");
-    delete require.cache[organizationsModulePath];
-    assert.deepStrictEqual(require("../organizations").listForSubject("oidc-subject-a"), [
+    organizations.reload();
+    assert.deepStrictEqual(organizations.listForSubject("oidc-subject-a"), [
       { slug: "team-extra" },
       { slug: "team-one" },
     ]);
     fs.mkdirSync(path.join(dataPath, "orgs", "broken"), { recursive: true });
     fs.writeFileSync(path.join(dataPath, "orgs", "broken", ".organization.json"), "not json");
     fs.mkdirSync(path.join(dataPath, "orgs", "../escape"), { recursive: true });
-    require("../organizations").reload();
-    assert.strictEqual(require("../organizations").get("broken"), null);
-    assert.strictEqual(require("../organizations").get("../escape"), null);
+    organizations.reload();
+    assert.strictEqual(organizations.get("broken"), null);
+    assert.strictEqual(organizations.get("../escape"), null);
     assert.strictEqual(
       (await request(port, "POST", "/api/v1/orgs/team-one/repos/inside", undefined, "token-a")).status,
       201,
@@ -499,7 +503,7 @@ async function run() {
     assert.strictEqual(readOnlyList.status, 200, "repo:read permits repository listing");
     const readOnlyRepo = path.join(dataPath, "orgs", "reader-org", "read-only-repo");
     fs.mkdirSync(readOnlyRepo, { recursive: true });
-    await require("simple-git").simpleGit(readOnlyRepo).init();
+    await simpleGit(readOnlyRepo).init();
     fs.writeFileSync(path.join(readOnlyRepo, "readme.txt"), "read only");
     assert.strictEqual(
       (await request(port, "DELETE", "/api/v1/repos/read-only-repo/files?path=readme.txt", undefined, "read-only"))
@@ -1045,14 +1049,12 @@ async function run() {
     process.env.OIDC_ISSUER = "https://issuer.example.test";
     process.env.OIDC_CLIENT_ID = "mock-git-store-client";
     process.env.OIDC_BROWSER_SCOPES = "repo:read repo:write";
-    const nativeFetch = global.fetch;
-    global.fetch = async (url, options) => {
-      assert.strictEqual(String(url), "https://issuer.example.test/userinfo");
-      assert.strictEqual(options.headers.Authorization, `Bearer ${oidcAccessToken}`);
-      return {
-        ok: true,
-        json: async () => oidcUserInfo,
-      };
+    const nativeFetch = globalThis.fetch;
+    app.locals.authApiClientOverride = {
+      async getUserInfo(accessToken) {
+        assert.strictEqual(accessToken, oidcAccessToken);
+        return oidcUserInfo;
+      },
     };
     const login = await request(port, "GET", "/ui/auth/login?returnTo=%2F%3Frepo%3Dresume");
     assert.strictEqual(login.status, 302);
@@ -1345,21 +1347,22 @@ async function run() {
     const tokenVerifier = app.locals.verifyToken;
     process.env.OIDC_CLIENT_ID = "mock-git-store-client";
     app.locals.verifyToken = null;
-    global.fetch = async (url, options) => {
+    app.locals.authApiClientOverride = null;
+    globalThis.fetch = async (url, options) => {
       assert.strictEqual(String(url), "https://issuer.example.test/oauth/introspect");
       assert.strictEqual(
         options.headers.Authorization,
         `Basic ${Buffer.from("mock-git-store-client:test-client-secret").toString("base64")}`,
       );
       assert.ok(String(options.body).includes("token=opaque-api-token"));
-      return {
-        ok: true,
-        json: async () => ({
+      return new Response(
+        JSON.stringify({
           active: true,
           sub: "introspected-subject",
           scope: "repo:read repo:write",
         }),
-      };
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
     };
     const introspectedList = await request(port, "GET", "/api/v1/repos", undefined, "opaque-api-token");
     assert.strictEqual(introspectedList.status, 200, "opaque repo:read/write API token should introspect successfully");
@@ -1384,11 +1387,12 @@ async function run() {
     assert.strictEqual(logout.status, 303);
     const loggedOutList = await request(port, "GET", "/api/v1/repos", undefined, undefined, { Cookie: sessionCookie });
     assert.strictEqual(loggedOutList.status, 401, "logout invalidates the browser session");
-    global.fetch = nativeFetch;
+    globalThis.fetch = nativeFetch;
     process.env.OIDC_ISSUER = "";
     process.env.OIDC_CLIENT_ID = "";
     process.env.OIDC_BROWSER_SCOPES = "";
     app.locals.oidcClientOverride = null;
+    app.locals.authApiClientOverride = null;
 
     const uiResponse = await request(port, "GET", "/ui/");
     assert.strictEqual(uiResponse.status, 200);

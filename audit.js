@@ -1,4 +1,4 @@
-const crypto = require("node:crypto");
+import crypto from "node:crypto";
 
 const schemaStatements = [
   "CREATE TABLE IF NOT EXISTS audit_events (id TEXT PRIMARY KEY, occurred_at TEXT NOT NULL, org_slug TEXT NOT NULL, issuer TEXT, subject TEXT, actor_name TEXT, event TEXT NOT NULL, object TEXT NOT NULL, origin TEXT NOT NULL, token_fingerprint TEXT, request_id TEXT, ip_address TEXT, user_agent TEXT, details TEXT NOT NULL DEFAULT '{}')",
@@ -95,4 +95,4 @@ function createTokenFingerprint(token, secret) {
   return crypto.createHmac("sha256", secret).update(token).digest("hex");
 }
 
-module.exports = { createDatabaseClient, createAuditStore, createTokenFingerprint };
+export { createDatabaseClient, createAuditStore, createTokenFingerprint };

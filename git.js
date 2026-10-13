@@ -1,5 +1,5 @@
-const { execFile, spawn } = require("node:child_process");
-const { promisify } = require("node:util");
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 function execGit(args, options = {}) {
@@ -196,7 +196,7 @@ async function listBranches(repoPath) {
     .filter(Boolean);
 }
 
-module.exports = {
+export {
   execGit,
   initRepo,
   hasCommits,
