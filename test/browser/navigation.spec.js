@@ -231,6 +231,20 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/v1/orgs", (route) =>
     route.fulfill({ json: [{ slug: "example" }] }),
   );
+  await page.route("**/api/v1/recent", (route) =>
+    route.fulfill({
+      json: {
+        recent: [
+          {
+            org: "example",
+            repo: "demo",
+            message: "Initial commit",
+            date: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      },
+    }),
+  );
   await page.route("**/api/v1/orgs/example/repos", (route) =>
     route.fulfill({ json: { repos: currentRepositories } }),
   );
@@ -331,6 +345,41 @@ test.beforeEach(async ({ page }) => {
 
 test.afterEach(() => {
   expect(runtimeErrors).toEqual([]);
+});
+
+test("organization landing renders organizations and recent changes", async ({
+  page,
+}) => {
+  await page.goto("/ui/");
+
+  await expect(
+    page.getByRole("heading", { name: "Your organizations" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "example", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Recent changes" }),
+  ).toBeVisible();
+  await expect(page.getByText("Initial commit", { exact: true })).toBeVisible();
+});
+
+test("organization breadcrumb does not retain a repository crumb", async ({
+  page,
+}) => {
+  await page.goto("/ui/?org=example&repo=demo");
+  await expect(
+    page
+      .getByTestId("repository-sidebar-list")
+      .getByRole("link", { name: "demo", exact: true }),
+  ).toBeVisible();
+
+  await page.getByRole("banner").getByRole("link", { name: "example" }).click();
+
+  await expect(page).toHaveURL(/\?org=example$/);
+  await expect(
+    page.getByRole("banner").getByRole("link", { name: "example", exact: true }),
+  ).toHaveCount(1);
 });
 
 test("uploads and branch, tag, and commit mutations update without document reload", async ({

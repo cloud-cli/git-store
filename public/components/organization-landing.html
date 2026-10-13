@@ -102,32 +102,55 @@
               </li></template
             >
           </ul>
-      <div class="mt-6">
-        <h2 class="text-lg font-medium text-gray-700 dark:text-gray-300">Recent changes</h2>
-        <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Last 10 commits across all repositories</p>
-        <div class="space-y-3" id="recent-commits">
-          <template if="!recentCommitsLoaded">
-            <p class="text-gray-400 dark:text-gray-500">Loading recent commits…</p>
-          </template>
-          <template if="recentCommitsLoaded && recentCommits.length === 0">
-            <p class="text-gray-400 dark:text-gray-500">No commits yet.</p>
-          </template>
-          <template if="recentCommitsLoaded && recentCommits.length > 0">
-            <ol class="list-decimal list-inside space-y-1 text-sm">
-              <template for="commit of recentCommits">
-                <li class="flex items-center gap-2">
-                  <span class="truncate min-w-40">{{ commit.org }}/{{ commit.repo }}</span>
-                  <span class="text-xs text-gray-500 dark:text-gray-400">{{ commit.message || 'No message' }}</span>
-                </li>
+          <section class="mt-6">
+            <h2 class="text-lg font-medium text-gray-700 dark:text-gray-300">
+              Recent changes
+            </h2>
+            <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+              Last 10 commits across all repositories
+            </p>
+            <div class="mt-3 space-y-3">
+              <template if="!recentCommitsLoaded">
+                <p class="text-gray-400 dark:text-gray-500" role="status">
+                  Loading recent commits…
+                </p>
               </template>
-            </ol>
-          </template>
+              <template if="recentCommitsLoaded && recentCommits.length === 0">
+                <p class="text-gray-400 dark:text-gray-500">
+                  No commits yet.
+                </p>
+              </template>
+              <template if="recentCommitsLoaded && recentCommits.length > 0">
+                <ol class="space-y-2">
+                  <template for="commit of recentCommits">
+                    <li
+                      class="rounded-xl border border-[#e1e5e1] bg-white px-4 py-3 dark:border-[#344039] dark:bg-[#1a231d]"
+                    >
+                      <a
+                        attr-href="repositoryHref(commit)"
+                        class="font-medium text-brand hover:underline dark:text-green-300"
+                      >
+                        {{ commit.org }}/{{ commit.repo }}
+                      </a>
+                      <p
+                        class="mt-1 truncate text-sm text-gray-600 dark:text-gray-300"
+                      >
+                        {{ commit.message || 'No message' }}
+                      </p>
+                      <time
+                        class="mt-1 block text-xs text-gray-500 dark:text-gray-400"
+                        attr-datetime="commit.date"
+                      >
+                        {{ formatEventDate(commit.date) }}
+                      </time>
+                    </li>
+                  </template>
+                </ol>
+              </template>
+            </div>
+          </section>
         </div>
-      </div>
-    </div></template
-  >
-</template>        </div></template
-      >
+      </template>
       <template if="org && eventsLoaded"
         ><section class="flex min-h-0 flex-1 flex-col text-left">
           <div
@@ -281,8 +304,8 @@
       });
       const events = defineProp("events", { default: () => [] });
       const eventsLoaded = defineProp("eventsLoaded", { default: false });
-      const recentCommits = defineProp("recentCommits", { default: () => [] });
-      const recentCommitsLoaded = defineProp("recentCommitsLoaded", { default: false });
+      const recentCommits = ref([]);
+      const recentCommitsLoaded = ref(false);
       const eventsError = defineProp("eventsError", { default: "" });
       const hasMoreEvents = defineProp("hasMoreEvents", { default: false });
       const profile = defineProp("profile", { default: () => ({}) });
@@ -296,6 +319,10 @@
       const repositoryName = ref("");
       const organizationHref = (item) =>
         `/?org=${encodeURIComponent(item.slug)}`;
+      const repositoryHref = (commit) =>
+        `/?org=${encodeURIComponent(commit.org)}&repo=${encodeURIComponent(
+          commit.repo,
+        )}`;
       const setOrganizationName = (value) => {
         organizationName.value = value;
       };
@@ -364,6 +391,7 @@
         orgError,
         errorMessage,
         organizationHref,
+        repositoryHref,
         setOrganizationName,
         setRepositoryName,
         createOrganization,

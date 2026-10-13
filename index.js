@@ -2122,12 +2122,19 @@ app.get(
         }
       });
       return res.json({ events, hasMore });
+    } catch {
+      return res
+        .status(503)
+        .json({ error: "Audit events are temporarily unavailable" });
+    }
+  },
+);
 app.get("/api/v1/recent", requireAuthentication, async (req, res) => {
-  const organizations = organizations.listForOwnerHash(
+  const ownedOrganizations = organizations.listForOwnerHash(
     getAuthenticatedSubjectHash(req),
   );
   const allCommits = [];
-  for (const org of organizations) {
+  for (const org of ownedOrganizations) {
     const orgReposPath = path.join(
       process.env.DATA_PATH,
       "orgs",
@@ -2143,14 +2150,14 @@ app.get("/api/v1/recent", requireAuthentication, async (req, res) => {
       if (!fs.existsSync(gitPath)) continue;
       try {
         const git = simpleGit.simpleGit(repoPath);
-        const log = await git.log({ n: 1, strictDate: false });
-        if (log.latest) {
-          const message = log.latest[0]?.message?.split(/\r?\n/, 1)[0] || "";
+        const log = await git.log({ n: 10, strictDate: false });
+        for (const commit of log.all) {
+          const message = commit.message?.split(/\r?\n/, 1)[0] || "";
           allCommits.push({
             org: org.slug,
             repo: repoDir.name,
             message,
-            date: log.latest?.[0]?.committer?.time || "",
+            date: commit.date || "",
           });
         }
       } catch {
@@ -2167,13 +2174,6 @@ app.get("/api/v1/recent", requireAuthentication, async (req, res) => {
   const top10 = allCommits.slice(0, 10);
   return res.json({ recent: top10 });
 });
-    } catch {
-      return res
-        .status(503)
-        .json({ error: "Audit events are temporarily unavailable" });
-    }
-  },
-);
 app.use("/api/v1/orgs/:org/repos", requireAuthentication, (req, res, next) => {
   if (!organizations.normalizeSlug(req.params.org)) {
     return res.status(400).json({ error: "Invalid organization slug" });
