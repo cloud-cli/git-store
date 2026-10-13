@@ -2122,6 +2122,51 @@ app.get(
         }
       });
       return res.json({ events, hasMore });
+app.get("/api/v1/recent", requireAuthentication, async (req, res) => {
+  const organizations = organizations.listForOwnerHash(
+    getAuthenticatedSubjectHash(req),
+  );
+  const allCommits = [];
+  for (const org of organizations) {
+    const orgReposPath = path.join(
+      process.env.DATA_PATH,
+      "orgs",
+      org.slug,
+    );
+    if (!fs.existsSync(orgReposPath)) continue;
+    const repoDirs = fs
+      .readdirSync(orgReposPath, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink());
+    for (const repoDir of repoDirs) {
+      const repoPath = path.join(orgReposPath, repoDir.name);
+      const gitPath = path.join(repoPath, ".git");
+      if (!fs.existsSync(gitPath)) continue;
+      try {
+        const git = simpleGit.simpleGit(repoPath);
+        const log = await git.log({ n: 1, strictDate: false });
+        if (log.latest) {
+          const message = log.latest[0]?.message?.split(/\r?\n/, 1)[0] || "";
+          allCommits.push({
+            org: org.slug,
+            repo: repoDir.name,
+            message,
+            date: log.latest?.[0]?.committer?.time || "",
+          });
+        }
+      } catch {
+        // Skip repos that can't be read
+      }
+    }
+  }
+  // Sort by date descending, take top 10
+  allCommits.sort((a, b) => {
+    const ad = new Date(a.date).getTime() || 0;
+    const bd = new Date(b.date).getTime() || 0;
+    return bd - ad;
+  });
+  const top10 = allCommits.slice(0, 10);
+  return res.json({ recent: top10 });
+});
     } catch {
       return res
         .status(503)

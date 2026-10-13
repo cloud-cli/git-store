@@ -102,7 +102,31 @@
               </li></template
             >
           </ul>
-        </div></template
+      <div class="mt-6">
+        <h2 class="text-lg font-medium text-gray-700 dark:text-gray-300">Recent changes</h2>
+        <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Last 10 commits across all repositories</p>
+        <div class="space-y-3" id="recent-commits">
+          <template if="!recentCommitsLoaded">
+            <p class="text-gray-400 dark:text-gray-500">Loading recent commits…</p>
+          </template>
+          <template if="recentCommitsLoaded && recentCommits.length === 0">
+            <p class="text-gray-400 dark:text-gray-500">No commits yet.</p>
+          </template>
+          <template if="recentCommitsLoaded && recentCommits.length > 0">
+            <ol class="list-decimal list-inside space-y-1 text-sm">
+              <template for="commit of recentCommits">
+                <li class="flex items-center gap-2">
+                  <span class="truncate min-w-40">{{ commit.org }}/{{ commit.repo }}</span>
+                  <span class="text-xs text-gray-500 dark:text-gray-400">{{ commit.message || 'No message' }}</span>
+                </li>
+              </template>
+            </ol>
+          </template>
+        </div>
+      </div>
+    </div></template
+  >
+</template>        </div></template
       >
       <template if="org && eventsLoaded"
         ><section class="flex min-h-0 flex-1 flex-col text-left">
@@ -257,6 +281,8 @@
       });
       const events = defineProp("events", { default: () => [] });
       const eventsLoaded = defineProp("eventsLoaded", { default: false });
+      const recentCommits = defineProp("recentCommits", { default: () => [] });
+      const recentCommitsLoaded = defineProp("recentCommitsLoaded", { default: false });
       const eventsError = defineProp("eventsError", { default: "" });
       const hasMoreEvents = defineProp("hasMoreEvents", { default: false });
       const profile = defineProp("profile", { default: () => ({}) });
@@ -300,6 +326,27 @@
         }
         return item.subject;
       };
+      // Fetch recent commits across all repositories
+      const loadRecentCommits = async () => {
+        try {
+          const response = await fetch("/api/v1/recent", {
+            credentials: "same-origin",
+          });
+          if (!response.ok) throw new Error("Failed to fetch recent commits");
+          const data = await response.json();
+          recentCommits.value = data.recent || [];
+          recentCommitsLoaded.value = true;
+        } catch (error) {
+          console.error("Error loading recent commits:", error);
+          recentCommits.value = [];
+          recentCommitsLoaded.value = true;
+        }
+      };
+      // Load on component mount
+      loadRecentCommits().catch(() => {
+        recentCommits.value = [];
+        recentCommitsLoaded.value = true;
+      });
       return {
         org,
         canWrite,
@@ -311,6 +358,8 @@
         eventsLoaded,
         eventsError,
         hasMoreEvents,
+        recentCommits,
+        recentCommitsLoaded,
         profile,
         orgError,
         errorMessage,
