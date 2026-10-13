@@ -4,8 +4,14 @@
     class="absolute z-30 flex h-full w-64 flex-col border-r border-gray-200 bg-gray-50 transition-transform dark:border-gray-800 dark:bg-gray-900 md:relative md:translate-x-0"
     class-open="open"
   >
-    <div class="flex items-center justify-between border-b border-gray-200 p-3 dark:border-gray-800">
-      <h2 class="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">Repositories</h2>
+    <div
+      class="flex items-center justify-between border-b border-gray-200 p-3 dark:border-gray-800"
+    >
+      <h2
+        class="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
+      >
+        Repositories
+      </h2>
       <button
         popovertarget="create-repo-popover"
         class="[anchor-name:--create-repository-anchor] rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-brand dark:hover:bg-gray-800"
@@ -26,12 +32,22 @@
           on-click.prevent="$$emit('select', item)"
           class="flex items-center gap-2 rounded-md px-3 py-2 text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800 [&.selected]:bg-green-50 [&.selected]:text-brand dark:[&.selected]:bg-green-950 dark:[&.selected]:text-green-300"
           class-selected="selected && selected.repo === item.repo"
-          ><lucide-icon icon="bookmark" size="16" class="text-gray-400"></lucide-icon>{{ item.repo }}</a
+          ><lucide-icon
+            icon="bookmark"
+            size="16"
+            class="text-gray-400"
+          ></lucide-icon
+          >{{ item.repo }}</a
         ></template
       >
     </div>
   </aside>
-  <template if="open"><div class="fixed inset-0 z-20 bg-black/50 md:hidden" on-click="$$emit('close')"></div></template>
+  <template if="open"
+    ><div
+      class="fixed inset-0 z-20 bg-black/50 md:hidden"
+      on-click="$$emit('close')"
+    ></div
+  ></template>
   <div
     popover="auto"
     id="create-repo-popover"
@@ -42,7 +58,9 @@
       class="w-full max-w-md rounded-lg border border-gray-200 bg-white p-5 text-gray-900 shadow-xl dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
     >
       <h2 class="text-lg font-semibold">Create repository</h2>
-      <p class="mt-1 text-sm text-gray-500 dark:text-gray-300">Choose a name for your first repository.</p>
+      <p class="mt-1 text-sm text-gray-500 dark:text-gray-300">
+        Choose a name for your first repository.
+      </p>
       <input
         class="mt-4 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 focus:border-brand focus:outline-2 focus:outline-brand/20 focus:outline-offset-1 dark:border-[#46544a] dark:bg-[#111713] dark:text-gray-100 dark:placeholder:text-[#98a49a]"
         placeholder="repository-name"

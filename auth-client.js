@@ -10,7 +10,13 @@
  * import client from './node.mjs';
  * const profile = await client.getProfile(request);
  */
-import { createHash, createPublicKey, randomBytes, timingSafeEqual, verify } from "node:crypto";
+import {
+  createHash,
+  createPublicKey,
+  randomBytes,
+  timingSafeEqual,
+  verify,
+} from "node:crypto";
 
 const defaultIssuer = "https://auth.api.apphor.de";
 const decodeBase64Url = (value) => Buffer.from(value, "base64url");
@@ -21,7 +27,10 @@ function safeStringEqual(left, right) {
   }
   const leftBytes = Buffer.from(left);
   const rightBytes = Buffer.from(right);
-  return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes);
+  return (
+    leftBytes.length === rightBytes.length &&
+    timingSafeEqual(leftBytes, rightBytes)
+  );
 }
 
 /** Decode a compact JWT into its header, payload, signature, and signed bytes. @param {string} token @returns {{header: object, payload: object, signature: Buffer, signed: Buffer}} */
@@ -53,7 +62,9 @@ class AuthApiError extends Error {
 
 /** Read and decode cookies from a Fetch or Node-style request. @param {Request|object} request @returns {Record<string, string>} */
 export function getCookies(request) {
-  const header = request?.headers?.get ? request.headers.get("cookie") : request?.headers?.cookie;
+  const header = request?.headers?.get
+    ? request.headers.get("cookie")
+    : request?.headers?.cookie;
   if (!header) {
     return {};
   }
@@ -101,7 +112,9 @@ export class AuthClient {
     }
     this.issuer = normalizedIssuer;
     this.issuerOrigin = new URL(normalizedIssuer).origin;
-    const normalizedJwksUri = jwksUri ? new URL(jwksUri) : new URL("/.well-known/jwks.json", normalizedIssuer);
+    const normalizedJwksUri = jwksUri
+      ? new URL(jwksUri)
+      : new URL("/.well-known/jwks.json", normalizedIssuer);
     if (normalizedJwksUri.origin !== this.issuerOrigin) {
       throw new Error("OIDC_JWKS_URI must share the issuer origin");
     }
@@ -140,7 +153,16 @@ export class AuthClient {
   /** Send a request to the issuer; `session` forwards the user's session cookie, `admin` forwards an admin session cookie, and `api` uses the configured Auth API bearer token. `form` is URL-encoded, `body` is JSON, and extra options are passed to fetch. @param {string} path @param {{method?: string, request?: Request|object, auth?: 'none'|'session'|'admin'|'api', body?: unknown, form?: Record<string, string>, headers?: Record<string, string>, allowEmpty?: boolean, [fetchOption: string]: unknown}} [options] @returns {Promise<unknown>} */
   async request(
     path,
-    { method = "GET", request, auth = "none", body, form, headers = {}, allowEmpty = false, ...options } = {},
+    {
+      method = "GET",
+      request,
+      auth = "none",
+      body,
+      form,
+      headers = {},
+      allowEmpty = false,
+      ...options
+    } = {},
   ) {
     const url = this.url(path);
     if (url.origin !== this.issuerOrigin) {
@@ -167,9 +189,20 @@ export class AuthClient {
       outgoing["content-type"] = "application/json";
       body = JSON.stringify(body);
     }
-    const response = await fetch(url, { method, headers: outgoing, body, ...options, redirect: "manual" });
+    const response = await fetch(url, {
+      method,
+      headers: outgoing,
+      body,
+      ...options,
+      redirect: "manual",
+    });
     if (!response.ok) {
-      throw new AuthApiError(method, path, response.status, await response.text());
+      throw new AuthApiError(
+        method,
+        path,
+        response.status,
+        await response.text(),
+      );
     }
     if (allowEmpty || response.status === 204) {
       return undefined;
@@ -213,24 +246,46 @@ export class AuthClient {
       throw new Error("Unsupported JWT");
     }
     this.requireClientId();
-    let keys = this.jwks && Date.now() < this.jwksExpiresAt ? this.jwks : await this.getJwks();
-    let jwk = keys.keys?.find((key) => key.kid === header.kid && key.kty === "RSA");
+    let keys =
+      this.jwks && Date.now() < this.jwksExpiresAt
+        ? this.jwks
+        : await this.getJwks();
+    let jwk = keys.keys?.find(
+      (key) => key.kid === header.kid && key.kty === "RSA",
+    );
     if (!jwk && Date.now() - this.jwksLastRefreshAt >= 5000) {
       keys = await this.getJwks();
-      jwk = keys.keys?.find((key) => key.kid === header.kid && key.kty === "RSA");
+      jwk = keys.keys?.find(
+        (key) => key.kid === header.kid && key.kty === "RSA",
+      );
     }
-    if (!jwk || !verify("RSA-SHA256", signed, createPublicKey({ key: jwk, format: "jwk" }), signature)) {
+    if (
+      !jwk ||
+      !verify(
+        "RSA-SHA256",
+        signed,
+        createPublicKey({ key: jwk, format: "jwk" }),
+        signature,
+      )
+    ) {
       throw new Error("Invalid JWT signature");
     }
     const now = Math.floor(Date.now() / 1000),
       audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-    if (payload.iss !== this.issuer || !audiences.includes(this.clientId) || typeof payload.sub !== "string") {
+    if (
+      payload.iss !== this.issuer ||
+      !audiences.includes(this.clientId) ||
+      typeof payload.sub !== "string"
+    ) {
       throw new Error("Invalid JWT claims");
     }
     if (typeof payload.exp !== "number" || payload.exp <= now) {
       throw new Error("Expired JWT");
     }
-    if (payload.nbf !== undefined && (typeof payload.nbf !== "number" || !Number.isFinite(payload.nbf))) {
+    if (
+      payload.nbf !== undefined &&
+      (typeof payload.nbf !== "number" || !Number.isFinite(payload.nbf))
+    ) {
       throw new Error("Invalid JWT not-before claim");
     }
     if (typeof payload.nbf === "number" && payload.nbf > now) {
@@ -243,7 +298,10 @@ export class AuthClient {
     this.requireClientId();
     await this.verifyToken(token);
     return this.request("/userinfo", {
-      headers: { Authorization: `Bearer ${token}`, "X-Auth-Audience": this.clientId },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Auth-Audience": this.clientId,
+      },
     });
   }
   /** Introspect an access token at `/oauth/introspect` using client Basic authentication (OIDC client secret). @param {string} token @returns {Promise<unknown>} */
@@ -302,7 +360,9 @@ export class AuthClient {
       state,
       scope,
       nonce,
-      code_challenge: createHash("sha256").update(codeVerifier).digest("base64url"),
+      code_challenge: createHash("sha256")
+        .update(codeVerifier)
+        .digest("base64url"),
       code_challenge_method: "S256",
     });
     return { url: String(url), state, codeVerifier, nonce, redirectUri };
@@ -312,7 +372,12 @@ export class AuthClient {
     return this.createAuthorizationRequest(options).url;
   }
   /** Exchange an authorization code at `/token`, optionally authenticating with the OIDC client secret. @param {{code: string, codeVerifier: string, redirectUri: string, clientSecret?: string}} options @returns {Promise<object>} Token response; includes `refresh_token` when `offline_access` was granted. */
-  exchangeCode({ code, codeVerifier, redirectUri, clientSecret = this.clientSecret }) {
+  exchangeCode({
+    code,
+    codeVerifier,
+    redirectUri,
+    clientSecret = this.clientSecret,
+  }) {
     this.requireClientId();
     return this.request("/token", {
       method: "POST",
@@ -327,7 +392,11 @@ export class AuthClient {
     });
   }
   /** Complete an authorization-code callback using its saved transaction: validate callback location/state, exchange with PKCE, and verify the ID token and nonce. The caller must load and consume the transaction from a short-lived browser-bound store. @param {{callbackUrl: string|URL, transaction: {state: string, nonce: string, codeVerifier: string, redirectUri: string}, clientSecret?: string}} options @returns {Promise<{tokens: object, claims: object}>} */
-  async completeAuthorization({ callbackUrl, transaction, clientSecret = this.clientSecret }) {
+  async completeAuthorization({
+    callbackUrl,
+    transaction,
+    clientSecret = this.clientSecret,
+  }) {
     this.requireClientId();
     if (
       !transaction ||
@@ -361,10 +430,16 @@ export class AuthClient {
       redirectUri.password ||
       callback.hash
     ) {
-      throw new Error("OIDC callback URL does not match the login redirect URI");
+      throw new Error(
+        "OIDC callback URL does not match the login redirect URI",
+      );
     }
     for (const name of new Set(redirectUri.searchParams.keys())) {
-      if (["code", "state", "error", "error_description", "error_uri"].includes(name)) {
+      if (
+        ["code", "state", "error", "error_description", "error_uri"].includes(
+          name,
+        )
+      ) {
         throw new Error("OIDC redirect URI uses a reserved callback parameter");
       }
       const expectedValues = redirectUri.searchParams.getAll(name);
@@ -373,7 +448,9 @@ export class AuthClient {
         expectedValues.length !== actualValues.length ||
         expectedValues.some((value, index) => value !== actualValues[index])
       ) {
-        throw new Error("OIDC callback URL does not match the login redirect URI");
+        throw new Error(
+          "OIDC callback URL does not match the login redirect URI",
+        );
       }
     }
     const states = callback.searchParams.getAll("state");
@@ -384,11 +461,15 @@ export class AuthClient {
       throw new Error("OIDC callback contains duplicate error parameters");
     }
     if (callback.searchParams.has("error")) {
-      throw new Error(`OIDC authorization failed: ${callback.searchParams.get("error") || "unknown_error"}`);
+      throw new Error(
+        `OIDC authorization failed: ${callback.searchParams.get("error") || "unknown_error"}`,
+      );
     }
     const codes = callback.searchParams.getAll("code");
     if (codes.length !== 1 || !codes[0]) {
-      throw new Error("OIDC callback must contain exactly one authorization code");
+      throw new Error(
+        "OIDC callback must contain exactly one authorization code",
+      );
     }
     const tokens = await this.exchangeCode({
       code: codes[0],
@@ -404,7 +485,9 @@ export class AuthClient {
       typeof tokens.access_token !== "string" ||
       !tokens.access_token
     ) {
-      throw new Error("OIDC token response is missing a required ID or access token");
+      throw new Error(
+        "OIDC token response is missing a required ID or access token",
+      );
     }
     const claims = await this.verifyToken(tokens.id_token);
     const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
@@ -421,7 +504,9 @@ export class AuthClient {
     }
     if (claims.at_hash !== undefined) {
       if (typeof tokens.access_token !== "string") {
-        throw new Error("OIDC token response is missing the access token required to validate at_hash");
+        throw new Error(
+          "OIDC token response is missing the access token required to validate at_hash",
+        );
       }
       const expectedAtHash = createHash("sha256")
         .update(tokens.access_token)
@@ -444,7 +529,9 @@ export class AuthClient {
     const existing = this.refreshRequests.get(key);
     if (existing) {
       if (existing.scope !== scope || existing.clientSecret !== clientSecret) {
-        throw new Error("A refresh with this token is already in progress with different options");
+        throw new Error(
+          "A refresh with this token is already in progress with different options",
+        );
       }
       return existing.promise;
     }
@@ -471,16 +558,26 @@ export class AuthClient {
     if (!getSessionCookie(request, this.sessionCookieName)) {
       return Promise.resolve(null);
     }
-    return this.request("/api/v1/profile", { request, auth: "session" }).catch((error) => {
-      if (error instanceof AuthApiError && [401, 403, 404].includes(error.status)) {
-        return null;
-      }
-      throw error;
-    });
+    return this.request("/api/v1/profile", { request, auth: "session" }).catch(
+      (error) => {
+        if (
+          error instanceof AuthApiError &&
+          [401, 403, 404].includes(error.status)
+        ) {
+          return null;
+        }
+        throw error;
+      },
+    );
   }
   /** Check the user's session with `HEAD /api/v1/profile`. @param {Request|object} request @returns {Promise<void>} */
   checkSession(request) {
-    return this.request("/api/v1/profile", { method: "HEAD", request, auth: "session", allowEmpty: true });
+    return this.request("/api/v1/profile", {
+      method: "HEAD",
+      request,
+      auth: "session",
+      allowEmpty: true,
+    });
   }
   /** Alias for getProfile; uses the user's session cookie. @param {Request|object} request @returns {Promise<unknown|null>} */
   getSessionProfile(request) {
@@ -502,7 +599,12 @@ export class AuthClient {
   }
   /** Sign out the current user via `DELETE /api/v1/profile` using their session cookie. @param {Request|object} request @returns {Promise<void>} */
   signOut(request) {
-    return this.request("/api/v1/profile", { method: "DELETE", request, auth: "session", allowEmpty: true });
+    return this.request("/api/v1/profile", {
+      method: "DELETE",
+      request,
+      auth: "session",
+      allowEmpty: true,
+    });
   }
   /** Update the current user's preferred username via the session-authenticated profile endpoint. @param {Request|object} request @param {string} preferred_username @returns {Promise<unknown>} */
   setPreferredUsername(request, preferred_username) {
@@ -522,18 +624,27 @@ export class AuthClient {
     if (!getSessionCookie(request, this.sessionCookieName)) {
       return Promise.resolve(null);
     }
-    return this.request(`/api/v1/properties/${encodeURIComponent(key)}`, { request, auth: "session" }).catch(
-      (error) => {
-        if (error instanceof AuthApiError && [401, 403, 404].includes(error.status)) {
-          return null;
-        }
-        throw error;
-      },
-    );
+    return this.request(`/api/v1/properties/${encodeURIComponent(key)}`, {
+      request,
+      auth: "session",
+    }).catch((error) => {
+      if (
+        error instanceof AuthApiError &&
+        [401, 403, 404].includes(error.status)
+      ) {
+        return null;
+      }
+      throw error;
+    });
   }
   /** Set a property for the current user via `PUT /api/v1/properties`. @param {Request|object} request @param {string} key @param {unknown} value @returns {Promise<unknown>} */
   setProperty(request, key, value) {
-    return this.request("/api/v1/properties", { method: "PUT", request, auth: "session", body: { key, value } });
+    return this.request("/api/v1/properties", {
+      method: "PUT",
+      request,
+      auth: "session",
+      body: { key, value },
+    });
   }
   /** Delete a current-user property via `DELETE /api/v1/properties/{key}`. @param {Request|object} request @param {string} key @returns {Promise<void>} */
   deleteProperty(request, key) {
@@ -550,7 +661,9 @@ export class AuthClient {
   }
   /** Issue a session-bound token for an audience using the user's session and request Origin. @param {Request|object} request @param {string} audience @returns {Promise<unknown>} */
   issueSessionToken(request, audience) {
-    const origin = request?.headers?.get ? request.headers.get("origin") : request?.headers?.origin;
+    const origin = request?.headers?.get
+      ? request.headers.get("origin")
+      : request?.headers?.origin;
     if (!origin) {
       throw new Error("Origin header required to issue a session token");
     }
@@ -565,11 +678,17 @@ export class AuthClient {
   /** List the current user's API tokens, optionally filtered by client ID; uses their session cookie. @param {Request|object} request @param {string} [clientId] @returns {Promise<unknown>} */
   listUserApiTokens(request, clientId) {
     const query = clientId ? `?clientId=${encodeURIComponent(clientId)}` : "";
-    return this.request(`/api/v1/api-tokens/me${query}`, { request, auth: "session" });
+    return this.request(`/api/v1/api-tokens/me${query}`, {
+      request,
+      auth: "session",
+    });
   }
   /** Admin-session list of API tokens for a client. @param {Request|object} request @param {string} clientId @returns {Promise<unknown>} */
   listApiTokensForClient(request, clientId) {
-    return this.request(`/api/v1/api-tokens/${encodeURIComponent(clientId)}`, { request, auth: "admin" });
+    return this.request(`/api/v1/api-tokens/${encodeURIComponent(clientId)}`, {
+      request,
+      auth: "admin",
+    });
   }
   /** Create a client API token using the admin session. @param {Request|object} request @param {string} clientId @param {object} data @returns {Promise<unknown>} */
   createApiToken(request, clientId, data) {
@@ -582,12 +701,15 @@ export class AuthClient {
   }
   /** Delete a client API token using the admin session. @param {Request|object} request @param {string} clientId @param {string} tokenId @returns {Promise<void>} */
   deleteApiToken(request, clientId, tokenId) {
-    return this.request(`/api/v1/api-tokens/${encodeURIComponent(clientId)}/${encodeURIComponent(tokenId)}`, {
-      method: "DELETE",
-      request,
-      auth: "admin",
-      allowEmpty: true,
-    });
+    return this.request(
+      `/api/v1/api-tokens/${encodeURIComponent(clientId)}/${encodeURIComponent(tokenId)}`,
+      {
+        method: "DELETE",
+        request,
+        auth: "admin",
+        allowEmpty: true,
+      },
+    );
   }
   /** Alias for listApiTokensForClient; requires an admin session. @param {Request|object} request @param {string} clientId @returns {Promise<unknown>} */
   listUserApiTokensForClient(request, clientId) {
@@ -604,20 +726,26 @@ export class AuthClient {
   /** Mint a downstream API token via `/api/v1/api-tokens/{clientId}/issue` using the configured Auth API bearer token, not OIDC client credentials. @param {{label: string, scopes: string[]}} options @returns {Promise<unknown>} */
   mintApiToken({ label, scopes }) {
     this.requireClientId();
-    return this.request(`/api/v1/api-tokens/${encodeURIComponent(this.clientId)}/issue`, {
-      method: "POST",
-      auth: "api",
-      body: { label, scopes },
-    });
+    return this.request(
+      `/api/v1/api-tokens/${encodeURIComponent(this.clientId)}/issue`,
+      {
+        method: "POST",
+        auth: "api",
+        body: { label, scopes },
+      },
+    );
   }
   /** Append downstream scopes to this client's scope list with the configured Auth API bearer token. Existing scopes cannot be removed through this operation. @param {string[]} scopes @returns {Promise<{scopes: string[]}>} */
   addApiTokenScopes(scopes) {
     this.requireClientId();
-    return this.request(`/api/v1/api-tokens/${encodeURIComponent(this.clientId)}/scopes`, {
-      method: "POST",
-      auth: "api",
-      body: { scopes },
-    });
+    return this.request(
+      `/api/v1/api-tokens/${encodeURIComponent(this.clientId)}/scopes`,
+      {
+        method: "POST",
+        auth: "api",
+        body: { scopes },
+      },
+    );
   }
   /** List OIDC clients using the admin session cookie. @param {Request|object} request @returns {Promise<unknown>} */
   listOidcClients(request) {
@@ -625,7 +753,12 @@ export class AuthClient {
   }
   /** Create an OIDC client using the admin session; response may include its one-time client secret. @param {Request|object} request @param {{id: string, redirectUris: string[], postLogoutRedirectUris?: string[], scopes?: string[], isPublic?: boolean}} data @returns {Promise<unknown>} */
   createOidcClient(request, data) {
-    return this.request("/api/v1/oidc/clients", { method: "POST", request, auth: "admin", body: data });
+    return this.request("/api/v1/oidc/clients", {
+      method: "POST",
+      request,
+      auth: "admin",
+      body: data,
+    });
   }
   /** Delete an OIDC client using the admin session. @param {Request|object} request @param {string} id @returns {Promise<void>} */
   deleteOidcClient(request, id) {
@@ -638,51 +771,69 @@ export class AuthClient {
   }
   /** Replace a client's registered post-logout redirect URLs using the admin session. @param {Request|object} request @param {string} id @param {string[]} postLogoutRedirectUris @returns {Promise<unknown>} */
   setClientLogoutRedirects(request, id, postLogoutRedirectUris) {
-    return this.request(`/api/v1/oidc/clients/${encodeURIComponent(id)}/logout-redirects`, {
-      method: "PUT",
-      request,
-      auth: "admin",
-      body: { postLogoutRedirectUris },
-    });
+    return this.request(
+      `/api/v1/oidc/clients/${encodeURIComponent(id)}/logout-redirects`,
+      {
+        method: "PUT",
+        request,
+        auth: "admin",
+        body: { postLogoutRedirectUris },
+      },
+    );
   }
   /** Regenerate an OIDC client's secret using the admin session; the new secret may be returned once. @param {Request|object} request @param {string} id @returns {Promise<unknown>} */
   regenerateOidcClientSecret(request, id) {
-    return this.request(`/api/v1/oidc/clients/${encodeURIComponent(id)}/secret`, {
-      method: "PUT",
-      request,
-      auth: "admin",
-    });
+    return this.request(
+      `/api/v1/oidc/clients/${encodeURIComponent(id)}/secret`,
+      {
+        method: "PUT",
+        request,
+        auth: "admin",
+      },
+    );
   }
   /** Replace an OIDC client's scopes using the admin session. @param {Request|object} request @param {string} id @param {string[]} scopes @returns {Promise<unknown>} */
   setOidcClientScopes(request, id, scopes) {
-    return this.request(`/api/v1/oidc/clients/${encodeURIComponent(id)}/scopes`, {
-      method: "PUT",
-      request,
-      auth: "admin",
-      body: { scopes },
-    });
+    return this.request(
+      `/api/v1/oidc/clients/${encodeURIComponent(id)}/scopes`,
+      {
+        method: "PUT",
+        request,
+        auth: "admin",
+        body: { scopes },
+      },
+    );
   }
   /** List a client's Auth API tokens using the admin session. @param {Request|object} request @param {string} clientId @returns {Promise<unknown>} */
   listAuthApiTokens(request, clientId) {
-    return this.request(`/api/v1/auth-api-tokens/${encodeURIComponent(clientId)}`, { request, auth: "admin" });
+    return this.request(
+      `/api/v1/auth-api-tokens/${encodeURIComponent(clientId)}`,
+      { request, auth: "admin" },
+    );
   }
   /** Create a client's fixed-purpose Auth API token using the admin session; its bearer value is returned only once. @param {Request|object} request @param {string} clientId @param {string} label @returns {Promise<unknown>} */
   createAuthApiToken(request, clientId, label) {
-    return this.request(`/api/v1/auth-api-tokens/${encodeURIComponent(clientId)}`, {
-      method: "POST",
-      request,
-      auth: "admin",
-      body: { label },
-    });
+    return this.request(
+      `/api/v1/auth-api-tokens/${encodeURIComponent(clientId)}`,
+      {
+        method: "POST",
+        request,
+        auth: "admin",
+        body: { label },
+      },
+    );
   }
   /** Delete a client's Auth API token using the admin session. @param {Request|object} request @param {string} clientId @param {string} tokenId @returns {Promise<void>} */
   deleteAuthApiToken(request, clientId, tokenId) {
-    return this.request(`/api/v1/auth-api-tokens/${encodeURIComponent(clientId)}/${encodeURIComponent(tokenId)}`, {
-      method: "DELETE",
-      request,
-      auth: "admin",
-      allowEmpty: true,
-    });
+    return this.request(
+      `/api/v1/auth-api-tokens/${encodeURIComponent(clientId)}/${encodeURIComponent(tokenId)}`,
+      {
+        method: "DELETE",
+        request,
+        auth: "admin",
+        allowEmpty: true,
+      },
+    );
   }
   /** Retrieve signing keys using the admin session. @param {Request|object} request @returns {Promise<unknown>} */
   getKeys(request) {
@@ -690,12 +841,19 @@ export class AuthClient {
   }
   /** Rotate signing keys using the admin session; affects issued-token signing keys. @param {Request|object} request @returns {Promise<unknown>} */
   rotateKeys(request) {
-    return this.request("/api/v1/keys/rotate", { method: "POST", request, auth: "admin" });
+    return this.request("/api/v1/keys/rotate", {
+      method: "POST",
+      request,
+      auth: "admin",
+    });
   }
   /** Query audit records using the user's session cookie. @param {Request|object} request @param {Record<string, string>} [query] @returns {Promise<unknown>} */
   getAudit(request, query = {}) {
     const url = this.url("/api/v1/audit", query);
-    return this.request(url.pathname + url.search, { request, auth: "session" });
+    return this.request(url.pathname + url.search, {
+      request,
+      auth: "session",
+    });
   }
   /** Fetch audit filter options using the user's session cookie. @param {Request|object} request @returns {Promise<unknown>} */
   getAuditOptions(request) {

@@ -7,7 +7,9 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const organizationsModuleUrl = pathToFileURL(path.join(__dirname, "..", "organizations.js")).href;
+const organizationsModuleUrl = pathToFileURL(
+  path.join(__dirname, "..", "organizations.js"),
+).href;
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "org-migration-"));
 const script = `
 import fs from "node:fs";
@@ -42,7 +44,11 @@ run.reload();
 if (!run.get("empty-org") || run.get("broken") || run.get("BAD")) throw Error("corrupt org isolation failed");
 `;
 try {
-  const valid = spawnSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8" });
+  const valid = spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", script],
+    { encoding: "utf8" },
+  );
   assert.strictEqual(valid.status, 0, valid.stderr);
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
@@ -53,7 +59,10 @@ try {
   const hash = createHash("sha256").update("healthy-subject").digest("hex");
   const healthyDir = path.join(malformedRoot, "orgs", "healthy");
   fs.mkdirSync(healthyDir, { recursive: true });
-  fs.writeFileSync(path.join(healthyDir, ".organization.json"), JSON.stringify({ slug: "healthy", ownerHash: hash }));
+  fs.writeFileSync(
+    path.join(healthyDir, ".organization.json"),
+    JSON.stringify({ slug: "healthy", ownerHash: hash }),
+  );
   fs.writeFileSync(path.join(malformedRoot, "organizations.json"), "not-json");
   const result = spawnSync(
     process.execPath,
@@ -65,8 +74,14 @@ try {
     { encoding: "utf8" },
   );
   assert.strictEqual(result.status, 0, result.stderr);
-  assert.strictEqual(fs.readFileSync(path.join(malformedRoot, "organizations.json"), "utf8"), "not-json");
-  assert.strictEqual(fs.existsSync(path.join(malformedRoot, "organizations.json.migrated")), false);
+  assert.strictEqual(
+    fs.readFileSync(path.join(malformedRoot, "organizations.json"), "utf8"),
+    "not-json",
+  );
+  assert.strictEqual(
+    fs.existsSync(path.join(malformedRoot, "organizations.json.migrated")),
+    false,
+  );
 
   const mixedRoot = fs.mkdtempSync(path.join(os.tmpdir(), "org-mixed-"));
   try {
@@ -92,10 +107,20 @@ try {
       if(orgs.create("another-subject","unrecognized")!==false) throw Error("existing directory was overwritten");
       if(fs.readdirSync(unknown).join()!==before) throw Error("existing directory was modified");
     `;
-    const mixed = spawnSync(process.execPath, ["--input-type=module", "-e", mixedScript], { encoding: "utf8" });
+    const mixed = spawnSync(
+      process.execPath,
+      ["--input-type=module", "-e", mixedScript],
+      { encoding: "utf8" },
+    );
     assert.strictEqual(mixed.status, 0, mixed.stderr);
-    const source = fs.readFileSync(path.join(mixedRoot, "organizations.json"), "utf8");
-    assert.ok(source.includes("../escape"), "original mixed legacy source remains available for recovery");
+    const source = fs.readFileSync(
+      path.join(mixedRoot, "organizations.json"),
+      "utf8",
+    );
+    assert.ok(
+      source.includes("../escape"),
+      "original mixed legacy source remains available for recovery",
+    );
   } finally {
     fs.rmSync(mixedRoot, { recursive: true, force: true });
   }

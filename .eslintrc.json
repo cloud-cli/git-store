@@ -11,7 +11,7 @@
   },
   "rules": {
     "curly": ["error", "all"],
-    "no-unused-vars": ["warn", {"argsIgnorePattern": "^_"}],
+    "no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
     "no-console": "warn",
     "eqeqeq": "error",
     "indent": ["error", 2],

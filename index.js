@@ -5,24 +5,36 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { Issuer, generators } from "openid-client";
-import { createAuthClient } from "./auth-client.js";
+import * as oidc from "openid-client";
+import { createOidcConfigurations } from "./oidc-client.js";
 import { validateRepoName, getSubjectHash } from "./storage.js";
 import * as organizations from "./organizations.js";
-import { createDatabaseClient, createAuditStore, createTokenFingerprint } from "./audit.js";
+import {
+  createDatabaseClient,
+  createAuditStore,
+  createTokenFingerprint,
+} from "./audit.js";
+import {
+  PersonalAccessTokenStore,
+  normalizeTokenExpiry,
+} from "./personal-access-tokens.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const getGit = (repoPath) => simpleGit.simpleGit(repoPath);
 
 const app = express();
-app.locals.auditStore = createAuditStore(createDatabaseClient(process.env.DATABASE_URL, process.env.DB_AUTH_TOKEN));
+app.locals.auditStore = createAuditStore(
+  createDatabaseClient(process.env.DATABASE_URL, process.env.DB_AUTH_TOKEN),
+);
 app.use((req, res, next) => {
   req.requestId = crypto.randomUUID();
   res.set("X-Request-Id", req.requestId);
   res.once("finish", () => {
     if (res.statusCode >= 400 && !req.auditFailureRecorded) {
-      auditSecurityFailure(req, "security.request.denied", { status: res.statusCode });
+      auditSecurityFailure(req, "security.request.denied", {
+        status: res.statusCode,
+      });
     }
   });
   next();
@@ -36,13 +48,17 @@ const PORT = process.env.PORT || 3000;
 
 // OpenID Discovery and Authentication Setup
 let oidcClient;
+let oidcIntrospectionClient;
 let oidcReady = false;
-let authApiClient;
-let authApiClientConfig;
 const browserSessions = new Map();
 const browserSessionRefreshes = new Map();
 const sessionCookieName = "git_store_session";
-const browserSessionStorePath = process.env.DATA_PATH ? path.join(process.env.DATA_PATH, ".browser-sessions") : null;
+const browserSessionStorePath = process.env.DATA_PATH
+  ? path.join(process.env.DATA_PATH, ".browser-sessions")
+  : null;
+const personalAccessTokens = new PersonalAccessTokenStore(
+  path.join(process.env.DATA_PATH, "personal-access-tokens.json"),
+);
 const browserSessionMaxAge = 30 * 24 * 60 * 60 * 1000;
 const accessTokenRefreshSkew = 60 * 1000;
 
@@ -50,24 +66,30 @@ const accessTokenRefreshSkew = 60 * 1000;
 // This is not an HTTP feature: production requests always use OIDC validation.
 
 async function initializeOidc() {
-  if (!process.env.OIDC_ISSUER || !process.env.OIDC_CLIENT_ID || !process.env.OIDC_CLIENT_SECRET) {
+  if (
+    !process.env.OIDC_ISSUER ||
+    !process.env.OIDC_CLIENT_ID ||
+    !process.env.OIDC_CLIENT_SECRET
+  ) {
     return;
   }
   try {
-    let issuer = await Issuer.discover(process.env.OIDC_ISSUER);
-    if (process.env.OIDC_JWKS_URI) {
-      const issuerOrigin = new URL(process.env.OIDC_ISSUER).origin;
-      const jwksUrl = new URL(process.env.OIDC_JWKS_URI);
-      if (jwksUrl.origin !== issuerOrigin) {
-        throw new Error("OIDC JWKS endpoint must share the issuer origin");
-      }
-      issuer = new Issuer({ ...issuer.metadata, jwks_uri: jwksUrl.toString() });
-    }
-    oidcClient = new issuer.Client({
-      client_id: process.env.OIDC_CLIENT_ID,
-      client_secret: process.env.OIDC_CLIENT_SECRET,
-      token_endpoint_auth_method: "client_secret_post",
-    });
+    const discovered = await oidc.discovery(
+      new URL(process.env.OIDC_ISSUER),
+      process.env.OIDC_CLIENT_ID,
+      process.env.OIDC_CLIENT_SECRET,
+      oidc.ClientSecretPost(process.env.OIDC_CLIENT_SECRET),
+    );
+    const configurations = createOidcConfigurations(
+      discovered.serverMetadata(),
+      {
+        clientId: process.env.OIDC_CLIENT_ID,
+        clientSecret: process.env.OIDC_CLIENT_SECRET,
+        jwksUri: process.env.OIDC_JWKS_URI,
+      },
+    );
+    oidcClient = configurations.oidc;
+    oidcIntrospectionClient = configurations.introspection;
     oidcReady = true;
   } catch {
     oidcReady = false;
@@ -76,18 +98,29 @@ async function initializeOidc() {
 initializeOidc();
 
 function auditOrgFromRequest(req) {
-  const slug = req.organization?.slug || req.organizationSlug || req.params?.org;
-  return typeof slug === "string" && organizations.get(slug) ? organizations.get(slug).slug : null;
+  const slug =
+    req.organization?.slug || req.organizationSlug || req.params?.org;
+  return typeof slug === "string" && organizations.get(slug)
+    ? organizations.get(slug).slug
+    : null;
 }
 
-async function recordAuditEvent(req, event, object = "", details = {}, org = auditOrgFromRequest(req)) {
+async function recordAuditEvent(
+  req,
+  event,
+  object = "",
+  details = {},
+  org = auditOrgFromRequest(req),
+) {
   const store = app.locals.auditStore;
   if (!store || !org) {
     return;
   }
-  const actorName = [req.user?.name, req.user?.preferred_username, req.user?.profile?.name].find(
-    (value) => typeof value === "string" && value.trim(),
-  );
+  const actorName = [
+    req.user?.name,
+    req.user?.preferred_username,
+    req.user?.profile?.name,
+  ].find((value) => typeof value === "string" && value.trim());
   try {
     await store.append({
       org,
@@ -97,47 +130,50 @@ async function recordAuditEvent(req, event, object = "", details = {}, org = aud
       event,
       object,
       origin: req.authType || (req.auditToken ? "token" : "unknown"),
-      tokenFingerprint: createTokenFingerprint(req.auditToken, process.env.OIDC_CLIENT_SECRET),
+      tokenFingerprint: createTokenFingerprint(
+        req.auditToken,
+        process.env.OIDC_CLIENT_SECRET,
+      ),
       requestId: req.requestId,
       ipAddress: req.socket?.remoteAddress || null,
       userAgent: req.get?.("user-agent") || null,
       details,
     });
   } catch (error) {
-    process.stderr.write(`[audit] event persistence failed: ${error.message}\n`);
+    process.stderr.write(
+      `[audit] event persistence failed: ${error.message}\n`,
+    );
   }
 }
 
 function auditSecurityFailure(req, event, details = {}) {
   req.auditFailureRecorded = true;
-  void recordAuditEvent(req, event, req.path, { method: req.method, ...details });
+  void recordAuditEvent(req, event, req.path, {
+    method: req.method,
+    ...details,
+  });
 }
 
 function getOidcClient() {
   return app.locals.oidcClientOverride || (oidcReady ? oidcClient : null);
 }
 
-function getAuthApiClient() {
-  if (app.locals.authApiClientOverride) {
-    return app.locals.authApiClientOverride;
+function callOidcOperation(client, operation, ...args) {
+  if (client === app.locals.oidcClientOverride) {
+    if (typeof client?.[operation] !== "function") {
+      throw new Error(`OIDC test client does not implement ${operation}`);
+    }
+    return client[operation](...args);
   }
-  const config = {
-    issuer: process.env.OIDC_ISSUER || undefined,
-    clientId: process.env.OIDC_CLIENT_ID || undefined,
-    clientSecret: process.env.OIDC_CLIENT_SECRET || undefined,
-    jwksUri: process.env.OIDC_JWKS_URI || undefined,
-  };
-  if (
-    !authApiClient ||
-    authApiClientConfig.issuer !== config.issuer ||
-    authApiClientConfig.clientId !== config.clientId ||
-    authApiClientConfig.clientSecret !== config.clientSecret ||
-    authApiClientConfig.jwksUri !== config.jwksUri
-  ) {
-    authApiClient = createAuthClient(config);
-    authApiClientConfig = config;
-  }
-  return authApiClient;
+  return oidc[operation](client, ...args);
+}
+
+function getTokenExpiresIn(tokenSet) {
+  const value =
+    typeof tokenSet?.expiresIn === "function"
+      ? tokenSet.expiresIn()
+      : Number(tokenSet?.expires_in);
+  return Number(value);
 }
 
 function parseCookies(header = "") {
@@ -147,18 +183,30 @@ function parseCookies(header = "") {
       if (separator < 0) {
         return [part.trim(), ""];
       }
-      return [part.slice(0, separator).trim(), decodeURIComponent(part.slice(separator + 1).trim())];
+      return [
+        part.slice(0, separator).trim(),
+        decodeURIComponent(part.slice(separator + 1).trim()),
+      ];
     }),
   );
 }
 
 function signSessionId(id) {
-  return crypto.createHmac("sha256", process.env.OIDC_CLIENT_SECRET).update(id).digest("base64url");
+  return crypto
+    .createHmac("sha256", process.env.OIDC_CLIENT_SECRET)
+    .update(id)
+    .digest("base64url");
 }
 
 function browserSessionStoreKey() {
   const secret = process.env.OIDC_CLIENT_SECRET;
-  return secret ? crypto.createHash("sha256").update("git-store-browser-sessions\0").update(secret).digest() : null;
+  return secret
+    ? crypto
+        .createHash("sha256")
+        .update("git-store-browser-sessions\0")
+        .update(secret)
+        .digest()
+    : null;
 }
 
 function isValidBrowserSession(session) {
@@ -167,9 +215,11 @@ function isValidBrowserSession(session) {
     typeof session.sub === "string" &&
     typeof session.scope === "string" &&
     (session.accessTokenExpiresAt === undefined ||
-      (Number.isFinite(session.accessTokenExpiresAt) && session.accessTokenExpiresAt > 0)) &&
+      (Number.isFinite(session.accessTokenExpiresAt) &&
+        session.accessTokenExpiresAt > 0)) &&
     (session.refreshToken === undefined ||
-      (typeof session.refreshToken === "string" && session.refreshToken.length > 0)) &&
+      (typeof session.refreshToken === "string" &&
+        session.refreshToken.length > 0)) &&
     Number.isFinite(session.expiresAt) &&
     session.expiresAt > Date.now() &&
     session.profile &&
@@ -186,10 +236,18 @@ function loadBrowserSessions() {
 
   try {
     const stored = JSON.parse(fs.readFileSync(browserSessionStorePath, "utf8"));
-    if (stored.version !== 1 || typeof stored.iv !== "string" || typeof stored.tag !== "string") {
+    if (
+      stored.version !== 1 ||
+      typeof stored.iv !== "string" ||
+      typeof stored.tag !== "string"
+    ) {
       return;
     }
-    const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(stored.iv, "base64url"));
+    const decipher = crypto.createDecipheriv(
+      "aes-256-gcm",
+      key,
+      Buffer.from(stored.iv, "base64url"),
+    );
     decipher.setAuthTag(Buffer.from(stored.tag, "base64url"));
     const plaintext = Buffer.concat([
       decipher.update(Buffer.from(stored.data, "base64url")),
@@ -216,15 +274,23 @@ function persistBrowserSessions() {
   }
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-  const sessions = [...browserSessions.entries()].filter(([, session]) => isValidBrowserSession(session));
-  const encrypted = Buffer.concat([cipher.update(JSON.stringify(sessions), "utf8"), cipher.final()]);
+  const sessions = [...browserSessions.entries()].filter(([, session]) =>
+    isValidBrowserSession(session),
+  );
+  const encrypted = Buffer.concat([
+    cipher.update(JSON.stringify(sessions), "utf8"),
+    cipher.final(),
+  ]);
   const stored = JSON.stringify({
     version: 1,
     iv: iv.toString("base64url"),
     tag: cipher.getAuthTag().toString("base64url"),
     data: encrypted.toString("base64url"),
   });
-  fs.mkdirSync(path.dirname(browserSessionStorePath), { recursive: true, mode: 0o700 });
+  fs.mkdirSync(path.dirname(browserSessionStorePath), {
+    recursive: true,
+    mode: 0o700,
+  });
   const temporaryPath = `${browserSessionStorePath}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`;
   fs.writeFileSync(temporaryPath, stored, { mode: 0o600 });
   fs.renameSync(temporaryPath, browserSessionStorePath);
@@ -236,15 +302,20 @@ async function refreshBrowserSession(id, session) {
     return existingRefresh;
   }
   const client = getOidcClient();
-  if (!client || typeof client.refresh !== "function" || !session.refreshToken) {
+  if (!client || !session.refreshToken) {
     return null;
   }
 
   const refresh = Promise.resolve().then(async () => {
-    const tokenSet = await client.refresh(session.refreshToken);
+    const tokenSet = await callOidcOperation(
+      client,
+      "refreshTokenGrant",
+      session.refreshToken,
+    );
     const accessToken = tokenSet.access_token;
-    const idClaims = typeof tokenSet.claims === "function" ? tokenSet.claims() : null;
-    const expiresIn = Number(tokenSet.expires_in);
+    const idClaims =
+      typeof tokenSet.claims === "function" ? tokenSet.claims() : null;
+    const expiresIn = getTokenExpiresIn(tokenSet);
     if (
       typeof accessToken !== "string" ||
       !accessToken ||
@@ -253,7 +324,9 @@ async function refreshBrowserSession(id, session) {
       !Number.isFinite(expiresIn) ||
       expiresIn <= 0
     ) {
-      throw new Error("OIDC refresh response did not match the browser session");
+      throw new Error(
+        "OIDC refresh response did not match the browser session",
+      );
     }
 
     const now = Date.now();
@@ -287,7 +360,11 @@ function renewBrowserSessionCookie(req, res, session) {
   try {
     const redirectUri = getOidcRedirectUri(req);
     const maxAge = Math.max(0, session.expiresAt - Date.now());
-    res.cookie(sessionCookieName, `${session.id}.${signSessionId(session.id)}`, cookieOptions(redirectUri, maxAge));
+    res.cookie(
+      sessionCookieName,
+      `${session.id}.${signSessionId(session.id)}`,
+      cookieOptions(redirectUri, maxAge),
+    );
     res.set("Cache-Control", "no-store");
   } catch {
     // A refreshed in-memory session remains usable even if this request cannot renew its cookie.
@@ -311,7 +388,10 @@ async function getBrowserSession(req, res, { refresh = true } = {}) {
   const expected = signSessionId(id);
   const providedBuffer = Buffer.from(signature);
   const expectedBuffer = Buffer.from(expected);
-  if (providedBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(providedBuffer, expectedBuffer)) {
+  if (
+    providedBuffer.length !== expectedBuffer.length ||
+    !crypto.timingSafeEqual(providedBuffer, expectedBuffer)
+  ) {
     return null;
   }
   let session = browserSessions.get(id);
@@ -328,7 +408,11 @@ async function getBrowserSession(req, res, { refresh = true } = {}) {
   const accessTokenExpiresAt = Number.isFinite(session.accessTokenExpiresAt)
     ? session.accessTokenExpiresAt
     : session.expiresAt;
-  if (refresh && session.refreshToken && accessTokenExpiresAt <= Date.now() + accessTokenRefreshSkew) {
+  if (
+    refresh &&
+    session.refreshToken &&
+    accessTokenExpiresAt <= Date.now() + accessTokenRefreshSkew
+  ) {
     try {
       const refreshedSession = await refreshBrowserSession(id, session);
       if (refreshedSession) {
@@ -344,7 +428,9 @@ async function getBrowserSession(req, res, { refresh = true } = {}) {
       }
     }
   }
-  const currentAccessTokenExpiresAt = Number.isFinite(session.accessTokenExpiresAt)
+  const currentAccessTokenExpiresAt = Number.isFinite(
+    session.accessTokenExpiresAt,
+  )
     ? session.accessTokenExpiresAt
     : session.expiresAt;
   if (currentAccessTokenExpiresAt <= Date.now()) {
@@ -365,7 +451,10 @@ app.locals.reloadBrowserSessions = loadBrowserSessions;
 app.get(["/ui/", "/ui/index.html"], async (req, res, next) => {
   let html;
   try {
-    html = fs.readFileSync(path.join(__dirname, "public", "index.html"), "utf8");
+    html = fs.readFileSync(
+      path.join(__dirname, "public", "index.html"),
+      "utf8",
+    );
   } catch (error) {
     return next(error);
   }
@@ -377,15 +466,23 @@ app.get(["/ui/", "/ui/index.html"], async (req, res, next) => {
       checked: true,
       authenticated: true,
       profile: session.profile,
+      canRead: session.scope.split(/\s+/).includes("repo:read") || session.scope.split(/\s+/).includes("repo:write"),
       canWrite: session.scope.split(/\s+/).includes("repo:write"),
     }
-    : { checked: true, authenticated: false, profile: null, canWrite: false };
-  const serialized = JSON.stringify(bootstrap).replace(/[<>&\u2028\u2029]/g, (character) => {
-    return `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`;
-  });
+    : { checked: true, authenticated: false, profile: null, canRead: false, canWrite: false };
+  const serialized = JSON.stringify(bootstrap).replace(
+    /[<>&\u2028\u2029]/g,
+    (character) => {
+      return `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`;
+    },
+  );
   const bootstrapScript = `<script>window.__gitStoreSession=${serialized};</script>`;
   res.set("Cache-Control", "no-store");
-  return res.type("html").send(html.replace("<!-- git-store-session-bootstrap -->", bootstrapScript));
+  return res
+    .type("html")
+    .send(
+      html.replace("<!-- git-store-session-bootstrap -->", bootstrapScript),
+    );
 });
 app.use("/ui", express.static(path.join(__dirname, "public")));
 
@@ -393,17 +490,31 @@ async function introspectAccessToken(token) {
   if (app.locals.verifyToken) {
     return app.locals.verifyToken(token);
   }
-  if (!process.env.OIDC_ISSUER || !process.env.OIDC_CLIENT_ID || !process.env.OIDC_CLIENT_SECRET) {
+  if (
+    !process.env.OIDC_ISSUER ||
+    !process.env.OIDC_CLIENT_ID ||
+    !process.env.OIDC_CLIENT_SECRET
+  ) {
     return null;
   }
-  return getAuthApiClient().introspectToken(token);
+  const client =
+    app.locals.oidcClientOverride ||
+    (oidcReady ? oidcIntrospectionClient : null);
+  if (!client) {
+    return null;
+  }
+  return callOidcOperation(client, "tokenIntrospection", token, {
+    token_type_hint: "access_token",
+  });
 }
 
 function isSameOriginRequest(req) {
   const origin = req.get("origin");
   if (origin) {
     try {
-      return new URL(origin).host.toLowerCase() === req.get("host").toLowerCase();
+      return (
+        new URL(origin).host.toLowerCase() === req.get("host").toLowerCase()
+      );
     } catch {
       return false;
     }
@@ -419,8 +530,12 @@ function getOidcRedirectUri(req) {
   if (baseUrl) {
     return new URL("/ui/auth/callback", baseUrl).toString();
   }
-  const protocol = (req.get("x-forwarded-proto") || req.protocol || "http").split(",")[0].trim();
-  const host = (req.get("x-forwarded-host") || req.get("host") || "").split(",")[0].trim();
+  const protocol = (req.get("x-forwarded-proto") || req.protocol || "http")
+    .split(",")[0]
+    .trim();
+  const host = (req.get("x-forwarded-host") || req.get("host") || "")
+    .split(",")[0]
+    .trim();
   if (!host || !["http", "https"].includes(protocol)) {
     throw new Error("OIDC redirect URL is not configured");
   }
@@ -438,7 +553,12 @@ function cookieOptions(redirectUri, maxAge) {
 }
 
 function safeReturnPath(value) {
-  if (typeof value !== "string" || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) {
+  if (
+    typeof value !== "string" ||
+    !value.startsWith("/") ||
+    value.startsWith("//") ||
+    value.includes("\\")
+  ) {
     return "/";
   }
   return value;
@@ -469,27 +589,42 @@ async function requireAuthentication(req, res, next) {
     const token = header.slice(7).trim();
     req.auditToken = token;
     try {
-      const claims = await introspectAccessToken(token);
+      const personalToken = personalAccessTokens.authenticate(token);
+      const claims = personalToken.recognized
+        ? personalToken.claims
+        : await introspectAccessToken(token);
       if (!claims || !claims.active) {
-        auditSecurityFailure(req, "security.auth.denied", { reason: "inactive_token" });
+        auditSecurityFailure(req, "security.auth.denied", {
+          reason: "inactive_token",
+        });
         return res.status(401).json({ error: "Unauthorized: inactive token" });
       }
       if (typeof claims.sub !== "string" || !claims.sub.trim()) {
-        auditSecurityFailure(req, "security.auth.denied", { reason: "missing_subject" });
-        return res.status(401).json({ error: "Unauthorized: missing subject claim" });
+        auditSecurityFailure(req, "security.auth.denied", {
+          reason: "missing_subject",
+        });
+        return res
+          .status(401)
+          .json({ error: "Unauthorized: missing subject claim" });
       }
       req.user = claims;
-      req.authType = "bearer";
+      req.authType = personalToken.recognized
+        ? "personal-access-token"
+        : "bearer";
       return next();
     } catch {
-      auditSecurityFailure(req, "security.auth.denied", { reason: "invalid_token" });
+      auditSecurityFailure(req, "security.auth.denied", {
+        reason: "invalid_token",
+      });
       return res.status(401).json({ error: "Unauthorized: invalid token" });
     }
   }
 
   // Browser sessions use a signed cookie backed by an encrypted subject/scope snapshot and
   // optional rotating refresh token. Access tokens are never retained after sign-in.
-  const session = isSameOriginRequest(req) ? await getBrowserSession(req, res) : null;
+  const session = isSameOriginRequest(req)
+    ? await getBrowserSession(req, res)
+    : null;
   if (session && isSameOriginRequest(req)) {
     req.user = {
       sub: session.sub,
@@ -501,7 +636,9 @@ async function requireAuthentication(req, res, next) {
     return next();
   }
 
-  auditSecurityFailure(req, "security.auth.denied", { reason: "missing_or_invalid_credentials" });
+  auditSecurityFailure(req, "security.auth.denied", {
+    reason: "missing_or_invalid_credentials",
+  });
   return res.status(401).json({ error: "Unauthorized" });
 }
 
@@ -516,9 +653,38 @@ function getTokenScopes(claims) {
   return new Set();
 }
 
+function getAuthenticatedSubjectHash(req) {
+  return req.authType === "personal-access-token"
+    ? req.user.ownerHash
+    : getSubjectHash(req);
+}
+
+function tokenResourceAllowsRequest(req) {
+  if (
+    req.authType !== "personal-access-token" ||
+    !req.user.tokenResource?.repo
+  ) {
+    return true;
+  }
+  const org = req.organizationSlug || req.organization?.slug || req.params?.org;
+  return (
+    org === req.user.tokenResource.org &&
+    req.params?.repo === req.user.tokenResource.repo
+  );
+}
+
 function sanitizeUserProfile(profile, subject) {
   const safeProfile = { sub: subject };
-  for (const key of ["id", "name", "email", "picture", "avatar", "avatar_url", "image", "photo"]) {
+  for (const key of [
+    "id",
+    "name",
+    "email",
+    "picture",
+    "avatar",
+    "avatar_url",
+    "image",
+    "photo",
+  ]) {
     if (typeof profile?.[key] === "string") {
       safeProfile[key] = profile[key];
     }
@@ -530,10 +696,27 @@ function requireScope(scope) {
   return (req, res, next) => {
     const scopes = getTokenScopes(req.user);
     const allowed =
-      scope === "repo:read" ? scopes.has("repo:read") || scopes.has("repo:write") : scopes.has("repo:write");
+      scope === "repo:read"
+        ? scopes.has("repo:read") || scopes.has("repo:write")
+        : scopes.has("repo:write");
+    if (!tokenResourceAllowsRequest(req)) {
+      auditSecurityFailure(req, "security.access.denied", {
+        reason: "token_resource_mismatch",
+      });
+      return res
+        .status(403)
+        .json({
+          error: "Forbidden: token is restricted to a different repository",
+        });
+    }
     if (!allowed) {
-      auditSecurityFailure(req, "security.access.denied", { reason: "insufficient_scope", requiredScope: scope });
-      return res.status(403).json({ error: `Forbidden: requires ${scope} scope` });
+      auditSecurityFailure(req, "security.access.denied", {
+        reason: "insufficient_scope",
+        requiredScope: scope,
+      });
+      return res
+        .status(403)
+        .json({ error: `Forbidden: requires ${scope} scope` });
     }
     return next();
   };
@@ -543,7 +726,9 @@ function requireGitBasicAuth(req, res, next) {
   const header = req.headers.authorization || "";
   const match = /^Basic\s+([A-Za-z0-9+/]+=*)$/i.exec(header);
   if (!match) {
-    auditSecurityFailure(req, "security.auth.denied", { reason: "missing_git_credentials" });
+    auditSecurityFailure(req, "security.auth.denied", {
+      reason: "missing_git_credentials",
+    });
     res.set("WWW-Authenticate", 'Basic realm="GitMini", charset="UTF-8"');
     return res.status(401).send("Git HTTP authentication required");
   }
@@ -556,14 +741,25 @@ function requireGitBasicAuth(req, res, next) {
   const separator = decoded.indexOf(":");
   const token = separator < 0 ? "" : decoded.slice(separator + 1);
   if (separator < 0 || !token) {
-    auditSecurityFailure(req, "security.auth.denied", { reason: "missing_git_token" });
+    auditSecurityFailure(req, "security.auth.denied", {
+      reason: "missing_git_token",
+    });
     res.set("WWW-Authenticate", 'Basic realm="GitMini", charset="UTF-8"');
     return res.status(401).send("Git HTTP authentication required");
   }
   req.auditToken = token;
-  Promise.resolve(introspectAccessToken(token))
+  const personalToken = personalAccessTokens.authenticate(token);
+  Promise.resolve(
+    personalToken.recognized
+      ? personalToken.claims
+      : introspectAccessToken(token),
+  )
     .then((claims) => {
-      if (!claims?.active || typeof claims.sub !== "string" || !claims.sub.trim()) {
+      if (
+        !claims?.active ||
+        typeof claims.sub !== "string" ||
+        !claims.sub.trim()
+      ) {
         auditSecurityFailure(req, "security.auth.denied", {
           reason: claims?.active ? "missing_subject" : "inactive_token",
         });
@@ -571,18 +767,25 @@ function requireGitBasicAuth(req, res, next) {
         return res.status(401).send("Invalid Git credentials");
       }
       req.user = claims;
-      req.authType = "git-token";
+      req.authType = personalToken.recognized
+        ? "personal-access-token"
+        : "git-token";
       return next();
     })
     .catch(() => {
-      auditSecurityFailure(req, "security.auth.denied", { reason: "invalid_token" });
+      auditSecurityFailure(req, "security.auth.denied", {
+        reason: "invalid_token",
+      });
       res.set("WWW-Authenticate", 'Basic realm="GitMini", charset="UTF-8"');
       return res.status(401).send("Invalid Git credentials");
     });
 }
 
 async function readRepositoryRefs(repoPath) {
-  const stdout = await getGit(repoPath).raw(["for-each-ref", "--format=%(refname)%00%(objectname)"]);
+  const stdout = await getGit(repoPath).raw([
+    "for-each-ref",
+    "--format=%(refname)%00%(objectname)",
+  ]);
   return new Map(
     stdout
       .split("\n")
@@ -599,24 +802,46 @@ async function gitSmartHttp(req, res) {
     /^\/git\/([A-Za-z0-9](?:[A-Za-z0-9._-]{0,61}[A-Za-z0-9])?)\/([A-Za-z0-9][A-Za-z0-9._-]{0,99})\.git\/(info\/refs|git-upload-pack|git-receive-pack)$/.exec(
       req.path,
     );
-  if (!match || !validateRepoName(match[2]) || Object.keys(req.query).some((key) => key !== "service")) {
+  if (
+    !match ||
+    !validateRepoName(match[2]) ||
+    Object.keys(req.query).some((key) => key !== "service")
+  ) {
     return res.status(400).send("Malformed Git request");
   }
   const orgSlug = match[1];
   const repo = match[2];
   const operation = match[3];
-  const subjectHash = getSubjectHash(req);
+  const subjectHash = getAuthenticatedSubjectHash(req);
   const organization = organizations.get(orgSlug);
   if (!organization || organization.ownerHash !== subjectHash) {
-    auditSecurityFailure(req, "security.access.denied", { reason: "organization_not_accessible" });
+    auditSecurityFailure(req, "security.access.denied", {
+      reason: "organization_not_accessible",
+    });
     return res.status(404).send("Repository not found");
   }
   req.organization = organization;
   req.organizationSlug = organization.slug;
+  if (
+    req.authType === "personal-access-token" &&
+    req.user.tokenResource?.repo &&
+    (req.user.tokenResource.org !== organization.slug ||
+      req.user.tokenResource.repo !== repo)
+  ) {
+    auditSecurityFailure(req, "security.access.denied", {
+      reason: "token_resource_mismatch",
+    });
+    return res
+      .status(403)
+      .send("Token is restricted to a different repository");
+  }
   const repoRoot = path.join(process.env.DATA_PATH, "orgs", organization.slug);
   const service = req.query.service;
   let write;
-  if (operation === "info/refs" && (service === "git-upload-pack" || service === "git-receive-pack")) {
+  if (
+    operation === "info/refs" &&
+    (service === "git-upload-pack" || service === "git-receive-pack")
+  ) {
     write = service === "git-receive-pack";
   } else if (operation === "git-upload-pack" && req.method === "POST") {
     write = false;
@@ -629,7 +854,11 @@ async function gitSmartHttp(req, res) {
     return res.status(405).send("Method not allowed");
   }
   const scopes = getTokenScopes(req.user);
-  if (write ? !scopes.has("repo:write") : !scopes.has("repo:read") && !scopes.has("repo:write")) {
+  if (
+    write
+      ? !scopes.has("repo:write")
+      : !scopes.has("repo:read") && !scopes.has("repo:write")
+  ) {
     if (write) {
       auditSecurityFailure(req, "security.access.denied", {
         reason: "insufficient_scope",
@@ -648,7 +877,9 @@ async function gitSmartHttp(req, res) {
     try {
       refsBefore = await readRepositoryRefs(repoPath);
     } catch (error) {
-      process.stderr.write(`[audit] unable to inspect refs before push: ${error.message}\n`);
+      process.stderr.write(
+        `[audit] unable to inspect refs before push: ${error.message}\n`,
+      );
       return res.status(500).send("Unable to inspect repository refs");
     }
   }
@@ -741,29 +972,45 @@ async function gitSmartHttp(req, res) {
       res.status(code === 0 ? 200 : 500);
     }
     if (code !== 0) {
-      process.stderr.write(`[git-http-backend] ${code}: ${stderr.slice(0, 500)}\n`);
+      process.stderr.write(
+        `[git-http-backend] ${code}: ${stderr.slice(0, 500)}\n`,
+      );
     }
     const finish = async () => {
       if (isPush && code === 0) {
         try {
           const refsAfter = await readRepositoryRefs(repoPath);
-          const changedRefs = new Set([...refsBefore.keys(), ...refsAfter.keys()]);
+          const changedRefs = new Set([
+            ...refsBefore.keys(),
+            ...refsAfter.keys(),
+          ]);
           for (const ref of changedRefs) {
             const before = refsBefore.get(ref) || null;
             const after = refsAfter.get(ref) || null;
             if (before === after) {
               continue;
             }
-            const refType = ref.startsWith("refs/heads/") ? "branch" : ref.startsWith("refs/tags/") ? "tag" : "ref";
+            const refType = ref.startsWith("refs/heads/")
+              ? "branch"
+              : ref.startsWith("refs/tags/")
+                ? "tag"
+                : "ref";
             const action = !before ? "created" : !after ? "deleted" : "updated";
-            await recordAuditEvent(req, `git.${refType}.${action}`, `${organization.slug}/${repo}@${ref}`, {
-              ref,
-              before,
-              after,
-            });
+            await recordAuditEvent(
+              req,
+              `git.${refType}.${action}`,
+              `${organization.slug}/${repo}@${ref}`,
+              {
+                ref,
+                before,
+                after,
+              },
+            );
           }
         } catch (error) {
-          process.stderr.write(`[audit] unable to inspect push refs: ${error.message}\n`);
+          process.stderr.write(
+            `[audit] unable to inspect push refs: ${error.message}\n`,
+          );
         }
       }
       res.end();
@@ -787,6 +1034,25 @@ function getSafeRepoPath(repo, req) {
     return false;
   }
   return path.join(req.organizationPath, repo);
+}
+
+function repositoryExists(org, repo) {
+  if (!organizations.normalizeSlug(org) || !validateRepoName(repo)) {
+    return false;
+  }
+  const repoPath = path.join(process.env.DATA_PATH, "orgs", org, repo);
+  try {
+    const repoStat = fs.lstatSync(repoPath);
+    const gitStat = fs.lstatSync(path.join(repoPath, ".git"));
+    return (
+      repoStat.isDirectory() &&
+      !repoStat.isSymbolicLink() &&
+      gitStat.isDirectory() &&
+      !gitStat.isSymbolicLink()
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** Resolve a repository-relative path and reject lexical or symlink escapes. */
@@ -821,7 +1087,10 @@ function safeRepoFile(repoPath, relativePath) {
     }
 
     const realExistingPath = fs.realpathSync(existingPath);
-    if (realExistingPath !== realRoot && !realExistingPath.startsWith(`${realRoot}${path.sep}`)) {
+    if (
+      realExistingPath !== realRoot &&
+      !realExistingPath.startsWith(`${realRoot}${path.sep}`)
+    ) {
       return null;
     }
     return target;
@@ -841,7 +1110,9 @@ function isValidGitRef(ref) {
     !ref.includes("@{") &&
     !ref.endsWith(".") &&
     !ref.endsWith("/") &&
-    !ref.split("/").some((part) => part.startsWith(".") || part.endsWith(".lock"))
+    !ref
+      .split("/")
+      .some((part) => part.startsWith(".") || part.endsWith(".lock"))
   );
 }
 
@@ -856,7 +1127,12 @@ function isValidGitRef(ref) {
 async function treeEntries(directory, relative = "") {
   const git = getGit(path.resolve(directory));
   const status = await git.status();
-  const dirty = new Set([...status.not_added, ...status.modified, ...status.created, ...status.deleted]);
+  const dirty = new Set([
+    ...status.not_added,
+    ...status.modified,
+    ...status.created,
+    ...status.deleted,
+  ]);
   return fs
     .readdirSync(directory, { withFileTypes: true })
     .map((entry) => ({
@@ -897,12 +1173,48 @@ async function createRepo(req, res) {
       await git.addConfig("user.email", "gitmini@local");
     }
 
-    await recordAuditEvent(req, "repository.created", `${req.organization.slug}/${repo}`);
-    return res.status(201).json({ message: `Repository ${repo} is ready`, repo });
+    await recordAuditEvent(
+      req,
+      "repository.created",
+      `${req.organization.slug}/${repo}`,
+    );
+    return res
+      .status(201)
+      .json({ message: `Repository ${repo} is ready`, repo });
   } catch (error) {
-    const code = typeof error.code === "string" ? error.code : "REPO_INITIALIZATION_FAILED";
+    const code =
+      typeof error.code === "string"
+        ? error.code
+        : "REPO_INITIALIZATION_FAILED";
     process.stderr.write(`[repo-create] ${code}\n`);
     return res.status(500).json({ error: "Repository creation failed", code });
+  }
+}
+
+async function deleteRepo(req, res) {
+  const repo = req.params.repo;
+  if (!validateRepoName(repo)) {
+    return res.status(400).json({ error: "Invalid repository name" });
+  }
+  const repoPath = getSafeRepoPath(repo, req);
+  if (!repoPath || !repositoryExists(req.organization.slug, repo)) {
+    return res.status(404).json({ error: "Repository not found" });
+  }
+  try {
+    const organizationRoot = fs.realpathSync(req.organizationPath);
+    const realRepoPath = fs.realpathSync(repoPath);
+    if (path.dirname(realRepoPath) !== organizationRoot) {
+      return res.status(404).json({ error: "Repository not found" });
+    }
+    fs.rmSync(realRepoPath, { recursive: true, force: false });
+    await recordAuditEvent(
+      req,
+      "repository.deleted",
+      `${req.organization.slug}/${repo}`,
+    );
+    return res.status(204).end();
+  } catch {
+    return res.status(500).json({ error: "Repository deletion failed" });
   }
 }
 
@@ -929,8 +1241,14 @@ async function getRepoLog(req, res) {
   const limit = req.query.limit;
   let logOptions;
   if (limit !== undefined) {
-    if (typeof limit !== "string" || !/^[1-9]\d*$/.test(limit) || Number(limit) > 1000) {
-      return res.status(400).json({ error: "Limit must be an integer between 1 and 1000." });
+    if (
+      typeof limit !== "string" ||
+      !/^[1-9]\d*$/.test(limit) ||
+      Number(limit) > 1000
+    ) {
+      return res
+        .status(400)
+        .json({ error: "Limit must be an integer between 1 and 1000." });
     }
     logOptions = { maxCount: Number(limit) };
   }
@@ -970,12 +1288,18 @@ async function getRepoTree(req, res) {
   }
 
   const directory = safeRepoFile(repoPath, req.query.path || "");
-  if (!directory || !fs.existsSync(directory) || !fs.statSync(directory).isDirectory()) {
+  if (
+    !directory ||
+    !fs.existsSync(directory) ||
+    !fs.statSync(directory).isDirectory()
+  ) {
     return res.status(404).json({ error: "Directory not found" });
   }
 
   try {
-    return res.json(await treeEntries(directory, path.relative(repoPath, directory)));
+    return res.json(
+      await treeEntries(directory, path.relative(repoPath, directory)),
+    );
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
@@ -1052,7 +1376,12 @@ async function uploadRepoFile(req, res) {
     return res.status(404).json({ error: "Repo not found" });
   }
 
-  if (!req.body || typeof req.body.path !== "string" || !req.body.path.trim() || typeof req.body.content !== "string") {
+  if (
+    !req.body ||
+    typeof req.body.path !== "string" ||
+    !req.body.path.trim() ||
+    typeof req.body.content !== "string"
+  ) {
     return res.status(400).json({ error: "Invalid file" });
   }
 
@@ -1064,7 +1393,11 @@ async function uploadRepoFile(req, res) {
   try {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, Buffer.from(req.body.content, "base64"));
-    await recordAuditEvent(req, "repository.file.uploaded", `${req.organization.slug}/${repo}/${req.body.path}`);
+    await recordAuditEvent(
+      req,
+      "repository.file.uploaded",
+      `${req.organization.slug}/${repo}/${req.body.path}`,
+    );
     return res.status(201).json({ path: req.body.path, staged: false });
   } catch (error) {
     return res.status(500).json({ error: error.message });
@@ -1224,7 +1557,8 @@ app.get("/api", (req, res) => res.json(makeApiSpec()));
 app.get("/ui/config", (req, res) => {
   const issuer = process.env.OIDC_ISSUER;
   const oidcConfigured = Boolean(
-    app.locals.oidcClientOverride || (issuer && process.env.OIDC_CLIENT_ID && process.env.OIDC_CLIENT_SECRET),
+    app.locals.oidcClientOverride ||
+    (issuer && process.env.OIDC_CLIENT_ID && process.env.OIDC_CLIENT_SECRET),
   );
   return res.json({
     oidcUserUrl: issuer ? `${issuer.replace(/\/$/, "")}/me` : null,
@@ -1237,22 +1571,33 @@ app.get("/ui/session", async (req, res) => {
     return res.json({ authenticated: false, profile: null });
   }
   try {
-    const browserSession = isSameOriginRequest(req) ? await getBrowserSession(req, res) : null;
+    const browserSession = isSameOriginRequest(req)
+      ? await getBrowserSession(req, res)
+      : null;
     if (browserSession && isSameOriginRequest(req)) {
       res.set("Cache-Control", "no-store");
       return res.json({
         authenticated: true,
         profile: browserSession.profile,
+        canRead:
+          browserSession.scope.split(/\s+/).includes("repo:read") ||
+          browserSession.scope.split(/\s+/).includes("repo:write"),
         canWrite: browserSession.scope.split(/\s+/).includes("repo:write"),
       });
     }
     const authorization = req.headers.authorization || "";
-    const token = /^Bearer\s+/i.test(authorization) ? authorization.slice(7).trim() : null;
+    const token = /^Bearer\s+/i.test(authorization)
+      ? authorization.slice(7).trim()
+      : null;
     if (!token) {
       return res.json({ authenticated: false, profile: null });
     }
     const claims = await introspectAccessToken(token);
-    if (!claims?.active || typeof claims.sub !== "string" || !claims.sub.trim()) {
+    if (
+      !claims?.active ||
+      typeof claims.sub !== "string" ||
+      !claims.sub.trim()
+    ) {
       return res.json({ authenticated: false, profile: null });
     }
     let profile = {
@@ -1260,10 +1605,14 @@ app.get("/ui/session", async (req, res) => {
       name: claims.name,
     };
     try {
-      const userInfo = await getAuthApiClient().getUserInfo(token);
+      const userInfo = await callOidcOperation(
+        getOidcClient(),
+        "fetchUserInfo",
+        token,
+        claims.sub,
+      );
       if (userInfo && typeof userInfo === "object") {
-        const profileSub = userInfo.sub || userInfo.id;
-        if (profileSub === claims.sub) {
+        if (userInfo.sub === claims.sub) {
           profile = { ...profile, ...userInfo, sub: claims.sub };
         }
       }
@@ -1279,30 +1628,37 @@ app.get("/ui/session", async (req, res) => {
   }
 });
 
-app.get("/ui/auth/login", (req, res) => {
+app.get("/ui/auth/login", async (req, res) => {
   const client = getOidcClient();
   if (!client) {
     return res.status(503).send("OIDC sign-in is not configured.");
   }
   try {
-    const state = generators.state();
-    const codeVerifier = generators.codeVerifier();
-    const codeChallenge = generators.codeChallenge(codeVerifier);
+    const state = oidc.randomState();
+    const nonce = oidc.randomNonce();
+    const codeVerifier = oidc.randomPKCECodeVerifier();
+    const codeChallenge = await oidc.calculatePKCECodeChallenge(codeVerifier);
     const redirectUri = getOidcRedirectUri(req);
     const options = cookieOptions(redirectUri, 10 * 60 * 1000);
     res.cookie("git_oidc_state", state, options);
     res.cookie("git_oidc_verifier", codeVerifier, options);
+    res.cookie("git_oidc_nonce", nonce, options);
     res.cookie("git_oidc_return", safeReturnPath(req.query.returnTo), options);
-    const authorizationUrl = client.authorizationUrl({
-      response_type: "code",
-      redirect_uri: redirectUri,
-      scope: "openid profile email offline_access",
-      state,
-      code_challenge: codeChallenge,
-      code_challenge_method: "S256",
-    });
+    const authorizationUrl = callOidcOperation(
+      client,
+      "buildAuthorizationUrl",
+      {
+        response_type: "code",
+        redirect_uri: redirectUri,
+        scope: "openid profile email offline_access",
+        state,
+        nonce,
+        code_challenge: codeChallenge,
+        code_challenge_method: "S256",
+      },
+    );
     res.set("Cache-Control", "no-store");
-    return res.redirect(302, authorizationUrl);
+    return res.redirect(302, authorizationUrl.href);
   } catch {
     return res.status(503).send("OIDC sign-in could not be started.");
   }
@@ -1325,44 +1681,79 @@ const handleOidcCallback = async (req, res) => {
   const cookies = parseCookies(req.headers.cookie);
   const state = cookies.git_oidc_state;
   const codeVerifier = cookies.git_oidc_verifier;
+  const nonce = cookies.git_oidc_nonce;
   const returnTo = safeReturnPath(cookies.git_oidc_return);
   clearLoginCookies(res, options);
-  if (!state || !codeVerifier || req.query.state !== state) {
-    return res.status(400).send("OIDC sign-in response was invalid. Please try again.");
+  if (!state || !codeVerifier || !nonce || req.query.state !== state) {
+    return res
+      .status(400)
+      .send("OIDC sign-in response was invalid. Please try again.");
   }
   if (typeof req.query.error === "string") {
-    return res.status(401).send("OIDC sign-in was cancelled or could not be completed. Please try again.");
+    return res
+      .status(401)
+      .send(
+        "OIDC sign-in was cancelled or could not be completed. Please try again.",
+      );
   }
   if (typeof req.query.code !== "string") {
-    return res.status(400).send("OIDC sign-in response was invalid. Please try again.");
+    return res
+      .status(400)
+      .send("OIDC sign-in response was invalid. Please try again.");
   }
 
   let callbackStage = "authorization-code exchange and ID-token validation";
   try {
-    const tokenSet = await client.callback(
-      redirectUri,
-      { code: req.query.code, state: req.query.state },
-      { state, code_verifier: codeVerifier },
+    const callbackUrl = new URL(redirectUri);
+    callbackUrl.search = new URL(
+      req.originalUrl,
+      "http://gitmini.invalid",
+    ).search;
+    const tokenSet = await callOidcOperation(
+      client,
+      "authorizationCodeGrant",
+      callbackUrl,
+      {
+        expectedState: state,
+        pkceCodeVerifier: codeVerifier,
+        expectedNonce: nonce,
+      },
     );
     const accessToken = tokenSet.access_token;
-    const idClaims = tokenSet.claims();
-    if (!accessToken || typeof idClaims.sub !== "string" || !idClaims.sub.trim()) {
-      return res.status(401).send("OIDC sign-in did not return a valid repository identity.");
+    const idClaims =
+      typeof tokenSet.claims === "function" ? tokenSet.claims() : null;
+    if (
+      !accessToken ||
+      typeof idClaims?.sub !== "string" ||
+      !idClaims.sub.trim()
+    ) {
+      return res
+        .status(401)
+        .send("OIDC sign-in did not return a valid repository identity.");
     }
 
     callbackStage = "userinfo validation";
-    const userInfo = await getAuthApiClient().getUserInfo(accessToken);
+    const userInfo = await callOidcOperation(
+      client,
+      "fetchUserInfo",
+      accessToken,
+      idClaims.sub,
+    );
     if (!userInfo || typeof userInfo !== "object") {
-      return res.status(401).send("OIDC sign-in could not verify the access-token profile.");
+      return res
+        .status(401)
+        .send("OIDC sign-in could not verify the access-token profile.");
     }
-    if ((userInfo.sub || userInfo.id) !== idClaims.sub) {
-      return res.status(401).send("OIDC sign-in subject did not match the access-token profile.");
+    if (userInfo.sub !== idClaims.sub) {
+      return res
+        .status(401)
+        .send("OIDC sign-in subject did not match the access-token profile.");
     }
     const profile = sanitizeUserProfile(userInfo, idClaims.sub);
 
     const id = crypto.randomBytes(32).toString("base64url");
     const now = Date.now();
-    const expiresInSeconds = Number(tokenSet.expires_in);
+    const expiresInSeconds = getTokenExpiresIn(tokenSet);
     const accessTokenExpiresIn =
       Number.isFinite(expiresInSeconds) && expiresInSeconds > 0
         ? expiresInSeconds * 1000
@@ -1370,7 +1761,9 @@ const handleOidcCallback = async (req, res) => {
           ? idClaims.exp * 1000 - now
           : 3600_000;
     const refreshToken =
-      typeof tokenSet.refresh_token === "string" && tokenSet.refresh_token ? tokenSet.refresh_token : null;
+      typeof tokenSet.refresh_token === "string" && tokenSet.refresh_token
+        ? tokenSet.refresh_token
+        : null;
     const maxAge = refreshToken
       ? browserSessionMaxAge
       : Math.max(60_000, Math.min(accessTokenExpiresIn, 24 * 60 * 60 * 1000));
@@ -1398,12 +1791,22 @@ const handleOidcCallback = async (req, res) => {
     res.set("Cache-Control", "no-store");
     return res.redirect(303, returnTo);
   } catch (error) {
-    const oauthError = typeof error.error === "string" && /^[a-z0-9_]+$/i.test(error.error) ? error.error : "none";
-    const statusCode = Number.isInteger(error.statusCode) ? error.statusCode : "none";
-    const endpoint = typeof error.response?.req?.path === "string" ? error.response.req.path : "none";
+    const oauthError =
+      typeof error.error === "string" && /^[a-z0-9_]+$/i.test(error.error)
+        ? error.error
+        : "none";
+    const statusCode = Number.isInteger(error.statusCode)
+      ? error.statusCode
+      : "none";
+    const endpoint =
+      typeof error.response?.req?.path === "string"
+        ? error.response.req.path
+        : "none";
     const description =
       typeof error.error_description === "string"
-        ? error.error_description.replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]").slice(0, 160)
+        ? error.error_description
+            .replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]")
+            .slice(0, 160)
         : "none";
     let message = "none";
     if (typeof error.message === "string") {
@@ -1433,7 +1836,9 @@ app.post("/ui/auth/logout", async (req, res) => {
     } catch {
       const { id, ...storedSession } = session;
       browserSessions.set(id, storedSession);
-      return res.status(500).send("Unable to end the session. Please try again.");
+      return res
+        .status(500)
+        .send("Unable to end the session. Please try again.");
     }
   }
   let redirectUri;
@@ -1447,73 +1852,315 @@ app.post("/ui/auth/logout", async (req, res) => {
   return res.clearCookie(sessionCookieName, clearOptions).redirect(303, "/");
 });
 
-// List and create organizations for the authenticated subject.
-app.get("/api/v1/orgs", requireAuthentication, requireScope("repo:read"), (req, res) =>
-  res.json({ orgs: organizations.listForSubject(req.user.sub) }),
-);
-app.post("/api/v1/orgs", requireAuthentication, requireScope("repo:write"), async (req, res) => {
-  const result = organizations.create(req.user.sub, req.body?.slug);
-  if (result === null) {
-    return res.status(400).json({ error: "Invalid organization slug" });
+function requireNonPersonalAccessToken(req, res, next) {
+  if (req.authType === "personal-access-token") {
+    return res
+      .status(403)
+      .json({
+        error:
+          "Personal access tokens cannot manage other personal access tokens",
+      });
   }
-  if (result === false) {
-    return res.status(409).json({ error: "Organization already exists" });
-  }
-  await recordAuditEvent(req, "organization.created", result.slug, {}, result.slug);
-  return res.status(201).json({ org: result });
-});
-app.get("/api/v1/orgs/:org/events", requireAuthentication, requireScope("repo:read"), async (req, res) => {
-  res.set("Cache-Control", "no-store");
-  if (!organizations.normalizeSlug(req.params.org)) {
-    return res.status(400).json({ error: "Invalid organization slug" });
-  }
-  const organization = organizations.get(req.params.org);
-  if (!organization || organization.ownerHash !== getSubjectHash(req)) {
-    auditSecurityFailure(req, "security.access.denied", { reason: "organization_not_accessible" });
-    return res.status(404).json({ error: "Organization not found" });
-  }
-  const limit = req.query.limit === undefined ? 50 : Number(req.query.limit);
-  const offset = req.query.offset === undefined ? 0 : Number(req.query.offset);
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(offset) || offset < 0) {
-    return res.status(400).json({ error: "Limit must be 1–100 and offset must be a non-negative integer." });
-  }
-  const store = app.locals.auditStore;
-  if (!store) {
-    return res.status(503).json({ error: "Audit event storage is not configured" });
-  }
-  try {
-    const rows = await store.list(organization.slug, limit + 1, offset);
-    const hasMore = rows.length > limit;
-    const events = rows.slice(0, limit).map((event) => {
-      try {
-        return { ...event, details: JSON.parse(event.details || "{}") };
-      } catch {
-        return { ...event, details: {} };
-      }
+  return next();
+}
+
+app.get(
+  "/api/v1/personal-access-tokens",
+  requireAuthentication,
+  requireNonPersonalAccessToken,
+  (req, res) => {
+    res.set("Cache-Control", "no-store");
+    return res.json({
+      tokens: personalAccessTokens.listForOwner(
+        getAuthenticatedSubjectHash(req),
+      ),
     });
-    return res.json({ events, hasMore });
-  } catch {
-    return res.status(503).json({ error: "Audit events are temporarily unavailable" });
-  }
-});
+  },
+);
+app.post(
+  "/api/v1/personal-access-tokens",
+  requireAuthentication,
+  requireNonPersonalAccessToken,
+  async (req, res) => {
+    const body = req.body || {};
+    const label = typeof body.label === "string" ? body.label.trim() : "";
+    const scopes = body.scopes;
+    if (
+      !label ||
+      label.length > 100 ||
+      !Array.isArray(scopes) ||
+      scopes.length !== 1
+    ) {
+      return res
+        .status(400)
+        .json({ error: "Provide a label and exactly one supported scope" });
+    }
+    const scope = scopes[0];
+    if (scope !== "repo:read" && scope !== "repo:write") {
+      return res.status(400).json({ error: "Unsupported token scope" });
+    }
+    const callerScopes = getTokenScopes(req.user);
+    if (
+      scope === "repo:write"
+        ? !callerScopes.has("repo:write")
+        : !callerScopes.has("repo:read") && !callerScopes.has("repo:write")
+    ) {
+      return res
+        .status(403)
+        .json({ error: `Forbidden: cannot grant ${scope}` });
+    }
+    const expiry = normalizeTokenExpiry(body.expiresAt);
+    if (!expiry.valid) {
+      return res
+        .status(400)
+        .json({ error: "Expiry must be a future calendar date or left blank" });
+    }
+
+    const hasOrg = typeof body.org === "string" && body.org.length > 0;
+    const hasRepo = typeof body.repo === "string" && body.repo.length > 0;
+    if (hasOrg !== hasRepo) {
+      return res
+        .status(400)
+        .json({
+          error: "Repository tokens require both organization and repository",
+        });
+    }
+    let org = null;
+    let repo = null;
+    const ownerHash = getAuthenticatedSubjectHash(req);
+    if (hasOrg) {
+      org = organizations.normalizeSlug(body.org);
+      repo = body.repo;
+      if (!org || !validateRepoName(repo)) {
+        return res
+          .status(400)
+          .json({ error: "Invalid organization or repository" });
+      }
+      const organization = organizations.get(org);
+      if (!organization || organization.ownerHash !== ownerHash) {
+        return res.status(404).json({ error: "Organization not found" });
+      }
+      if (!repositoryExists(org, repo)) {
+        return res.status(404).json({ error: "Repository not found" });
+      }
+    }
+
+    const created = personalAccessTokens.create({
+      ownerHash,
+      label,
+      scopes: [scope],
+      org,
+      repo,
+      expiresAt: expiry.expiresAt,
+    });
+    res.set("Cache-Control", "no-store");
+    if (org) {
+      await recordAuditEvent(
+        req,
+        "personal_access_token.created",
+        `${org}/${repo}`,
+        {
+          tokenId: created.record.id,
+          label: created.record.label,
+          scopes: created.record.scopes,
+          expiresAt: created.record.expiresAt,
+        },
+        org,
+      );
+    }
+    return res.status(201).json(created);
+  },
+);
+app.delete(
+  "/api/v1/personal-access-tokens/:id",
+  requireAuthentication,
+  requireNonPersonalAccessToken,
+  async (req, res) => {
+    const ownerHash = getAuthenticatedSubjectHash(req);
+    const record = personalAccessTokens
+      .listForOwner(ownerHash)
+      .find((item) => item.id === req.params.id);
+    if (!record) {
+      return res.status(404).json({ error: "Personal access token not found" });
+    }
+    if (!personalAccessTokens.revoke(req.params.id, ownerHash)) {
+      return res.status(404).json({ error: "Personal access token not found" });
+    }
+    if (record.org && record.repo) {
+      await recordAuditEvent(
+        req,
+        "personal_access_token.revoked",
+        `${record.org}/${record.repo}`,
+        {
+          tokenId: record.id,
+          label: record.label,
+        },
+        record.org,
+      );
+    }
+    return res.status(204).end();
+  },
+);
+
+// List, create, and remove organizations for the authenticated subject.
+app.get(
+  "/api/v1/orgs",
+  requireAuthentication,
+  requireScope("repo:read"),
+  (req, res) =>
+    res.json({
+      orgs: organizations.listForOwnerHash(getAuthenticatedSubjectHash(req)),
+    }),
+);
+app.post(
+  "/api/v1/orgs",
+  requireAuthentication,
+  requireScope("repo:write"),
+  async (req, res) => {
+    const result = organizations.createForOwnerHash(
+      getAuthenticatedSubjectHash(req),
+      req.body?.slug,
+    );
+    if (result === null) {
+      return res.status(400).json({ error: "Invalid organization slug" });
+    }
+    if (result === false) {
+      return res.status(409).json({ error: "Organization already exists" });
+    }
+    await recordAuditEvent(
+      req,
+      "organization.created",
+      result.slug,
+      {},
+      result.slug,
+    );
+    return res.status(201).json({ org: result });
+  },
+);
+app.delete(
+  "/api/v1/orgs/:org",
+  requireAuthentication,
+  requireScope("repo:write"),
+  async (req, res) => {
+    const result = organizations.deleteEmptyForOwnerHash(
+      getAuthenticatedSubjectHash(req),
+      req.params.org,
+    );
+    if (result === null) {
+      return res.status(400).json({ error: "Invalid organization slug" });
+    }
+    if (result === false) {
+      return res.status(404).json({ error: "Organization not found" });
+    }
+    if (!result.deleted) {
+      return res
+        .status(409)
+        .json({
+          error: "Remove this organization's repositories before deleting it",
+        });
+    }
+    await recordAuditEvent(
+      req,
+      "organization.deleted",
+      result.slug,
+      {},
+      result.slug,
+    );
+    return res.status(204).end();
+  },
+);
+app.get(
+  "/api/v1/orgs/:org/events",
+  requireAuthentication,
+  requireScope("repo:read"),
+  async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    if (!organizations.normalizeSlug(req.params.org)) {
+      return res.status(400).json({ error: "Invalid organization slug" });
+    }
+    const organization = organizations.get(req.params.org);
+    if (
+      !organization ||
+      organization.ownerHash !== getAuthenticatedSubjectHash(req)
+    ) {
+      auditSecurityFailure(req, "security.access.denied", {
+        reason: "organization_not_accessible",
+      });
+      return res.status(404).json({ error: "Organization not found" });
+    }
+    const limit = req.query.limit === undefined ? 50 : Number(req.query.limit);
+    const offset =
+      req.query.offset === undefined ? 0 : Number(req.query.offset);
+    if (
+      !Number.isSafeInteger(limit) ||
+      limit < 1 ||
+      limit > 100 ||
+      !Number.isSafeInteger(offset) ||
+      offset < 0
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Limit must be 1–100 and offset must be a non-negative integer.",
+        });
+    }
+    const store = app.locals.auditStore;
+    if (!store) {
+      return res
+        .status(503)
+        .json({ error: "Audit event storage is not configured" });
+    }
+    try {
+      const rows = await store.list(organization.slug, limit + 1, offset);
+      const hasMore = rows.length > limit;
+      const events = rows.slice(0, limit).map((event) => {
+        try {
+          return { ...event, details: JSON.parse(event.details || "{}") };
+        } catch {
+          return { ...event, details: {} };
+        }
+      });
+      return res.json({ events, hasMore });
+    } catch {
+      return res
+        .status(503)
+        .json({ error: "Audit events are temporarily unavailable" });
+    }
+  },
+);
 app.use("/api/v1/orgs/:org/repos", requireAuthentication, (req, res, next) => {
   if (!organizations.normalizeSlug(req.params.org)) {
     return res.status(400).json({ error: "Invalid organization slug" });
   }
   const organization = organizations.get(req.params.org);
-  if (!organization || organization.ownerHash !== getSubjectHash(req)) {
-    auditSecurityFailure(req, "security.access.denied", { reason: "organization_not_accessible" });
+  if (
+    !organization ||
+    organization.ownerHash !== getAuthenticatedSubjectHash(req)
+  ) {
+    auditSecurityFailure(req, "security.access.denied", {
+      reason: "organization_not_accessible",
+    });
     return res.status(404).json({ error: "Organization not found" });
   }
   req.organization = organization;
   req.organizationSlug = organization.slug;
-  req.organizationPath = path.join(process.env.DATA_PATH, "orgs", organization.slug);
+  req.organizationPath = path.join(
+    process.env.DATA_PATH,
+    "orgs",
+    organization.slug,
+  );
   if (req.path === "/" || req.path === "") {
     if (req.method !== "GET") {
       return next();
     }
-    if (!getTokenScopes(req.user).has("repo:read") && !getTokenScopes(req.user).has("repo:write")) {
-      return res.status(403).json({ error: "Forbidden: requires repo:read scope" });
+    if (
+      !getTokenScopes(req.user).has("repo:read") &&
+      !getTokenScopes(req.user).has("repo:write")
+    ) {
+      return res
+        .status(403)
+        .json({ error: "Forbidden: requires repo:read scope" });
     }
     const reposPath = req.organizationPath;
     let repos = [];
@@ -1538,172 +2185,288 @@ app.use("/api/v1/orgs/:org/repos", requireAuthentication, (req, res, next) => {
 });
 app.use("/api/v1/repos", (req, res, next) => {
   if (!req.organizationPath) {
-    return res.status(404).json({ error: "Organization-scoped repository path required" });
+    return res
+      .status(404)
+      .json({ error: "Organization-scoped repository path required" });
   }
   return next();
 });
-app.post("/api/v1/repos/:repo", requireAuthentication, requireScope("repo:write"), createRepo);
+app.post(
+  "/api/v1/repos/:repo",
+  requireAuthentication,
+  requireScope("repo:write"),
+  createRepo,
+);
+app.delete(
+  "/api/v1/repos/:repo",
+  requireAuthentication,
+  requireScope("repo:write"),
+  deleteRepo,
+);
 
 // Repository operations - all use :repo only, no owner in route
-app.get("/api/v1/repos/:repo/log", requireAuthentication, requireScope("repo:read"), async (req, res) => {
-  getRepoLog(req, res);
-});
-app.get("/api/v1/repos/:repo/tree", requireAuthentication, requireScope("repo:read"), async (req, res) => {
-  getRepoTree(req, res);
-});
-app.get("/api/v1/repos/:repo/file", requireAuthentication, requireScope("repo:read"), async (req, res) => {
-  getRepoFile(req, res);
-});
-app.post("/api/v1/repos/:repo/files", requireAuthentication, requireScope("repo:write"), uploadRepoFile);
-app.delete("/api/v1/repos/:repo/files", requireAuthentication, requireScope("repo:write"), deleteRepoFile);
-app.get("/api/v1/repos/:repo/branches", requireAuthentication, requireScope("repo:read"), async (req, res) => {
-  getRepoBranches(req, res);
-});
-app.get("/api/v1/repos/:repo/tags", requireAuthentication, requireScope("repo:read"), async (req, res) => {
-  getRepoTags(req, res);
-});
-app.get("/api/v1/repos/:repo/history", requireAuthentication, requireScope("repo:read"), async (req, res) => {
-  getRepoHistory(req, res);
-});
-app.post("/api/v1/repos/:repo/stage", requireAuthentication, requireScope("repo:write"), async (req, res) => {
-  const repo = req.params.repo;
-  const repoPath = getSafeRepoPath(repo, req);
-  if (!repoPath) {
-    return res.status(400).json({ error: "Invalid repository name" });
-  }
-  if (!fs.existsSync(repoPath) || !fs.existsSync(path.join(repoPath, ".git"))) {
-    return res.status(404).json({ error: "Repo not found" });
-  }
-  try {
-    await getGit(repoPath).add(req.body.files);
-    await recordAuditEvent(req, "repository.files.staged", `${req.organization.slug}/${repo}`);
-    return res.json({ message: "Files staged successfully" });
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
-  }
-});
-app.post("/api/v1/repos/:repo/unstage", requireAuthentication, requireScope("repo:write"), async (req, res) => {
-  const repo = req.params.repo;
-  const repoPath = getSafeRepoPath(repo, req);
-  if (!repoPath) {
-    return res.status(400).json({ error: "Invalid repository name" });
-  }
-  if (!fs.existsSync(repoPath) || !fs.existsSync(path.join(repoPath, ".git"))) {
-    return res.status(404).json({ error: "Repo not found" });
-  }
-  try {
-    await getGit(repoPath).reset(["--mixed", ...(req.body.files || [])]);
-    await recordAuditEvent(req, "repository.files.unstaged", `${req.organization.slug}/${repo}`);
-    return res.json({ message: "Files unstaged successfully" });
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
-  }
-});
-app.post("/api/v1/repos/:repo/commit", requireAuthentication, requireScope("repo:write"), async (req, res) => {
-  const repo = req.params.repo;
-  const repoPath = getSafeRepoPath(repo, req);
-  if (!repoPath) {
-    return res.status(400).json({ error: "Invalid repository name" });
-  }
-  if (!fs.existsSync(repoPath) || !fs.existsSync(path.join(repoPath, ".git"))) {
-    return res.status(404).json({ error: "Repo not found" });
-  }
-  try {
-    const status = await getGit(repoPath).status();
-    if (status.staged.length === 0) {
-      return res.json({ message: "No changes to commit" });
+app.get(
+  "/api/v1/repos/:repo/log",
+  requireAuthentication,
+  requireScope("repo:read"),
+  async (req, res) => {
+    getRepoLog(req, res);
+  },
+);
+app.get(
+  "/api/v1/repos/:repo/tree",
+  requireAuthentication,
+  requireScope("repo:read"),
+  async (req, res) => {
+    getRepoTree(req, res);
+  },
+);
+app.get(
+  "/api/v1/repos/:repo/file",
+  requireAuthentication,
+  requireScope("repo:read"),
+  async (req, res) => {
+    getRepoFile(req, res);
+  },
+);
+app.post(
+  "/api/v1/repos/:repo/files",
+  requireAuthentication,
+  requireScope("repo:write"),
+  uploadRepoFile,
+);
+app.delete(
+  "/api/v1/repos/:repo/files",
+  requireAuthentication,
+  requireScope("repo:write"),
+  deleteRepoFile,
+);
+app.get(
+  "/api/v1/repos/:repo/branches",
+  requireAuthentication,
+  requireScope("repo:read"),
+  async (req, res) => {
+    getRepoBranches(req, res);
+  },
+);
+app.get(
+  "/api/v1/repos/:repo/tags",
+  requireAuthentication,
+  requireScope("repo:read"),
+  async (req, res) => {
+    getRepoTags(req, res);
+  },
+);
+app.get(
+  "/api/v1/repos/:repo/history",
+  requireAuthentication,
+  requireScope("repo:read"),
+  async (req, res) => {
+    getRepoHistory(req, res);
+  },
+);
+app.post(
+  "/api/v1/repos/:repo/stage",
+  requireAuthentication,
+  requireScope("repo:write"),
+  async (req, res) => {
+    const repo = req.params.repo;
+    const repoPath = getSafeRepoPath(repo, req);
+    if (!repoPath) {
+      return res.status(400).json({ error: "Invalid repository name" });
     }
-    const message = req.body.message || "autocommit";
-    const result = await getGit(repoPath).commit(message);
-    await recordAuditEvent(
-      req,
-      "repository.commit.created",
-      `${req.organization.slug}/${repo}@${result.commit || "HEAD"}`,
-      {
-        message,
-      },
-    );
-    return res.json({
-      message: "Changes committed successfully",
-      commit: message,
-    });
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
-  }
-});
-app.post("/api/v1/repos/:repo/tags", requireAuthentication, requireScope("repo:write"), async (req, res) => {
-  if (!isValidGitRef(req.body?.name)) {
-    return res.status(400).json({ error: "Invalid tag name" });
-  }
-  const repo = req.params.repo;
-  const repoPath = getSafeRepoPath(repo, req);
-  if (!repoPath) {
-    return res.status(400).json({ error: "Invalid repository name" });
-  }
-  if (!fs.existsSync(repoPath) || !fs.existsSync(path.join(repoPath, ".git"))) {
-    return res.status(404).json({ error: "Repo not found" });
-  }
-  try {
-    await getGit(repoPath).addTag(req.body.name);
-    await recordAuditEvent(
-      req,
-      "repository.tag.created",
-      `${req.organization.slug}/${repo}@refs/tags/${req.body.name}`,
-    );
-    return res.json({ message: `Tag ${req.body.name} added` });
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
-  }
-});
-app.delete("/api/v1/repos/:repo/tags/:name", requireAuthentication, requireScope("repo:write"), async (req, res) => {
-  if (!isValidGitRef(req.params.name)) {
-    return res.status(400).json({ error: "Invalid tag name" });
-  }
-  const repo = req.params.repo;
-  const repoPath = getSafeRepoPath(repo, req);
-  if (!repoPath) {
-    return res.status(400).json({ error: "Invalid repository name" });
-  }
-  if (!fs.existsSync(repoPath) || !fs.existsSync(path.join(repoPath, ".git"))) {
-    return res.status(404).json({ error: "Repo not found" });
-  }
-  try {
-    await getGit(repoPath).tag(["-d", req.params.name]);
-    await recordAuditEvent(
-      req,
-      "repository.tag.deleted",
-      `${req.organization.slug}/${repo}@refs/tags/${req.params.name}`,
-    );
-    return res.json({ message: `Tag ${req.params.name} removed` });
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
-  }
-});
-app.post("/api/v1/repos/:repo/branches", requireAuthentication, requireScope("repo:write"), async (req, res) => {
-  if (!isValidGitRef(req.body?.name) || (req.body.startPoint && !isValidGitRef(req.body.startPoint))) {
-    return res.status(400).json({ error: "Invalid branch name or start point" });
-  }
-  const repo = req.params.repo;
-  const repoPath = getSafeRepoPath(repo, req);
-  if (!repoPath) {
-    return res.status(400).json({ error: "Invalid repository name" });
-  }
-  if (!fs.existsSync(repoPath) || !fs.existsSync(path.join(repoPath, ".git"))) {
-    return res.status(404).json({ error: "Repo not found" });
-  }
-  try {
-    const args = req.body.startPoint ? [req.body.name, req.body.startPoint] : [req.body.name];
-    await getGit(repoPath).branch(args);
-    await recordAuditEvent(
-      req,
-      "repository.branch.created",
-      `${req.organization.slug}/${repo}@refs/heads/${req.body.name}`,
-    );
-    return res.json({ message: `Branch ${req.body.name} created` });
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
-  }
-});
+    if (
+      !fs.existsSync(repoPath) ||
+      !fs.existsSync(path.join(repoPath, ".git"))
+    ) {
+      return res.status(404).json({ error: "Repo not found" });
+    }
+    try {
+      await getGit(repoPath).add(req.body.files);
+      await recordAuditEvent(
+        req,
+        "repository.files.staged",
+        `${req.organization.slug}/${repo}`,
+      );
+      return res.json({ message: "Files staged successfully" });
+    } catch (error) {
+      return res.status(500).json({ error: error.message });
+    }
+  },
+);
+app.post(
+  "/api/v1/repos/:repo/unstage",
+  requireAuthentication,
+  requireScope("repo:write"),
+  async (req, res) => {
+    const repo = req.params.repo;
+    const repoPath = getSafeRepoPath(repo, req);
+    if (!repoPath) {
+      return res.status(400).json({ error: "Invalid repository name" });
+    }
+    if (
+      !fs.existsSync(repoPath) ||
+      !fs.existsSync(path.join(repoPath, ".git"))
+    ) {
+      return res.status(404).json({ error: "Repo not found" });
+    }
+    try {
+      await getGit(repoPath).reset(["--mixed", ...(req.body.files || [])]);
+      await recordAuditEvent(
+        req,
+        "repository.files.unstaged",
+        `${req.organization.slug}/${repo}`,
+      );
+      return res.json({ message: "Files unstaged successfully" });
+    } catch (error) {
+      return res.status(500).json({ error: error.message });
+    }
+  },
+);
+app.post(
+  "/api/v1/repos/:repo/commit",
+  requireAuthentication,
+  requireScope("repo:write"),
+  async (req, res) => {
+    const repo = req.params.repo;
+    const repoPath = getSafeRepoPath(repo, req);
+    if (!repoPath) {
+      return res.status(400).json({ error: "Invalid repository name" });
+    }
+    if (
+      !fs.existsSync(repoPath) ||
+      !fs.existsSync(path.join(repoPath, ".git"))
+    ) {
+      return res.status(404).json({ error: "Repo not found" });
+    }
+    try {
+      const status = await getGit(repoPath).status();
+      if (status.staged.length === 0) {
+        return res.json({ message: "No changes to commit" });
+      }
+      const message = req.body.message || "autocommit";
+      const result = await getGit(repoPath).commit(message);
+      await recordAuditEvent(
+        req,
+        "repository.commit.created",
+        `${req.organization.slug}/${repo}@${result.commit || "HEAD"}`,
+        {
+          message,
+        },
+      );
+      return res.json({
+        message: "Changes committed successfully",
+        commit: message,
+      });
+    } catch (error) {
+      return res.status(500).json({ error: error.message });
+    }
+  },
+);
+app.post(
+  "/api/v1/repos/:repo/tags",
+  requireAuthentication,
+  requireScope("repo:write"),
+  async (req, res) => {
+    if (!isValidGitRef(req.body?.name)) {
+      return res.status(400).json({ error: "Invalid tag name" });
+    }
+    const repo = req.params.repo;
+    const repoPath = getSafeRepoPath(repo, req);
+    if (!repoPath) {
+      return res.status(400).json({ error: "Invalid repository name" });
+    }
+    if (
+      !fs.existsSync(repoPath) ||
+      !fs.existsSync(path.join(repoPath, ".git"))
+    ) {
+      return res.status(404).json({ error: "Repo not found" });
+    }
+    try {
+      await getGit(repoPath).addTag(req.body.name);
+      await recordAuditEvent(
+        req,
+        "repository.tag.created",
+        `${req.organization.slug}/${repo}@refs/tags/${req.body.name}`,
+      );
+      return res.json({ message: `Tag ${req.body.name} added` });
+    } catch (error) {
+      return res.status(500).json({ error: error.message });
+    }
+  },
+);
+app.delete(
+  "/api/v1/repos/:repo/tags/:name",
+  requireAuthentication,
+  requireScope("repo:write"),
+  async (req, res) => {
+    if (!isValidGitRef(req.params.name)) {
+      return res.status(400).json({ error: "Invalid tag name" });
+    }
+    const repo = req.params.repo;
+    const repoPath = getSafeRepoPath(repo, req);
+    if (!repoPath) {
+      return res.status(400).json({ error: "Invalid repository name" });
+    }
+    if (
+      !fs.existsSync(repoPath) ||
+      !fs.existsSync(path.join(repoPath, ".git"))
+    ) {
+      return res.status(404).json({ error: "Repo not found" });
+    }
+    try {
+      await getGit(repoPath).tag(["-d", req.params.name]);
+      await recordAuditEvent(
+        req,
+        "repository.tag.deleted",
+        `${req.organization.slug}/${repo}@refs/tags/${req.params.name}`,
+      );
+      return res.json({ message: `Tag ${req.params.name} removed` });
+    } catch (error) {
+      return res.status(500).json({ error: error.message });
+    }
+  },
+);
+app.post(
+  "/api/v1/repos/:repo/branches",
+  requireAuthentication,
+  requireScope("repo:write"),
+  async (req, res) => {
+    if (
+      !isValidGitRef(req.body?.name) ||
+      (req.body.startPoint && !isValidGitRef(req.body.startPoint))
+    ) {
+      return res
+        .status(400)
+        .json({ error: "Invalid branch name or start point" });
+    }
+    const repo = req.params.repo;
+    const repoPath = getSafeRepoPath(repo, req);
+    if (!repoPath) {
+      return res.status(400).json({ error: "Invalid repository name" });
+    }
+    if (
+      !fs.existsSync(repoPath) ||
+      !fs.existsSync(path.join(repoPath, ".git"))
+    ) {
+      return res.status(404).json({ error: "Repo not found" });
+    }
+    try {
+      const args = req.body.startPoint
+        ? [req.body.name, req.body.startPoint]
+        : [req.body.name];
+      await getGit(repoPath).branch(args);
+      await recordAuditEvent(
+        req,
+        "repository.branch.created",
+        `${req.organization.slug}/${repo}@refs/heads/${req.body.name}`,
+      );
+      return res.json({ message: `Branch ${req.body.name} created` });
+    } catch (error) {
+      return res.status(500).json({ error: error.message });
+    }
+  },
+);
 app.delete(
   "/api/v1/repos/:repo/branches/:name",
   requireAuthentication,
@@ -1717,7 +2480,10 @@ app.delete(
     if (!repoPath) {
       return res.status(400).json({ error: "Invalid repository name" });
     }
-    if (!fs.existsSync(repoPath) || !fs.existsSync(path.join(repoPath, ".git"))) {
+    if (
+      !fs.existsSync(repoPath) ||
+      !fs.existsSync(path.join(repoPath, ".git"))
+    ) {
       return res.status(404).json({ error: "Repo not found" });
     }
     try {
@@ -1740,7 +2506,9 @@ app.delete(
  * @returns {object} The OpenAPI specification object
  */
 function makeApiSpec() {
-  const pathParametersRepo = [{ name: "repo", in: "path", required: true, schema: { type: "string" } }];
+  const pathParametersRepo = [
+    { name: "repo", in: "path", required: true, schema: { type: "string" } },
+  ];
 
   const jsonBody = (properties, required = []) => ({
     required: required.length > 0,
@@ -1750,9 +2518,15 @@ function makeApiSpec() {
   });
   const unauthorized = { description: "Unauthorized" };
   const notFound = { description: "Repository not found" };
-  const operation = (summary, responses, body, parameters = pathParametersRepo) => {
+  const operation = (
+    summary,
+    responses,
+    body,
+    parameters = pathParametersRepo,
+  ) => {
     const protectedOperation =
-      parameters.some(({ name }) => name === "repo" || name === "org") || summary.includes("authenticated subject");
+      parameters.some(({ name }) => name === "repo" || name === "org") ||
+      summary.includes("authenticated subject");
     const readOperation = /^(Fetch|Get file|List|Read)/.test(summary);
     const result = {
       summary,
@@ -1762,7 +2536,9 @@ function makeApiSpec() {
     };
     if (protectedOperation) {
       result.security = [{ bearerAuth: [] }];
-      result["x-required-scope"] = readOperation ? "repo:read or repo:write" : "repo:write";
+      result["x-required-scope"] = readOperation
+        ? "repo:read or repo:write"
+        : "repo:write";
       result.responses = {
         ...responses,
         401: unauthorized,
@@ -1778,7 +2554,12 @@ function makeApiSpec() {
     servers: [{ url: "/", description: "This GitMini server" }],
     paths: {
       "/api/v1/health": {
-        get: operation("Health check", { 200: { description: "Healthy" } }, null, []),
+        get: operation(
+          "Health check",
+          { 200: { description: "Healthy" } },
+          null,
+          [],
+        ),
       },
       "/api/v1/orgs": {
         get: {
@@ -1820,6 +2601,101 @@ function makeApiSpec() {
           "x-required-scope": "repo:write",
         },
       },
+      "/api/v1/orgs/{org}": {
+        delete: {
+          summary:
+            "Delete an empty organization owned by the authenticated subject",
+          parameters: [
+            {
+              name: "org",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          security: [{ bearerAuth: [] }],
+          "x-required-scope": "repo:write",
+          responses: {
+            204: { description: "Organization deleted" },
+            400: { description: "Invalid organization slug" },
+            401: unauthorized,
+            403: { description: "Insufficient scope" },
+            404: { description: "Organization not found" },
+            409: {
+              description: "Remove the organization's repositories first",
+            },
+          },
+        },
+      },
+      "/api/v1/personal-access-tokens": {
+        get: {
+          summary:
+            "List personal access token metadata for the authenticated subject",
+          security: [{ bearerAuth: [] }],
+          responses: {
+            200: { description: "Token metadata without token values" },
+            401: unauthorized,
+            403: {
+              description: "Personal access tokens cannot manage other tokens",
+            },
+          },
+        },
+        post: {
+          summary: "Create a scoped personal access token, returned once",
+          security: [{ bearerAuth: [] }],
+          requestBody: jsonBody(
+            {
+              label: { type: "string", minLength: 1, maxLength: 100 },
+              scopes: {
+                type: "array",
+                items: { type: "string", enum: ["repo:read", "repo:write"] },
+                minItems: 1,
+                maxItems: 1,
+              },
+              expiresAt: { type: "string", format: "date", nullable: true },
+              org: { type: "string" },
+              repo: { type: "string" },
+            },
+            ["label", "scopes"],
+          ),
+          responses: {
+            201: {
+              description:
+                "Personal access token and metadata; token value is shown once",
+            },
+            400: { description: "Invalid label, scope, repository, or expiry" },
+            401: unauthorized,
+            403: {
+              description:
+                "Insufficient scope to grant the requested permissions",
+            },
+            404: { description: "Organization or repository not found" },
+          },
+        },
+      },
+      "/api/v1/personal-access-tokens/{id}": {
+        delete: {
+          summary:
+            "Revoke a personal access token owned by the authenticated subject",
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            204: { description: "Token revoked" },
+            401: unauthorized,
+            403: {
+              description: "Personal access tokens cannot manage other tokens",
+            },
+            404: { description: "Personal access token not found" },
+          },
+        },
+      },
       "/api/v1/orgs/{org}/repos": {
         get: {
           ...operation(
@@ -1858,9 +2734,24 @@ function makeApiSpec() {
             },
             null,
             [
-              { name: "org", in: "path", required: true, schema: { type: "string" } },
-              { name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 100 } },
-              { name: "offset", in: "query", required: false, schema: { type: "integer", minimum: 0 } },
+              {
+                name: "org",
+                in: "path",
+                required: true,
+                schema: { type: "string" },
+              },
+              {
+                name: "limit",
+                in: "query",
+                required: false,
+                schema: { type: "integer", minimum: 1, maximum: 100 },
+              },
+              {
+                name: "offset",
+                in: "query",
+                required: false,
+                schema: { type: "integer", minimum: 0 },
+              },
             ],
           ),
           security: [{ bearerAuth: [] }],
@@ -1944,23 +2835,40 @@ function makeApiSpec() {
           null,
           pathParametersRepo,
         ),
+        delete: operation(
+          "Delete a repository and its history",
+          {
+            204: { description: "Repository deleted" },
+            400: { description: "Invalid repository name" },
+            404: notFound,
+          },
+          null,
+          pathParametersRepo,
+        ),
       },
       "/api/v1/repos/{repo}/log": {
-        get: operation("Fetch the repository log", { 200: { description: "Commit array" }, 404: notFound }, null, [
-          ...pathParametersRepo,
-          {
-            name: "limit",
-            in: "query",
-            required: false,
-            schema: { type: "integer", minimum: 1, maximum: 1000 },
-          },
-        ]),
+        get: operation(
+          "Fetch the repository log",
+          { 200: { description: "Commit array" }, 404: notFound },
+          null,
+          [
+            ...pathParametersRepo,
+            {
+              name: "limit",
+              in: "query",
+              required: false,
+              schema: { type: "integer", minimum: 1, maximum: 1000 },
+            },
+          ],
+        ),
       },
       "/api/v1/repos/{repo}/stage": {
         post: operation(
           "Stage files",
           { 200: { description: "Staged" }, 401: unauthorized, 404: notFound },
-          jsonBody({ files: { type: "array", items: { type: "string" } } }, ["files"]),
+          jsonBody({ files: { type: "array", items: { type: "string" } } }, [
+            "files",
+          ]),
         ),
       },
       "/api/v1/repos/{repo}/unstage": {
@@ -1971,7 +2879,9 @@ function makeApiSpec() {
             401: unauthorized,
             404: notFound,
           },
-          jsonBody({ files: { type: "array", items: { type: "string" } } }, ["files"]),
+          jsonBody({ files: { type: "array", items: { type: "string" } } }, [
+            "files",
+          ]),
         ),
       },
       "/api/v1/repos/{repo}/commit": {
@@ -2037,7 +2947,10 @@ function makeApiSpec() {
             401: unauthorized,
             404: notFound,
           },
-          jsonBody({ name: { type: "string" }, startPoint: { type: "string" } }, ["name"]),
+          jsonBody(
+            { name: { type: "string" }, startPoint: { type: "string" } },
+            ["name"],
+          ),
         ),
       },
       "/api/v1/repos/{repo}/branches/{name}": {
@@ -2155,55 +3068,65 @@ function makeApiSpec() {
           type: "apiKey",
           in: "cookie",
           name: sessionCookieName,
-          description: "HttpOnly OIDC browser session established by /ui/auth/callback",
+          description:
+            "HttpOnly OIDC browser session established by /ui/auth/callback",
         },
         bearerAuth: {
           type: "http",
           scheme: "bearer",
-          bearerFormat: "OIDC access token",
-          description: "Active OIDC access token. repo:write also grants repository reads.",
+          bearerFormat: "OIDC access token or GitMini personal access token",
+          description:
+            "Active OIDC access token or GitMini PAT. repo:write also grants repository reads.",
         },
         basicGitToken: {
           type: "http",
           scheme: "basic",
-          description: "Arbitrary username; OIDC access token as the password. repo:read fetches, repo:write pushes.",
+          description:
+            "Arbitrary username; an active OIDC access token or GitMini PAT as the password. repo:read fetches, repo:write pushes.",
         },
       },
     },
   };
 
   apiSpec.paths["/api"] = {
-    get: operation("Get this OpenAPI document", { 200: { description: "OpenAPI document" } }, null, []),
+    get: operation(
+      "Get this OpenAPI document",
+      { 200: { description: "OpenAPI document" } },
+      null,
+      [],
+    ),
   };
   const organizationRepoPrefix = "/api/v1/orgs/{org}/repos";
   for (const [route, methods] of Object.entries(apiSpec.paths)) {
     if (route.startsWith("/api/v1/repos/{repo}")) {
       const suffix = route.slice("/api/v1/repos/{repo}".length);
-      apiSpec.paths[`${organizationRepoPrefix}/{repo}${suffix}`] = Object.fromEntries(
-        Object.entries(methods).map(([method, definition]) => [
-          method,
-          {
-            ...definition,
-            parameters: [
-              {
-                name: "org",
-                in: "path",
-                required: true,
-                schema: { type: "string" },
+      apiSpec.paths[`${organizationRepoPrefix}/{repo}${suffix}`] =
+        Object.fromEntries(
+          Object.entries(methods).map(([method, definition]) => [
+            method,
+            {
+              ...definition,
+              parameters: [
+                {
+                  name: "org",
+                  in: "path",
+                  required: true,
+                  schema: { type: "string" },
+                },
+                ...(definition.parameters || []),
+              ],
+              security: [{ bearerAuth: [] }],
+              "x-required-scope":
+                definition["x-required-scope"] || "repo:read or repo:write",
+              responses: {
+                401: unauthorized,
+                403: { description: "Insufficient scope" },
+                404: { description: "Organization or repository not found" },
+                ...definition.responses,
               },
-              ...(definition.parameters || []),
-            ],
-            security: [{ bearerAuth: [] }],
-            "x-required-scope": definition["x-required-scope"] || "repo:read or repo:write",
-            responses: {
-              401: unauthorized,
-              403: { description: "Insufficient scope" },
-              404: { description: "Organization or repository not found" },
-              ...definition.responses,
             },
-          },
-        ]),
-      );
+          ]),
+        );
     }
   }
 
@@ -2230,7 +3153,10 @@ function makeApiSpec() {
   }
 
   for (const route of Object.keys(apiSpec.paths)) {
-    if (route.startsWith("/api/v1/repos") || route.startsWith("/git/{repo}.git/")) {
+    if (
+      route.startsWith("/api/v1/repos") ||
+      route.startsWith("/git/{repo}.git/")
+    ) {
       delete apiSpec.paths[route];
     }
   }
@@ -2238,7 +3164,10 @@ function makeApiSpec() {
   return apiSpec;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
   app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
 }
 

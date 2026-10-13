@@ -46,7 +46,10 @@ async function unstageFiles(repoPath, files) {
     await execGit(["reset", "HEAD", "--", ...fileList], { cwd: repoPath });
   } else {
     // If no commits yet, rm --cached
-    await execGit(["rm", "--cached", "-r", "--ignore-unmatch", "--", ...fileList], { cwd: repoPath });
+    await execGit(
+      ["rm", "--cached", "-r", "--ignore-unmatch", "--", ...fileList],
+      { cwd: repoPath },
+    );
   }
 }
 
@@ -60,8 +63,15 @@ async function commit(repoPath, message = "autocommit") {
     // Exit code 1 means changes exist, proceed to commit
   }
 
-  const { stdout } = await execGit(["commit", "-m", message], { cwd: repoPath });
-  return { committed: true, message: "Changes committed successfully", commit: message, output: stdout.trim() };
+  const { stdout } = await execGit(["commit", "-m", message], {
+    cwd: repoPath,
+  });
+  return {
+    committed: true,
+    message: "Changes committed successfully",
+    commit: message,
+    output: stdout.trim(),
+  };
 }
 
 function streamLog(repoPath, res) {
@@ -77,9 +87,13 @@ function streamLog(repoPath, res) {
     res.write("[\n");
 
     // delimiter format: %H%x00%an%x00%ae%x00%aI%x00%s%x01
-    const git = spawn("git", ["log", "--pretty=format:%H%x00%an%x00%ae%x00%aI%x00%s%x01"], {
-      cwd: repoPath,
-    });
+    const git = spawn(
+      "git",
+      ["log", "--pretty=format:%H%x00%an%x00%ae%x00%aI%x00%s%x01"],
+      {
+        cwd: repoPath,
+      },
+    );
 
     let buffer = "";
     let isFirst = true;
@@ -94,7 +108,8 @@ function streamLog(repoPath, res) {
         if (!trimmed) {
           continue;
         }
-        const [hash, author_name, author_email, date, message] = trimmed.split("\x00");
+        const [hash, author_name, author_email, date, message] =
+          trimmed.split("\x00");
         const entry = JSON.stringify({
           hash,
           author_name,
@@ -128,7 +143,9 @@ function streamLog(repoPath, res) {
 
     git.on("close", (code) => {
       if (buffer.trim()) {
-        const [hash, author_name, author_email, date, message] = buffer.trim().split("\x00");
+        const [hash, author_name, author_email, date, message] = buffer
+          .trim()
+          .split("\x00");
         const entry = JSON.stringify({
           hash,
           author_name,
@@ -189,7 +206,9 @@ async function removeBranch(repoPath, name) {
 }
 
 async function listBranches(repoPath) {
-  const { stdout } = await execGit(["branch", "--format=%(refname:short)"], { cwd: repoPath });
+  const { stdout } = await execGit(["branch", "--format=%(refname:short)"], {
+    cwd: repoPath,
+  });
   return stdout
     .split("\n")
     .map((b) => b.trim())

@@ -24,7 +24,10 @@ async function run() {
   });
 
   assert.match(calls[0].statement, /CREATE TABLE IF NOT EXISTS audit_events/);
-  assert.match(calls[1].statement, /CREATE INDEX IF NOT EXISTS audit_events_org_time/);
+  assert.match(
+    calls[1].statement,
+    /CREATE INDEX IF NOT EXISTS audit_events_org_time/,
+  );
   const insert = calls[2];
   assert.strictEqual(insert.mode, "run");
   assert.strictEqual(insert.bindings[4], "subject-1");
@@ -39,8 +42,14 @@ async function run() {
   assert.deepStrictEqual(query.bindings, ["example", 25, 50]);
 
   const fingerprint = createTokenFingerprint("raw-token", "test-key");
-  assert.strictEqual(fingerprint, createTokenFingerprint("raw-token", "test-key"));
-  assert.notStrictEqual(fingerprint, createTokenFingerprint("raw-token", "other-key"));
+  assert.strictEqual(
+    fingerprint,
+    createTokenFingerprint("raw-token", "test-key"),
+  );
+  assert.notStrictEqual(
+    fingerprint,
+    createTokenFingerprint("raw-token", "other-key"),
+  );
   assert.notStrictEqual(fingerprint, "raw-token");
 }
 

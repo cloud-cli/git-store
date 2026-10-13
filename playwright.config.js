@@ -8,7 +8,8 @@ export default defineConfig({
     { name: "mobile", use: { viewport: { width: 390, height: 844 } } },
   ],
   webServer: {
-    command: "PORT=3179 DATA_PATH=/tmp/opencode/git-store-playwright-data OIDC_ISSUER= node index.js",
+    command:
+      "PORT=3179 DATA_PATH=/tmp/opencode/git-store-playwright-data OIDC_ISSUER= node index.js",
     url: "http://127.0.0.1:3179/ui/",
     reuseExistingServer: false,
     timeout: 30_000,
