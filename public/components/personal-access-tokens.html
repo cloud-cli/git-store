@@ -1,0 +1,38 @@
+<template>
+  <div class="flex min-h-0 flex-1 p-6">
+    <h1 class="text-xl font-bold text-text-main mb-6">Personal Access Tokens</h1>
+    
+    <template if="!canRead && !canWrite">
+      <p class="text-gray-500 dark:text-gray-400">
+        You have read-only access. Ask your GitMini administrator to enable
+        repository write access (repo:write) to manage personal access tokens.
+      </p>
+    </template>
+    
+    <template if="canRead && !canWrite">
+      <p class="text-gray-500 dark:text-gray-400">
+        You can view and manage your personal access tokens.
+      </p>
+    </template>
+    
+    <template if="canWrite">
+      <p class="text-gray-500 dark:text-gray-400">
+        You can create, view, and revoke personal access tokens.
+      </p>
+    </template>
+    
+    <div class="mt-6">
+      <h2 class="text-lg font-medium text-gray-700 dark:text-gray-300">Tokens</h2>
+      <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+        Manage your API tokens for Git Smart HTTP and git CLI access.
+      </p>
+    </div>
+  </div>
+</template>
+
+<script setup>
+defineProps({
+  canRead: { type: Boolean, default: false },
+  canWrite: { type: Boolean, default: false },
+})
+</script>
