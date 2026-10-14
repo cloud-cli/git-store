@@ -367,6 +367,10 @@ test("organization landing renders organizations and recent changes", async ({
   const dashboard = await page.getByTestId("landing-dashboard").boundingBox();
   expect(dashboard.width).toBeGreaterThan(page.viewportSize().width * 0.9);
   expect(dashboard.height).toBeGreaterThan(page.viewportSize().height * 0.75);
+  await page.getByRole("button", { name: "Add org" }).click();
+  await expect(page.getByLabel("Organization name")).toBeVisible();
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByLabel("Organization name")).toHaveCount(0);
 });
 
 test("organization breadcrumb does not retain a repository crumb", async ({
