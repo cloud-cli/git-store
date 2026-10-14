@@ -591,7 +591,7 @@ test("header uses the GitMini home logo", async ({ page }) => {
   await expect(page).toHaveTitle("GitMini");
   await expect(homeLink).toBeVisible();
   await expect(homeLink).toContainText("gitmini.");
-  await expect(homeLink).toHaveCSS("width", "256px");
+  await expect(homeLink).toHaveCSS("width", page.viewportSize().width < 768 ? "128px" : "256px");
   await expect(homeLink.getByTestId("home-indicator")).toHaveAttribute("width", "32");
   await expect(homeLink.getByTestId("home-indicator").locator("rect")).toHaveAttribute("rx", "4");
   const breadcrumbs = page.getByTestId("workspace-breadcrumbs");
@@ -600,10 +600,11 @@ test("header uses the GitMini home logo", async ({ page }) => {
   await expect(breadcrumbs.locator("span").nth(1)).not.toHaveCSS("display", "none");
   expect(
     await breadcrumbs.evaluate((nav) => {
-      const bounds = nav.getBoundingClientRect();
-      return Math.abs(bounds.left + bounds.width / 2 - window.innerWidth / 2);
+      const home = document.querySelector('a[aria-label="Home"]');
+      return nav.compareDocumentPosition(home) & Node.DOCUMENT_POSITION_PRECEDING;
     }),
-  ).toBeLessThan(2);
+  ).toBeTruthy();
+  await expect(page.getByRole("banner").getByTestId("workspace-breadcrumbs")).toBeVisible();
   expect(
     await breadcrumbs.evaluate(
       (nav) => nav.compareDocumentPosition(document.querySelector("main")) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -625,7 +626,7 @@ test("anonymous landing welcomes returning users", async ({ page }) => {
   await page.route("**/ui/session", (route) => route.fulfill({ json: { authenticated: false } }));
   await page.goto("/ui/");
 
-  await expect(page.getByTestId("workspace-breadcrumbs").locator("xpath=..")).toBeHidden();
+  await expect(page.getByTestId("workspace-breadcrumbs")).toBeHidden();
   await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
   await expect(page.getByText("Sign in to access your organizations and repositories.")).toBeVisible();
   await expect(page.getByRole("link", { name: "Continue to GitMini" })).toBeVisible();

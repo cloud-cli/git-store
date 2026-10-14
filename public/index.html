@@ -44,7 +44,7 @@
       <header
         class="relative z-30 flex h-[88px] shrink-0 items-center justify-between bg-app-bg px-6 py-4 dark:bg-[#111713] max-md:h-[72px] max-md:px-4 max-md:py-3"
       >
-        <div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden md:gap-3">
+        <div class="flex min-w-0 items-center gap-2 overflow-hidden md:gap-3">
           <template if="showWorkspace && !settings"
             ><button
               class="p-2 text-gray-500 dark:text-gray-300 md:hidden"
@@ -53,7 +53,7 @@
             >
               <lucide-icon icon="menu" size="20"></lucide-icon></button
           ></template>
-          <a href="/" class="flex h-full w-64 shrink-0 items-center gap-3 overflow-hidden" aria-label="Home"
+          <a href="/" class="flex h-full w-64 shrink-0 items-center gap-3 overflow-hidden max-md:w-32" aria-label="Home"
             ><svg
               data-testid="home-indicator"
               xmlns="http://www.w3.org/2000/svg"
@@ -75,6 +75,23 @@
               >gitmini<span class="text-brand">.</span></span
             ></a
           >
+          <nav
+            aria-label="Workspace breadcrumbs"
+            data-testid="workspace-breadcrumbs"
+            class="flex min-w-0 items-center gap-4 overflow-hidden"
+            class-hidden="!breadcrumbs.length"
+          >
+            <template for="breadcrumb of breadcrumbs"
+              ><span class="shrink-0 text-gray-400" aria-hidden="true" class-hidden="!breadcrumb.showSeparator">/</span
+              ><a
+                data-testid="workspace-breadcrumb"
+                attr-href="breadcrumb.href"
+                attr-title="breadcrumb.label"
+                class="max-w-[20vw] truncate text-base font-semibold hover:text-brand md:max-w-80 md:text-lg"
+                >{{ breadcrumb.label }}</a
+              ></template
+            >
+          </nav>
         </div>
         <div class="flex flex-shrink-0 items-center gap-2 sm:gap-4">
           <button
@@ -114,27 +131,6 @@
           >
         </div>
       </header>
-      <div
-        class="flex h-12 shrink-0 items-center justify-center bg-app-bg px-6 dark:bg-[#111713] max-md:px-4"
-        class-hidden="!breadcrumbs.length"
-      >
-        <nav
-          aria-label="Workspace breadcrumbs"
-          data-testid="workspace-breadcrumbs"
-          class="flex min-w-0 items-center gap-4 overflow-hidden"
-        >
-          <template for="breadcrumb of breadcrumbs"
-            ><span class="shrink-0 text-gray-400" aria-hidden="true" class-hidden="!breadcrumb.showSeparator">/</span
-            ><a
-              data-testid="workspace-breadcrumb"
-              attr-href="breadcrumb.href"
-              attr-title="breadcrumb.label"
-              class="max-w-[20vw] truncate text-base font-semibold hover:text-brand md:max-w-80 md:text-lg"
-              >{{ breadcrumb.label }}</a
-            ></template
-          >
-        </nav>
-      </div>
       <div
         class="flex min-h-0 flex-1 gap-6 overflow-hidden bg-app-bg px-6 pb-6 pt-2 dark:bg-[#111713] max-md:min-h-[calc(100dvh-72px)] max-md:gap-4 max-md:overflow-visible max-md:p-4"
       >
