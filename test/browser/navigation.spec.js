@@ -391,6 +391,30 @@ test("organization breadcrumb does not retain a repository crumb", async ({
   ).toHaveCount(1);
 });
 
+test("clone panel is inline on mobile and anchored on desktop", async ({
+  page,
+}) => {
+  await page.goto("/ui/?org=example&repo=demo");
+  await page.getByRole("button", { name: "Clone" }).click();
+
+  const panel = page.locator("#clone-repo-popover");
+  await expect(panel).toBeVisible();
+  if (page.viewportSize().width <= 767) {
+    await expect(panel).not.toHaveAttribute("popover");
+    await expect(panel).toHaveCSS("position", "static");
+    await expect(page.getByText("Clone URL", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Close clone dialog" }).click();
+    await expect(panel).toBeHidden();
+  } else {
+    await expect(panel).toHaveAttribute("popover", "auto");
+    expect(
+      await panel.evaluate((element) => element.matches(":popover-open")),
+    ).toBe(true);
+    await page.getByRole("button", { name: "Close clone dialog" }).click();
+    await expect(panel).toBeHidden();
+  }
+});
+
 test("uploads and branch, tag, and commit mutations update without document reload", async ({
   page,
 }) => {
