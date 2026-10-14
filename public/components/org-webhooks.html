@@ -9,11 +9,11 @@
       <details class="rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-800">
         <summary class="cursor-pointer font-medium">What data is sent?</summary>
         <p class="mt-2 text-gray-600 dark:text-gray-300">
-          Each matching event is sent as a signed JSON POST. The event-specific <code>details</code> object can contain
-          commit messages or repository-controlled ref and file names.
+          Each matching event is sent as a signed JSON POST. The event-specific
+          <code>details</code> object can contain commit messages or repository-controlled ref and file names.
         </p>
         <pre class="mt-2 overflow-x-auto rounded bg-gray-50 p-3 text-xs dark:bg-gray-900">
-{"id":"delivery-id","org":"your-org","event":"repository.commit.created","occurredAt":"2026-01-01T12:00:00.000Z","object":"your-org/repo@abc123","details":{"message":"Example commit"}}</pre>
+ {"id":"delivery-id","org":"your-org","event":"git.branch","action":"created","occurredAt":"2026-01-01T12:00:00.000Z","object":"your-org/repo@refs/heads/main","details":{"ref":"refs/heads/main","before":null,"after":"abc123"}}</pre>
         <p class="mt-2 text-gray-600 dark:text-gray-300">
           Receivers should verify <code>X-GitMini-Signature</code> against the exact request body and deduplicate with
           <code>id</code>.
@@ -33,15 +33,54 @@
       <fieldset>
         <legend class="mb-2 text-sm font-medium">Events</legend>
         <div class="grid gap-2 sm:grid-cols-2">
-          <template for="event of eventTypes"
-            ><label class="flex items-center gap-2 text-sm"
-              ><input
-                type="checkbox"
-                attr-value="event.name"
-                on-change="toggleEvent(event.name, $event.target.checked)"
-              />{{ event.name }}</label
-            ></template
-          >
+          <div class="rounded border p-2">
+            <label class="flex items-center gap-2 text-sm font-medium"
+              ><input type="checkbox" on-change="toggleEvent('repository', $event.target.checked)" />Repository
+              (all)</label
+            >
+            <details class="ml-5 mt-2">
+              <summary class="cursor-pointer text-xs">Choose individual families</summary>
+              <div class="mt-2 grid gap-2">
+                <label class="flex items-center gap-2 text-sm"
+                  ><input
+                    type="checkbox"
+                    on-change="toggleEvent('repository.commit', $event.target.checked)"
+                  />repository.commit</label
+                >
+                <label class="flex items-center gap-2 text-sm"
+                  ><input
+                    type="checkbox"
+                    on-change="toggleEvent('repository.file', $event.target.checked)"
+                  />repository.file</label
+                >
+              </div>
+            </details>
+          </div>
+          <div class="rounded border p-2">
+            <label class="flex items-center gap-2 text-sm font-medium"
+              ><input type="checkbox" on-change="toggleEvent('git', $event.target.checked)" />Git (all)</label
+            >
+            <details class="ml-5 mt-2">
+              <summary class="cursor-pointer text-xs">Choose individual families</summary>
+              <div class="mt-2 grid gap-2">
+                <label class="flex items-center gap-2 text-sm"
+                  ><input type="checkbox" on-change="toggleEvent('git.push', $event.target.checked)" />git.push</label
+                >
+                <label class="flex items-center gap-2 text-sm"
+                  ><input
+                    type="checkbox"
+                    on-change="toggleEvent('git.branch', $event.target.checked)"
+                  />git.branch</label
+                >
+                <label class="flex items-center gap-2 text-sm"
+                  ><input type="checkbox" on-change="toggleEvent('git.tag', $event.target.checked)" />git.tag</label
+                >
+                <label class="flex items-center gap-2 text-sm"
+                  ><input type="checkbox" on-change="toggleEvent('git.ref', $event.target.checked)" />git.ref</label
+                >
+              </div>
+            </details>
+          </div>
         </div>
       </fieldset>
       <button class="self-start rounded-lg bg-brand px-4 py-2 font-medium text-white" type="submit">
@@ -74,26 +113,6 @@
       const org = defineProp("org", {
         default: () => new URL(window.location.href).searchParams.get("org") || "",
       });
-      const eventTypes = [
-        "repository.created",
-        "repository.deleted",
-        "repository.commit.created",
-        "repository.branch.created",
-        "repository.branch.deleted",
-        "repository.tag.created",
-        "repository.tag.deleted",
-        "repository.file.uploaded",
-        "repository.file.deleted",
-        "git.branch.created",
-        "git.branch.updated",
-        "git.branch.deleted",
-        "git.tag.created",
-        "git.tag.updated",
-        "git.tag.deleted",
-        "git.ref.created",
-        "git.ref.updated",
-        "git.ref.deleted",
-      ].map((name) => ({ name }));
       const hooks = ref([]);
       const selected = ref([]);
       const endpoint = ref("");
@@ -155,7 +174,6 @@
       );
       return {
         org,
-        eventTypes,
         hooks,
         selected,
         secret,

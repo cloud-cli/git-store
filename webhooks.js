@@ -7,26 +7,46 @@ const MAX_SUBSCRIPTIONS = 20;
 const MAX_QUEUE = 100;
 const CONCURRENCY = 4;
 const events = new Set([
-  "repository.created",
-  "repository.deleted",
-  "repository.commit.created",
-  "repository.branch.created",
-  "repository.branch.deleted",
-  "repository.tag.created",
-  "repository.tag.deleted",
-  "repository.ref.updated",
-  "repository.file.uploaded",
-  "repository.file.deleted",
-  "git.branch.created",
-  "git.branch.deleted",
-  "git.branch.updated",
-  "git.tag.created",
-  "git.tag.deleted",
-  "git.tag.updated",
-  "git.ref.created",
-  "git.ref.deleted",
-  "git.ref.updated",
+  "repository",
+  "repository.commit",
+  "repository.file",
+  "git",
+  "git.branch",
+  "git.tag",
+  "git.ref",
+  "git.push",
 ]);
+function normalizeAuditEvent(event) {
+  const match = /^(repository\.(?:branch|tag)|git\.(?:branch|tag|ref))\.(created|updated|deleted)$/.exec(event);
+  if (match) {
+    const [, family, action] = match;
+    return { event: family.replace("repository.", "git."), action };
+  }
+  const repositoryEvent = /^repository\.(created|deleted)$/.exec(event);
+  if (repositoryEvent) {
+    return { event: "repository", action: repositoryEvent[1] };
+  }
+  const eventMatch = /^(repository\.(?:commit|file))\.(created|uploaded|deleted)$/.exec(event);
+  if (eventMatch) {
+    const [, family, action] = eventMatch;
+    return { event: family, action };
+  }
+  return null;
+}
+function createPushWebhookEvent({ id, org, occurredAt, object, changes }) {
+  return { id, org, event: "git.push", action: "pushed", occurredAt, object, details: { changes } };
+}
+function serializeWebhookPayload(record) {
+  return JSON.stringify({
+    id: record.id,
+    org: record.org,
+    event: record.event,
+    ...(record.action ? { action: record.action } : {}),
+    occurredAt: record.occurredAt,
+    object: record.object,
+    details: record.details,
+  });
+}
 const statements = [
   "CREATE TABLE IF NOT EXISTS org_webhooks (id TEXT PRIMARY KEY, org_slug TEXT NOT NULL, url TEXT NOT NULL, secret TEXT NOT NULL, events TEXT NOT NULL, created_at TEXT NOT NULL)",
   "CREATE INDEX IF NOT EXISTS org_webhooks_org ON org_webhooks (org_slug)",
@@ -103,7 +123,38 @@ function createWebhookStore(client, key) {
         org,
       ]);
       return rows
-        .filter((row) => JSON.parse(row.events).includes(event))
+        .filter((row) => {
+          const subscriptions = JSON.parse(row.events);
+          const legacy = {
+            repository: ["repository.created", "repository.deleted"],
+            "repository.commit": ["repository.commit.created"],
+            "repository.branch": ["repository.branch.created", "repository.branch.deleted"],
+            "repository.tag": ["repository.tag.created", "repository.tag.deleted"],
+            "repository.file": ["repository.file.uploaded", "repository.file.deleted"],
+            "git.branch": [
+              "git.branch.created",
+              "git.branch.deleted",
+              "git.branch.updated",
+              "repository.branch.created",
+              "repository.branch.deleted",
+            ],
+            "git.tag": [
+              "git.tag.created",
+              "git.tag.deleted",
+              "git.tag.updated",
+              "repository.tag.created",
+              "repository.tag.deleted",
+            ],
+            "git.ref": ["git.ref.created", "git.ref.deleted", "git.ref.updated"],
+          };
+          const aliases = { "git.branch": ["repository.branch"], "git.tag": ["repository.tag"] };
+          return (
+            subscriptions.includes(event) ||
+            subscriptions.includes(event.split(".")[0]) ||
+            (aliases[event] || []).some((name) => subscriptions.includes(name)) ||
+            (legacy[event] || []).some((name) => subscriptions.includes(name))
+          );
+        })
         .map((row) => ({ id: row.id, url: row.url, secret: decryptSecret(row.secret, key) }));
     },
   };
@@ -250,14 +301,7 @@ async function deliver(store, record) {
         if (!pinned) {
           return;
         }
-        const body = JSON.stringify({
-          id: record.id,
-          org: record.org,
-          event: record.event,
-          occurredAt: record.occurredAt,
-          object: record.object,
-          details: record.details,
-        });
+        const body = serializeWebhookPayload(record);
         const signature = crypto.createHmac("sha256", target.secret).update(body).digest("hex");
         const controller = new globalThis.AbortController();
         const timer = setTimeout(() => controller.abort(), 5000);
@@ -293,6 +337,9 @@ export {
   createWebhookStore,
   deliver,
   events,
+  normalizeAuditEvent,
+  createPushWebhookEvent,
+  serializeWebhookPayload,
   validateTarget,
   getEncryptionKey,
   encryptedSecret,

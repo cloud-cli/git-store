@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import {
   createWebhookStore,
   events,
+  normalizeAuditEvent,
+  createPushWebhookEvent,
+  serializeWebhookPayload,
   validateTarget,
   getEncryptionKey,
   encryptedSecret,
@@ -27,6 +30,28 @@ assert.equal(MAX_QUEUE, 100);
 assert.equal(events.has("security.request.denied"), false);
 assert.equal(events.has("personal_access_token.created"), false);
 assert.equal(events.has("repository.files.staged"), false);
+assert.equal(events.has("repository"), true);
+assert.equal(events.has("git"), true);
+assert.equal(events.has("git.push"), true);
+assert.equal(events.has("git.pull_request"), false);
+assert.deepEqual(normalizeAuditEvent("repository.branch.created"), { event: "git.branch", action: "created" });
+assert.deepEqual(normalizeAuditEvent("git.tag.updated"), { event: "git.tag", action: "updated" });
+assert.deepEqual(normalizeAuditEvent("repository.file.deleted"), { event: "repository.file", action: "deleted" });
+assert.equal(normalizeAuditEvent("repository.files.staged"), null);
+const pushEvent = createPushWebhookEvent({
+  id: "push-1",
+  org: "owned",
+  occurredAt: "now",
+  object: "owned/repo",
+  changes: [
+    { ref: "refs/heads/main", before: "a", after: "b", action: "updated" },
+    { ref: "refs/tags/v1", before: null, after: "b", action: "created" },
+  ],
+});
+assert.equal(pushEvent.event, "git.push");
+assert.equal(pushEvent.action, "pushed");
+assert.equal(pushEvent.details.changes.length, 2);
+assert.deepEqual(JSON.parse(serializeWebhookPayload(pushEvent)), pushEvent);
 assert.equal(await validateTarget("http://example.com"), false);
 assert.equal(await validateTarget("https://user:pass@example.com"), false);
 assert.equal(await validateTarget("https://127.0.0.1"), false);
@@ -82,6 +107,28 @@ await store.create({
 assert.notEqual(rows[0].secret, "secret");
 assert.deepEqual((await store.list("owned"))[0].events, ["repository.created"]);
 assert.equal((await store.matching("owned", "repository.created"))[0].secret, "secret");
+await store.create({
+  id: "family",
+  org: "owned",
+  url: "https://example.com/hook",
+  secret: "secret",
+  events: ["repository"],
+  createdAt: "now",
+});
+assert.equal((await store.matching("owned", "repository.commit"))[0].id, "family");
+assert.equal(
+  (await store.matching("owned", "git.branch")).some((hook) => hook.id === "family"),
+  false,
+);
+await store.create({
+  id: "legacy-branch",
+  org: "owned",
+  url: "https://example.com/hook",
+  secret: "secret",
+  events: ["repository.branch.created"],
+  createdAt: "now",
+});
+assert.ok((await store.matching("owned", "git.branch")).some((hook) => hook.id === "legacy-branch"));
 assert.equal((await store.list("other")).length, 0);
 assert.equal(await store.remove("other", "id"), false);
 assert.equal(await store.remove("owned", "id"), true);

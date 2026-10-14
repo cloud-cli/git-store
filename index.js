@@ -16,6 +16,8 @@ import {
   createWebhookStore,
   deliver as deliverWebhook,
   events as webhookEvents,
+  normalizeAuditEvent,
+  createPushWebhookEvent,
   validateTarget,
   getEncryptionKey,
   MAX_SUBSCRIPTIONS,
@@ -129,11 +131,12 @@ async function recordAuditEvent(req, event, object = "", details = {}, org = aud
   } catch (error) {
     process.stderr.write(`[audit] event persistence failed: ${error.message}\n`);
   }
-  if (webhookEvents.has(event) && app.locals.webhookStore) {
+  const webhookEvent = normalizeAuditEvent(event);
+  if (webhookEvent && webhookEvents.has(webhookEvent.event) && app.locals.webhookStore && !req.suppressWebhook) {
     void deliverWebhook(app.locals.webhookStore, {
       id: crypto.randomUUID(),
       org,
-      event,
+      ...webhookEvent,
       occurredAt: new Date().toISOString(),
       object,
       details,
@@ -871,6 +874,8 @@ async function gitSmartHttp(req, res) {
         try {
           const refsAfter = await readRepositoryRefs(repoPath);
           const changedRefs = new Set([...refsBefore.keys(), ...refsAfter.keys()]);
+          const changes = [];
+          req.suppressWebhook = true;
           for (const ref of changedRefs) {
             const before = refsBefore.get(ref) || null;
             const after = refsAfter.get(ref) || null;
@@ -879,13 +884,28 @@ async function gitSmartHttp(req, res) {
             }
             const refType = ref.startsWith("refs/heads/") ? "branch" : ref.startsWith("refs/tags/") ? "tag" : "ref";
             const action = !before ? "created" : !after ? "deleted" : "updated";
+            changes.push({ ref, before, after, action });
             await recordAuditEvent(req, `git.${refType}.${action}`, `${organization.slug}/${repo}@${ref}`, {
               ref,
               before,
               after,
             });
           }
+          req.suppressWebhook = false;
+          if (changes.length && app.locals.webhookStore) {
+            void deliverWebhook(
+              app.locals.webhookStore,
+              createPushWebhookEvent({
+                id: crypto.randomUUID(),
+                org: organization.slug,
+                occurredAt: new Date().toISOString(),
+                object: `${organization.slug}/${repo}`,
+                changes,
+              }),
+            ).catch((error) => process.stderr.write(`[webhooks] delivery failed: ${error.message}\n`));
+          }
         } catch (error) {
+          req.suppressWebhook = false;
           process.stderr.write(`[audit] unable to inspect push refs: ${error.message}\n`);
         }
       }
