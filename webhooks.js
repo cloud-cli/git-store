@@ -1,0 +1,304 @@
+import crypto from "node:crypto";
+import dns from "node:dns/promises";
+import https from "node:https";
+import net from "node:net";
+
+const MAX_SUBSCRIPTIONS = 20;
+const MAX_QUEUE = 100;
+const CONCURRENCY = 4;
+const events = new Set([
+  "repository.created",
+  "repository.deleted",
+  "repository.commit.created",
+  "repository.branch.created",
+  "repository.branch.deleted",
+  "repository.tag.created",
+  "repository.tag.deleted",
+  "repository.ref.updated",
+  "repository.file.uploaded",
+  "repository.file.deleted",
+  "git.branch.created",
+  "git.branch.deleted",
+  "git.branch.updated",
+  "git.tag.created",
+  "git.tag.deleted",
+  "git.tag.updated",
+  "git.ref.created",
+  "git.ref.deleted",
+  "git.ref.updated",
+]);
+const statements = [
+  "CREATE TABLE IF NOT EXISTS org_webhooks (id TEXT PRIMARY KEY, org_slug TEXT NOT NULL, url TEXT NOT NULL, secret TEXT NOT NULL, events TEXT NOT NULL, created_at TEXT NOT NULL)",
+  "CREATE INDEX IF NOT EXISTS org_webhooks_org ON org_webhooks (org_slug)",
+];
+const encryptedSecret = (secret, key) => {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const data = Buffer.concat([cipher.update(secret, "utf8"), cipher.final()]);
+  return `v1:${iv.toString("base64url")}:${cipher.getAuthTag().toString("base64url")}:${data.toString("base64url")}`;
+};
+const decryptSecret = (value, key) => {
+  const [version, iv, tag, data] = value.split(":");
+  if (version !== "v1" || !iv || !tag || !data) {
+    throw new Error("Invalid encrypted webhook secret");
+  }
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(iv, "base64url"));
+  decipher.setAuthTag(Buffer.from(tag, "base64url"));
+  return Buffer.concat([decipher.update(Buffer.from(data, "base64url")), decipher.final()]).toString("utf8");
+};
+function getEncryptionKey(hex) {
+  return typeof hex === "string" && /^[0-9a-fA-F]{64}$/.test(hex) ? Buffer.from(hex, "hex") : null;
+}
+function createWebhookStore(client, key) {
+  if (!client || !key) {
+    return null;
+  }
+  let init;
+  async function ready() {
+    if (!init) {
+      init = Promise.all(statements.map((sql) => client.query("run", sql))).catch((error) => {
+        init = null;
+        throw error;
+      });
+    }
+    return init;
+  }
+  return {
+    async list(org) {
+      await ready();
+      const rows = await client.query(
+        "all",
+        "SELECT id, org_slug AS org, url, events, created_at AS createdAt FROM org_webhooks WHERE org_slug = ?",
+        [org],
+      );
+      return rows.map((row) => ({ ...row, events: JSON.parse(row.events) }));
+    },
+    async create(record) {
+      await ready();
+      const count = await client.query("all", "SELECT id FROM org_webhooks WHERE org_slug = ?", [record.org]);
+      if (count.length >= MAX_SUBSCRIPTIONS) {
+        throw new Error("Webhook subscription limit reached");
+      }
+      await client.query(
+        "run",
+        "INSERT INTO org_webhooks (id, org_slug, url, secret, events, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        [
+          record.id,
+          record.org,
+          record.url,
+          encryptedSecret(record.secret, key),
+          JSON.stringify(record.events),
+          record.createdAt,
+        ],
+      );
+    },
+    async remove(org, id) {
+      await ready();
+      const result = await client.query("run", "DELETE FROM org_webhooks WHERE org_slug = ? AND id = ?", [org, id]);
+      return result?.changes !== 0;
+    },
+    async matching(org, event) {
+      await ready();
+      const rows = await client.query("all", "SELECT id, url, secret, events FROM org_webhooks WHERE org_slug = ?", [
+        org,
+      ]);
+      return rows
+        .filter((row) => JSON.parse(row.events).includes(event))
+        .map((row) => ({ id: row.id, url: row.url, secret: decryptSecret(row.secret, key) }));
+    },
+  };
+}
+
+function ipv4Public(address) {
+  const p = address.split(".").map(Number);
+  if (p.length !== 4) {
+    return false;
+  }
+  const [a, b] = p;
+  return !(
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    a >= 224 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && (b === 0 || b === 168)) ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 198 && (b === 18 || b === 19)) ||
+    (a === 192 && b === 88)
+  );
+}
+function ipv6Bytes(address) {
+  let input = address.toLowerCase();
+  const mapped = /(?:^|:)ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(input);
+  if (mapped) {
+    return { mapped: mapped[1] };
+  }
+  if (input.includes(".")) {
+    return null;
+  }
+  const halves = input.split("::");
+  if (halves.length > 2) {
+    return null;
+  }
+  const left = halves[0] ? halves[0].split(":") : [];
+  const right = halves[1] ? halves[1].split(":") : [];
+  const groups = halves.length === 1 ? left : [...left, ...Array(8 - left.length - right.length).fill("0"), ...right];
+  if (groups.length !== 8 || groups.some((group) => !/^[\da-f]{1,4}$/.test(group))) {
+    return null;
+  }
+  return Buffer.from(
+    groups.flatMap((group) => {
+      const n = Number.parseInt(group, 16);
+      return [n >> 8, n & 255];
+    }),
+  );
+}
+function isPublicAddress(address) {
+  const version = net.isIP(address);
+  if (version === 4) {
+    return ipv4Public(address);
+  }
+  if (version !== 6) {
+    return false;
+  }
+  const bytes = ipv6Bytes(address);
+  if (!bytes) {
+    return false;
+  }
+  if (bytes.mapped) {
+    return ipv4Public(bytes.mapped);
+  }
+  const first = bytes[0];
+  // Globally routable unicast is 2000::/3. Exclude special-use allocations within it.
+  return (first & 0xe0) === 0x20 && !(bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x0d && bytes[3] === 0xb8);
+}
+async function resolveTarget(raw) {
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" || url.username || url.password || url.hash) {
+    return null;
+  }
+  try {
+    const hostname = url.hostname.replace(/^\[|\]$/g, "");
+    const addresses = net.isIP(hostname)
+      ? [{ address: hostname, family: net.isIP(hostname) }]
+      : await dns.lookup(hostname, { all: true, verbatim: true });
+    if (!addresses.length || addresses.some(({ address }) => !isPublicAddress(address))) {
+      return null;
+    }
+    return { url, hostname, address: addresses[0].address, family: addresses[0].family };
+  } catch {
+    return null;
+  }
+}
+async function validateTarget(raw) {
+  return Boolean(await resolveTarget(raw));
+}
+function requestPinned(target, body, headers, signal) {
+  return new Promise((resolve, reject) => {
+    const { url, hostname, address, family } = target;
+    const request = https.request(
+      url,
+      {
+        method: "POST",
+        headers,
+        signal,
+        ...(net.isIP(hostname) ? {} : { servername: hostname }),
+        lookup: (_host, _options, callback) => callback(null, address, family),
+      },
+      (response) => {
+        response.resume();
+        response.once("end", () => resolve(response.statusCode));
+      },
+    );
+    request.once("error", reject);
+    request.end(body);
+  });
+}
+let active = 0;
+const queue = [];
+async function runQueue(task) {
+  if (queue.length >= MAX_QUEUE) {
+    return;
+  }
+  queue.push(task);
+  pumpQueue();
+}
+function pumpQueue() {
+  while (active < CONCURRENCY && queue.length) {
+    const next = queue.shift();
+    active += 1;
+    void next()
+      .catch(() => {})
+      .finally(() => {
+        active -= 1;
+        pumpQueue();
+      });
+  }
+}
+async function deliver(store, record) {
+  const targets = await store.matching(record.org, record.event);
+  for (const target of targets) {
+    await runQueue(async () => {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const pinned = await resolveTarget(target.url);
+        if (!pinned) {
+          return;
+        }
+        const body = JSON.stringify({
+          id: record.id,
+          org: record.org,
+          event: record.event,
+          occurredAt: record.occurredAt,
+          object: record.object,
+          details: record.details,
+        });
+        const signature = crypto.createHmac("sha256", target.secret).update(body).digest("hex");
+        const controller = new globalThis.AbortController();
+        const timer = setTimeout(() => controller.abort(), 5000);
+        try {
+          const status = await requestPinned(
+            pinned,
+            body,
+            {
+              "content-type": "application/json",
+              "content-length": Buffer.byteLength(body),
+              "x-gitmini-signature": `sha256=${signature}`,
+              "x-gitmini-event": record.event,
+              "x-gitmini-delivery": record.id,
+            },
+            controller.signal,
+          );
+          if (status >= 200 && status < 300) {
+            return;
+          }
+        } catch {
+          /* bounded best-effort retries */
+        } finally {
+          globalThis.clearTimeout(timer);
+        }
+        if (attempt < 2) {
+          await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+        }
+      }
+    });
+  }
+}
+export {
+  createWebhookStore,
+  deliver,
+  events,
+  validateTarget,
+  getEncryptionKey,
+  encryptedSecret,
+  decryptSecret,
+  isPublicAddress,
+  MAX_SUBSCRIPTIONS,
+  MAX_QUEUE,
+  CONCURRENCY,
+};

@@ -12,6 +12,14 @@ import { validateRepoName, getSubjectHash } from "./storage.js";
 import * as organizations from "./organizations.js";
 import { createDatabaseClient, createAuditStore, createTokenFingerprint } from "./audit.js";
 import { PersonalAccessTokenStore, normalizeTokenExpiry } from "./personal-access-tokens.js";
+import {
+  createWebhookStore,
+  deliver as deliverWebhook,
+  events as webhookEvents,
+  validateTarget,
+  getEncryptionKey,
+  MAX_SUBSCRIPTIONS,
+} from "./webhooks.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -19,6 +27,10 @@ const getGit = (repoPath) => simpleGit.simpleGit(repoPath);
 
 const app = express();
 app.locals.auditStore = createAuditStore(createDatabaseClient(process.env.DATABASE_URL, process.env.DB_AUTH_TOKEN));
+app.locals.webhookStore = createWebhookStore(
+  createDatabaseClient(process.env.DATABASE_URL, process.env.DB_AUTH_TOKEN),
+  getEncryptionKey(process.env.WEBHOOK_ENCRYPTION_KEY),
+);
 app.use((req, res, next) => {
   req.requestId = crypto.randomUUID();
   res.set("X-Request-Id", req.requestId);
@@ -116,6 +128,16 @@ async function recordAuditEvent(req, event, object = "", details = {}, org = aud
     });
   } catch (error) {
     process.stderr.write(`[audit] event persistence failed: ${error.message}\n`);
+  }
+  if (webhookEvents.has(event) && app.locals.webhookStore) {
+    void deliverWebhook(app.locals.webhookStore, {
+      id: crypto.randomUUID(),
+      org,
+      event,
+      occurredAt: new Date().toISOString(),
+      object,
+      details,
+    }).catch((error) => process.stderr.write(`[webhooks] delivery failed: ${error.message}\n`));
   }
 }
 
@@ -1749,6 +1771,92 @@ app.delete("/api/v1/orgs/:org", requireAuthentication, requireScope("repo:write"
   await recordAuditEvent(req, "organization.deleted", result.slug, {}, result.slug);
   return res.status(204).end();
 });
+function accessibleWebhookOrg(req, res) {
+  if (!organizations.normalizeSlug(req.params.org)) {
+    res.status(400).json({ error: "Invalid organization slug" });
+    return null;
+  }
+  const org = organizations.get(req.params.org);
+  if (!org || org.ownerHash !== getAuthenticatedSubjectHash(req)) {
+    auditSecurityFailure(req, "security.access.denied", { reason: "organization_not_accessible" });
+    res.status(404).json({ error: "Organization not found" });
+    return null;
+  }
+  return org;
+}
+app.get("/api/v1/orgs/:org/webhooks", requireAuthentication, requireScope("repo:read"), async (req, res) => {
+  const org = accessibleWebhookOrg(req, res);
+  if (!org) {
+    return;
+  }
+  if (!app.locals.webhookStore) {
+    return res.status(503).json({ error: "Webhook storage is not configured" });
+  }
+  try {
+    return res.json({ webhooks: await app.locals.webhookStore.list(org.slug) });
+  } catch {
+    return res.status(503).json({ error: "Webhook storage is temporarily unavailable" });
+  }
+});
+app.post("/api/v1/orgs/:org/webhooks", requireAuthentication, requireScope("repo:write"), async (req, res) => {
+  const org = accessibleWebhookOrg(req, res);
+  if (!org) {
+    return;
+  }
+  if (!app.locals.webhookStore) {
+    return res.status(503).json({ error: "Webhook storage is not configured" });
+  }
+  const { url, events } = req.body || {};
+  if (
+    typeof url !== "string" ||
+    !Array.isArray(events) ||
+    !events.length ||
+    events.some((event) => !webhookEvents.has(event)) ||
+    new Set(events).size !== events.length ||
+    !(await validateTarget(url))
+  ) {
+    return res
+      .status(400)
+      .json({ error: "Provide an HTTPS public endpoint and an allowlisted, unique event subscription" });
+  }
+  if ((await app.locals.webhookStore.list(org.slug)).length >= MAX_SUBSCRIPTIONS) {
+    return res.status(409).json({ error: `Organization webhook limit is ${MAX_SUBSCRIPTIONS}` });
+  }
+  const webhook = {
+    id: crypto.randomUUID(),
+    org: org.slug,
+    url,
+    events,
+    createdAt: new Date().toISOString(),
+    secret: `whsec_${crypto.randomBytes(32).toString("hex")}`,
+  };
+  try {
+    await app.locals.webhookStore.create(webhook);
+    return res.status(201).json({
+      webhook: { id: webhook.id, org: webhook.org, url, events, createdAt: webhook.createdAt },
+      secret: webhook.secret,
+    });
+  } catch {
+    return res.status(503).json({ error: "Webhook storage is temporarily unavailable" });
+  }
+});
+app.delete("/api/v1/orgs/:org/webhooks/:id", requireAuthentication, requireScope("repo:write"), async (req, res) => {
+  const org = accessibleWebhookOrg(req, res);
+  if (!org) {
+    return;
+  }
+  if (!app.locals.webhookStore) {
+    return res.status(503).json({ error: "Webhook storage is not configured" });
+  }
+  try {
+    if (!(await app.locals.webhookStore.remove(org.slug, req.params.id))) {
+      return res.status(404).json({ error: "Webhook not found" });
+    }
+    return res.status(204).end();
+  } catch {
+    return res.status(503).json({ error: "Webhook storage is temporarily unavailable" });
+  }
+});
 app.get("/api/v1/orgs/:org/events", requireAuthentication, requireScope("repo:read"), async (req, res) => {
   res.set("Cache-Control", "no-store");
   if (!organizations.normalizeSlug(req.params.org)) {
@@ -2307,6 +2415,62 @@ function makeApiSpec() {
           ),
           security: [{ bearerAuth: [] }],
           "x-required-scope": "repo:read or repo:write",
+        },
+      },
+      "/api/v1/orgs/{org}/webhooks": {
+        get: {
+          summary: "List webhook subscriptions for an owned organization",
+          parameters: [{ name: "org", in: "path", required: true, schema: { type: "string" } }],
+          security: [{ bearerAuth: [] }],
+          "x-required-scope": "repo:read",
+          responses: {
+            200: { description: "Webhook subscriptions (secrets omitted)" },
+            401: unauthorized,
+            403: { description: "Insufficient scope" },
+            404: { description: "Organization not found" },
+          },
+        },
+        post: {
+          summary: "Create a webhook subscription; secret is returned once",
+          parameters: [{ name: "org", in: "path", required: true, schema: { type: "string" } }],
+          security: [{ bearerAuth: [] }],
+          "x-required-scope": "repo:write",
+          requestBody: jsonBody(
+            {
+              url: { type: "string", format: "uri", description: "Public HTTPS endpoint" },
+              events: {
+                type: "array",
+                minItems: 1,
+                uniqueItems: true,
+                items: { type: "string", enum: [...webhookEvents] },
+              },
+            },
+            ["url", "events"],
+          ),
+          responses: {
+            201: { description: "Created subscription and one-time signing secret" },
+            400: { description: "Invalid URL or event subscription" },
+            401: unauthorized,
+            403: { description: "Insufficient scope" },
+            404: { description: "Organization not found" },
+          },
+        },
+      },
+      "/api/v1/orgs/{org}/webhooks/{id}": {
+        delete: {
+          summary: "Delete a webhook subscription",
+          parameters: [
+            { name: "org", in: "path", required: true, schema: { type: "string" } },
+            { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+          ],
+          security: [{ bearerAuth: [] }],
+          "x-required-scope": "repo:write",
+          responses: {
+            204: { description: "Deleted" },
+            401: unauthorized,
+            403: { description: "Insufficient scope" },
+            404: { description: "Organization or webhook not found" },
+          },
         },
       },
       "/git/{repo}.git/info/refs": {

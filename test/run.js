@@ -914,6 +914,8 @@ async function run() {
       "/api/v1/personal-access-tokens/{id}": ["delete"],
       "/api/v1/orgs/{org}": ["delete"],
       "/api/v1/orgs/{org}/events": ["get"],
+      "/api/v1/orgs/{org}/webhooks": ["get", "post"],
+      "/api/v1/orgs/{org}/webhooks/{id}": ["delete"],
       "/api/v1/orgs/{org}/repos": ["get"],
       "/api/v1/orgs/{org}/repos/{repo}": ["post", "delete"],
       "/api/v1/orgs/{org}/repos/{repo}/log": ["get"],
