@@ -1,6 +1,7 @@
 import express from "express";
 import * as simpleGit from "simple-git";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
@@ -89,9 +90,15 @@ async function recordAuditEvent(req, event, object = "", details = {}, org = aud
   if (!store || !org) {
     return;
   }
-  const actorName = [req.user?.name, req.user?.preferred_username, req.user?.profile?.name].find(
-    (value) => typeof value === "string" && value.trim(),
-  );
+  const personalToken =
+    req.authType === "personal-access-token"
+      ? personalAccessTokens.listForOwner(req.user.ownerHash).find((token) => token.id === req.user.tokenId)
+      : null;
+  const actorName =
+    personalToken?.label ||
+    [req.user?.name, req.user?.preferred_username, req.user?.profile?.name].find(
+      (value) => typeof value === "string" && value.trim(),
+    );
   try {
     await store.append({
       org,
@@ -725,6 +732,27 @@ async function gitSmartHttp(req, res) {
     CONTENT_LENGTH: req.get("content-length") || "0",
     REMOTE_USER: req.user.sub,
   };
+  let requestBodyPath;
+  if (req.method === "POST" && !req.get("content-length")) {
+    requestBodyPath = path.join(os.tmpdir(), `gitmini-http-${crypto.randomUUID()}`);
+    try {
+      await new Promise((resolve, reject) => {
+        const file = fs.createWriteStream(requestBodyPath, { flags: "wx", mode: 0o600 });
+        req.once("aborted", () => reject(new Error("Git request aborted")));
+        file.once("error", reject);
+        file.once("finish", resolve);
+        req.pipe(file);
+      });
+      env.CONTENT_LENGTH = String(fs.statSync(requestBodyPath).size);
+    } catch {
+      try {
+        fs.unlinkSync(requestBodyPath);
+      } catch {
+        // The request body file may not have been created.
+      }
+      return res.status(400).send("Unable to read Git request body");
+    }
+  }
   const child = spawn("git", ["http-backend"], {
     env,
     stdio: ["pipe", "pipe", "pipe"],
@@ -777,7 +805,20 @@ async function gitSmartHttp(req, res) {
       writeBackendOutput(chunk);
     }
   });
-  req.pipe(child.stdin);
+  if (requestBodyPath) {
+    const requestBody = fs.createReadStream(requestBodyPath);
+    requestBody.on("error", () => child.kill());
+    requestBody.pipe(child.stdin);
+    child.once("close", () => {
+      try {
+        fs.unlinkSync(requestBodyPath);
+      } catch {
+        // The request body file may already have been removed.
+      }
+    });
+  } else {
+    req.pipe(child.stdin);
+  }
   child.stdin.on("error", (error) => {
     if (error.code !== "EPIPE") {
       child.kill();

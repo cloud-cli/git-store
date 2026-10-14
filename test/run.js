@@ -348,6 +348,8 @@ async function run() {
     ]);
     await git([
       "-c",
+      "http.postBuffer=1",
+      "-c",
       `http.extraheader=${orgAuthHeader}`,
       "-C",
       orgClonePath,
