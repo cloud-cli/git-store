@@ -6,6 +6,8 @@ let currentTags;
 let currentCommits;
 let currentRepositories;
 let currentEvents;
+let currentPersonalAccessTokens;
+let createdPersonalAccessTokenRequest;
 let bootstrapSession;
 let runtimeErrors;
 let imageBytes;
@@ -99,6 +101,18 @@ test.beforeEach(async ({ page }) => {
     },
   ];
   currentRepositories = [{ repo: "demo" }];
+  currentPersonalAccessTokens = [
+    {
+      id: "pat_000000000000000000000001",
+      label: "Existing integration",
+      scopes: ["repo:read"],
+      org: null,
+      repo: null,
+      createdAt: "2026-05-01T12:00:00.000Z",
+      expiresAt: null,
+    },
+  ];
+  createdPersonalAccessTokenRequest = null;
   currentEvents = [
     {
       id: "event-1",
@@ -228,6 +242,46 @@ test.beforeEach(async ({ page }) => {
     }),
   );
   await page.route("**/ui/config", (route) => route.fulfill({ json: {} }));
+  await page.route("**/api/v1/personal-access-tokens**", async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    if (
+      pathname === "/api/v1/personal-access-tokens" &&
+      request.method() === "GET"
+    ) {
+      return route.fulfill({ json: { tokens: currentPersonalAccessTokens } });
+    }
+    if (
+      pathname === "/api/v1/personal-access-tokens" &&
+      request.method() === "POST"
+    ) {
+      createdPersonalAccessTokenRequest = JSON.parse(request.postData());
+      const record = {
+        id: "pat_000000000000000000000002",
+        ...createdPersonalAccessTokenRequest,
+        org: null,
+        repo: null,
+        createdAt: "2026-05-02T12:00:00.000Z",
+        expiresAt: createdPersonalAccessTokenRequest.expiresAt || null,
+      };
+      currentPersonalAccessTokens = [record, ...currentPersonalAccessTokens];
+      return route.fulfill({
+        status: 201,
+        json: { token: "gmpat_browser_test_secret", record },
+      });
+    }
+    if (
+      pathname.startsWith("/api/v1/personal-access-tokens/") &&
+      request.method() === "DELETE"
+    ) {
+      const tokenId = pathname.split("/").at(-1);
+      currentPersonalAccessTokens = currentPersonalAccessTokens.filter(
+        (token) => token.id !== tokenId,
+      );
+      return route.fulfill({ status: 204 });
+    }
+    return route.fulfill({ status: 404, json: { error: "Not found" } });
+  });
   await page.route("**/api/v1/orgs", (route) =>
     route.fulfill({ json: [{ slug: "example" }] }),
   );
@@ -371,6 +425,41 @@ test("organization landing renders organizations and recent changes", async ({
   await expect(page.getByLabel("Organization name")).toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).click();
   await expect(page.getByLabel("Organization name")).toHaveCount(0);
+});
+
+test("token settings lists tokens and creates an owner-wide PAT", async ({
+  page,
+}) => {
+  await page.goto("/ui/?settings=tokens");
+
+  await expect(
+    page.getByRole("heading", { name: "Personal access tokens" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Existing integration", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("All owned repositories").first()).toBeVisible();
+
+  await page.getByLabel("Label", { exact: true }).fill("Automation client");
+  await page.getByRole("combobox", { name: "Scope" }).selectOption("repo:write");
+  await page.getByRole("button", { name: "Create token" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "Copy your token now" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("gmpat_browser_test_secret", { exact: true }),
+  ).toBeVisible();
+  await expect
+    .poll(() => createdPersonalAccessTokenRequest)
+    .toEqual({ label: "Automation client", scopes: ["repo:write"] });
+
+  const existingToken = page
+    .getByRole("listitem")
+    .filter({ hasText: "Existing integration" });
+  page.once("dialog", (dialog) => dialog.accept());
+  await existingToken.getByRole("button", { name: "Revoke" }).click();
+  await expect(existingToken).toHaveCount(0);
 });
 
 test("organization breadcrumb does not retain a repository crumb", async ({
