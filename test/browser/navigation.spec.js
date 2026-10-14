@@ -7,6 +7,10 @@ let currentCommits;
 let currentRepositories;
 let currentEvents;
 let currentPersonalAccessTokens;
+let currentOrgWebhooks;
+let createdOrgWebhookRequest;
+let webhookApiDisabled;
+let expectedWebhookHttpErrors;
 let createdPersonalAccessTokenRequest;
 let bootstrapSession;
 let runtimeErrors;
@@ -60,6 +64,10 @@ test.beforeEach(async ({ page }) => {
   page.on("pageerror", (error) => runtimeErrors.push(error.message));
   page.on("console", (message) => {
     if (message.type() === "error") {
+      if (expectedWebhookHttpErrors > 0 && message.text().startsWith("Failed to load resource:")) {
+        expectedWebhookHttpErrors -= 1;
+        return;
+      }
       runtimeErrors.push(message.text());
     }
   });
@@ -103,6 +111,10 @@ test.beforeEach(async ({ page }) => {
     },
   ];
   createdPersonalAccessTokenRequest = null;
+  currentOrgWebhooks = [];
+  createdOrgWebhookRequest = null;
+  webhookApiDisabled = false;
+  expectedWebhookHttpErrors = 0;
   currentEvents = [
     {
       id: "event-1",
@@ -262,6 +274,32 @@ test.beforeEach(async ({ page }) => {
     }),
   );
   await page.route("**/api/v1/orgs/example/repos", (route) => route.fulfill({ json: { repos: currentRepositories } }));
+  await page.route("**/api/v1/orgs/example/webhooks**", async (route) => {
+    const request = route.request();
+    if (request.method() === "GET") {
+      if (webhookApiDisabled) {
+        return route.fulfill({ status: 503, json: { error: "Webhook API is disabled" } });
+      }
+      return route.fulfill({ json: { webhooks: currentOrgWebhooks } });
+    }
+    if (request.method() === "POST") {
+      createdOrgWebhookRequest = JSON.parse(request.postData());
+      if (createdOrgWebhookRequest.events.length === 0) {
+        return route.fulfill({ status: 400, json: { error: "At least one event is required" } });
+      }
+      currentOrgWebhooks.push({
+        id: "hook-1",
+        url: createdOrgWebhookRequest.url,
+        events: createdOrgWebhookRequest.events,
+      });
+      return route.fulfill({ status: 201, json: { secret: "whsec_one_time_test" } });
+    }
+    if (request.method() === "DELETE") {
+      currentOrgWebhooks = currentOrgWebhooks.filter((hook) => !request.url().endsWith(`/${hook.id}`));
+      return route.fulfill({ status: 204 });
+    }
+    return route.fulfill({ status: 405, json: { error: "Method not allowed" } });
+  });
   await page.route("**/api/v1/orgs/example/events**", (route) => {
     const url = new URL(route.request().url());
     const limit = Number(url.searchParams.get("limit") || 50);
@@ -391,6 +429,57 @@ test("token settings lists tokens and creates an owner-wide PAT", async ({ page 
   page.once("dialog", (dialog) => dialog.accept());
   await existingToken.getByRole("button", { name: "Revoke" }).click();
   await expect(existingToken).toHaveCount(0);
+});
+
+test("organization settings navigate to repositories and manage webhook subscriptions", async ({ page }) => {
+  currentRepositories = [{ repo: "demo" }, { repo: "second" }];
+  await page.goto("/ui/");
+  await page.locator('button[title="Settings"]').click();
+  await expect(page).toHaveURL(/settings=organizations/);
+  await page.getByRole("link", { name: "example", exact: true }).click();
+  await expect(page).toHaveURL(/settings=organizations&org=example/);
+
+  const navigation = page.getByRole("navigation", { name: "Organization settings" });
+  await expect(navigation.getByRole("link", { name: "General" })).toHaveAttribute("aria-current", "page");
+  await navigation.getByRole("link", { name: "Repositories" }).click();
+  await expect(page.getByRole("heading", { name: "Repositories", exact: true })).toBeVisible();
+  const repositoryLink = page.getByRole("link", { name: "demo", exact: true });
+  await expect(repositoryLink).toHaveAttribute("href", "/?org=example&repo=demo");
+  await navigation.getByRole("link", { name: "Webhooks" }).click();
+  await expect(page).toHaveURL(/section=webhooks/);
+  await expect(navigation.getByRole("link", { name: "Webhooks" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("heading", { name: "Webhooks", exact: true })).toBeVisible();
+
+  await page.getByLabel("Webhook URL").fill("https://hooks.example.test/events");
+  await page.getByLabel("repository.created").check();
+  await page.getByLabel("git.branch.updated").check();
+  await page.getByRole("button", { name: "Create webhook" }).click();
+  await expect
+    .poll(() => createdOrgWebhookRequest)
+    .toEqual({
+      url: "https://hooks.example.test/events",
+      events: ["repository.created", "git.branch.updated"],
+    });
+  await expect(page.getByRole("status")).toContainText("This secret is shown only once.");
+  await expect(page.getByText("whsec_one_time_test", { exact: true })).toBeVisible();
+  const subscription = page.getByRole("listitem").filter({ hasText: "https://hooks.example.test/events" });
+  await expect(subscription).toContainText("repository.created, git.branch.updated");
+  await subscription.getByRole("button", { name: "Delete" }).click();
+  await expect(subscription).toHaveCount(0);
+  await expect(page).toHaveURL(/settings=organizations&org=example&section=webhooks/);
+  const webhookPanel = page.locator("org-webhooks");
+  expect(await webhookPanel.evaluate((element) => element.getBoundingClientRect().width)).toBeLessThanOrEqual(
+    page.viewportSize().width,
+  );
+
+  await page.getByLabel("Webhook URL").fill("https://hooks.example.test/events");
+  expectedWebhookHttpErrors += 1;
+  await page.getByRole("button", { name: "Create webhook" }).click();
+  await expect(page.getByRole("alert")).toHaveText("At least one event is required");
+  webhookApiDisabled = true;
+  expectedWebhookHttpErrors += 1;
+  await page.reload();
+  await expect(page.getByRole("alert")).toHaveText("Webhook API is disabled");
 });
 
 test("organization breadcrumb does not retain a repository crumb", async ({ page }) => {

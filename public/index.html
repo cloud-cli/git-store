@@ -13,6 +13,7 @@
     <link rel="component" href="/ui/components/file-preview.html" />
     <link rel="component" href="/ui/components/organization-landing.html" />
     <link rel="component" href="/ui/components/organization-settings.html" />
+    <link rel="component" href="/ui/components/org-webhooks.html" />
     <link rel="component" href="/ui/components/personal-access-tokens.html" />
     <link rel="component" href="/ui/components/sign-in-landing.html" />
     <script type="module">
@@ -433,7 +434,10 @@
                 ><organization-settings
                   class="flex min-h-0 flex-1"
                   bind-can-write="canWrite"
+                  bind-selected-org="settingsOrg"
+                  bind-section="settingsSection"
                   bind-organizations="orgs"
+                  bind-repositories="orgRepositories"
                   bind-created="orgCreated"
                   bind-error="orgError"
                   on-createorg="createOrganization($event.detail)"
@@ -903,6 +907,8 @@
               );
               const initialSettingsTab = new URL(window.location.href).searchParams.get("settings");
               const settings = ref(initialSettingsTab === "organizations" || initialSettingsTab === "tokens");
+              const settingsOrg = ref(new URL(window.location.href).searchParams.get("org") || "");
+              const settingsSection = ref(new URL(window.location.href).searchParams.get("section") || "general");
               const settingsTab = ref(initialSettingsTab === "tokens" ? "tokens" : "organizations");
               const profile = ref(serverSession.value?.authenticated ? serverSession.value.profile : null);
               const canRead = ref(
@@ -1133,6 +1139,8 @@
                 org.value = nextOrg;
                 const requestedSettingsTab = next.searchParams.get("settings");
                 settings.value = requestedSettingsTab === "organizations" || requestedSettingsTab === "tokens";
+                settingsOrg.value = requestedSettingsTab === "organizations" ? nextOrg : "";
+                settingsSection.value = next.searchParams.get("section") || "general";
                 settingsTab.value = requestedSettingsTab === "tokens" ? "tokens" : "organizations";
                 const organizationChanged = nextOrg !== (previous.searchParams.get("org") || "");
                 const refreshOrganization = organizationChanged
@@ -2086,6 +2094,8 @@
                 orgEventsHasMore,
                 orgCreated,
                 settingsTab,
+                settingsOrg,
+                settingsSection,
                 orgHref,
                 routeOrg,
                 retryOrganizationLoad,

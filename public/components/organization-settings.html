@@ -1,7 +1,7 @@
 <template component="organization-settings">
-  <div class="flex min-h-full flex-1 gap-6 p-4 md:p-8">
+  <div class="flex min-h-full min-w-0 flex-1 flex-col gap-4 p-4 sm:flex-row sm:gap-6 md:p-8">
     <nav
-      class="w-32 flex-shrink-0 border-r border-gray-200 pr-3 sm:w-44 sm:pr-4 dark:border-gray-800"
+      class="w-full flex-shrink-0 border-b border-gray-200 pb-3 sm:w-44 sm:border-b-0 sm:border-r sm:pb-0 sm:pr-4 dark:border-gray-800"
       aria-label="Settings navigation"
     >
       <h1 class="mb-4 text-xl font-bold">Settings</h1>
@@ -17,7 +17,7 @@
         >Personal access tokens</a
       >
     </nav>
-    <div class="min-w-0 flex-1">
+    <div class="w-full min-w-0 flex-1">
       <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h2 class="text-2xl font-bold">Organizations</h2>
         <template if="!canWrite"
@@ -31,48 +31,108 @@
           </button></template
         >
       </div>
-      <ul class="mb-6 space-y-2">
-        <template for="item of organizations"
-          ><li
-            class="flex items-center gap-2 rounded-xl border border-[#e1e5e1] bg-white p-2 shadow-[0_1px_2px_rgba(28,32,30,0.10)] dark:border-[#344039] dark:bg-[#1a231d]"
-          >
-            <a
-              attr-href="organizationHref(item)"
-              class="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-gray-50 dark:hover:bg-gray-900"
-              ><lucide-icon
-                icon="building"
-                size="18"
-                class="shrink-0 text-brand"
-              ></lucide-icon
-              ><span class="truncate font-medium">{{ item.slug }}</span></a
-            >
-            <template if="canWrite"
-              ><button
-                class="inline-flex shrink-0 items-center gap-1 rounded-lg px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40"
-                type="button"
-                on-click="deleteOrganization(item.slug)"
-                aria-label="Delete empty organization"
-                title="Delete organization (remove its repositories first)"
-              >
-                <lucide-icon icon="trash" size="14"></lucide-icon
-                ><span>Delete</span>
-              </button></template
-            >
-            <template if="!canWrite"
-              ><button
-                class="inline-flex shrink-0 items-center gap-1 rounded-lg px-3 py-2 text-xs font-medium text-gray-400 dark:text-gray-500"
-                type="button"
-                disabled
-                title="Repository write access is required"
-                aria-label="Delete organization (write access required)"
-              >
-                <lucide-icon icon="trash" size="14"></lucide-icon
-                ><span>Delete</span>
-              </button></template
-            >
-          </li></template
+      <template if="selectedOrg">
+        <a href="/?settings=organizations" class="mb-4 inline-block text-sm text-brand hover:underline"
+          >← All organizations</a
         >
-      </ul>
+        <h2 class="mb-4 text-2xl font-bold">{{ selectedOrg }} settings</h2>
+        <nav aria-label="Organization settings" class="mb-6 flex flex-wrap gap-2">
+          <a
+            attr-href="sectionHref('repositories')"
+            attr-aria-current="section === 'repositories' ? 'page' : null"
+            class="rounded-lg px-3 py-2 font-medium hover:bg-gray-100 dark:hover:bg-gray-900"
+            class-current="section === 'repositories'"
+            >Repositories</a
+          ><a
+            attr-href="sectionHref('general')"
+            attr-aria-current="section === 'general' ? 'page' : null"
+            class="rounded-lg px-3 py-2 font-medium hover:bg-gray-100 dark:hover:bg-gray-900"
+            class-current="section === 'general'"
+            >General</a
+          ><a
+            attr-href="sectionHref('webhooks')"
+            attr-aria-current="section === 'webhooks' ? 'page' : null"
+            class="rounded-lg px-3 py-2 font-medium hover:bg-gray-100 dark:hover:bg-gray-900"
+            class-current="section === 'webhooks'"
+            >Webhooks</a
+          >
+        </nav>
+        <template if="section === 'webhooks'"><org-webhooks bind-org="selectedOrg"></org-webhooks></template>
+        <template if="section === 'repositories'"
+          ><section aria-labelledby="org-repositories-heading">
+            <h3 id="org-repositories-heading" class="mb-3 text-xl font-semibold">Repositories</h3>
+            <template if="repositories.length">
+              <ul class="max-w-3xl space-y-2">
+                <template for="repository of repositories"
+                  ><li class="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900">
+                    <a attr-href="repositoryHref(repository)" class="font-medium text-brand hover:underline"
+                      >{{ repository.repo }}</a
+                    >
+                  </li></template
+                >
+              </ul>
+            </template>
+            <template if="!repositories.length"
+              ><p class="text-sm text-gray-600 dark:text-gray-300">
+                No repositories in this organization yet.
+              </p></template
+            >
+          </section></template
+        >
+        <template if="section === 'general'"
+          ><section class="max-w-3xl rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+            <h3 class="text-xl font-semibold">General</h3>
+            <dl class="mt-4 grid gap-3 sm:grid-cols-2">
+              <div>
+                <dt class="text-sm text-gray-500">Organization slug</dt>
+                <dd class="font-medium">{{ selectedOrg }}</dd>
+              </div>
+              <div>
+                <dt class="text-sm text-gray-500">Repositories</dt>
+                <dd class="font-medium">{{ repositories.length }}</dd>
+              </div>
+            </dl>
+          </section></template
+        >
+      </template>
+      <template if="!selectedOrg">
+        <ul class="mb-6 space-y-2">
+          <template for="item of organizations"
+            ><li
+              class="flex items-center gap-2 rounded-xl border border-[#e1e5e1] bg-white p-2 shadow-[0_1px_2px_rgba(28,32,30,0.10)] dark:border-[#344039] dark:bg-[#1a231d]"
+            >
+              <a
+                attr-href="organizationHref(item)"
+                class="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-gray-50 dark:hover:bg-gray-900"
+                ><lucide-icon icon="building" size="18" class="shrink-0 text-brand"></lucide-icon
+                ><span class="truncate font-medium">{{ item.slug }}</span></a
+              >
+              <template if="canWrite"
+                ><button
+                  class="inline-flex shrink-0 items-center gap-1 rounded-lg px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40"
+                  type="button"
+                  on-click="deleteOrganization(item.slug)"
+                  aria-label="Delete empty organization"
+                  title="Delete organization (remove its repositories first)"
+                >
+                  <lucide-icon icon="trash" size="14"></lucide-icon><span>Delete</span>
+                </button></template
+              >
+              <template if="!canWrite"
+                ><button
+                  class="inline-flex shrink-0 items-center gap-1 rounded-lg px-3 py-2 text-xs font-medium text-gray-400 dark:text-gray-500"
+                  type="button"
+                  disabled
+                  title="Repository write access is required"
+                  aria-label="Delete organization (write access required)"
+                >
+                  <lucide-icon icon="trash" size="14"></lucide-icon><span>Delete</span>
+                </button></template
+              >
+            </li></template
+          >
+        </ul>
+      </template>
       <template if="canWrite"
         ><form
           class="flex max-w-xl flex-col gap-3 rounded-xl border border-[#e1e5e1] bg-white p-4 shadow-[0_1px_2px_rgba(28,32,30,0.10)] sm:flex-row dark:border-[#344039] dark:bg-[#1a231d]"
@@ -94,27 +154,15 @@
       >
       <template if="!canWrite"
         ><p class="text-sm text-amber-700 dark:text-amber-300" role="status">
-          Read-only access: ask your GitMini administrator to enable repository
-          write access (repo:write).
+          Read-only access: ask your GitMini administrator to enable repository write access (repo:write).
         </p></template
       >
       <template if="created"
-        ><p
-          role="status"
-          class="mt-3 text-sm text-green-700 dark:text-green-300"
-        >
-          Organization created.
-        </p></template
+        ><p role="status" class="mt-3 text-sm text-green-700 dark:text-green-300">Organization created.</p></template
       >
       <template if="error"
-        ><p role="alert" class="mt-3 text-sm text-red-600 dark:text-red-400">
-          {{ error }}
-        </p>
-        <button
-          class="mt-2 text-sm text-brand hover:underline dark:text-green-300"
-          type="button"
-          on-click="retry()"
-        >
+        ><p role="alert" class="mt-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
+        <button class="mt-2 text-sm text-brand hover:underline dark:text-green-300" type="button" on-click="retry()">
           Try again
         </button></template
       >
@@ -125,23 +173,33 @@
     export default function () {
       const organizations = defineProp("organizations", { default: () => [] });
       const canWrite = defineProp("canWrite", { default: false });
+      const selectedOrg = defineProp("selectedOrg", { default: "" });
+      const section = defineProp("section", { default: "general" });
+      const repositories = defineProp("repositories", { default: () => [] });
       const created = defineProp("created", { default: false });
       const error = defineProp("error", { default: "" });
       const emitCreate = defineEvent("createorg");
       const emitDelete = defineEvent("deleteorg");
       const emitRetry = defineEvent("retry");
       const organizationName = ref("");
-      const organizationHref = (item) =>
-        `/?org=${encodeURIComponent(item.slug)}`;
+      const organizationHref = (item) => `/?settings=organizations&org=${encodeURIComponent(item.slug)}`;
+      const sectionHref = (name) =>
+        `/?settings=organizations&org=${encodeURIComponent(selectedOrg.value)}&section=${name}`;
+      const repositoryHref = (repository) =>
+        `/?org=${encodeURIComponent(selectedOrg.value)}&repo=${encodeURIComponent(repository.repo)}`;
       const setOrganizationName = (value) => {
         organizationName.value = value;
       };
-      const createOrganization = () =>
-        emitCreate(organizationName.value.trim());
+      const createOrganization = () => emitCreate(organizationName.value.trim());
       const deleteOrganization = (slug) => emitDelete(slug);
       const retry = () => emitRetry();
       return {
         organizations,
+        selectedOrg,
+        section,
+        sectionHref,
+        repositories,
+        repositoryHref,
         canWrite,
         created,
         error,
