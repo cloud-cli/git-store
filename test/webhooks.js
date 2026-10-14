@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   createWebhookStore,
   events,
+  isWebhookEvent,
   normalizeAuditEvent,
   createPushWebhookEvent,
   serializeWebhookPayload,
@@ -30,13 +31,32 @@ assert.equal(MAX_QUEUE, 100);
 assert.equal(events.has("security.request.denied"), false);
 assert.equal(events.has("personal_access_token.created"), false);
 assert.equal(events.has("repository.files.staged"), false);
-assert.equal(events.has("repository"), true);
-assert.equal(events.has("git"), true);
-assert.equal(events.has("git.push"), true);
+assert.deepEqual([...events], ["git", "repo", "thread"]);
 assert.equal(events.has("git.pull_request"), false);
-assert.deepEqual(normalizeAuditEvent("repository.branch.created"), { event: "git.branch", action: "created" });
-assert.deepEqual(normalizeAuditEvent("git.tag.updated"), { event: "git.tag", action: "updated" });
-assert.deepEqual(normalizeAuditEvent("repository.file.deleted"), { event: "repository.file", action: "deleted" });
+assert.equal(isWebhookEvent("git.branch"), true);
+assert.equal(isWebhookEvent("git.push"), true);
+assert.equal(isWebhookEvent("repository.file"), false);
+assert.equal(isWebhookEvent("repo"), true);
+assert.equal(isWebhookEvent("thread"), true);
+assert.deepEqual(normalizeAuditEvent("repository.branch.created"), {
+  event: "git.branch",
+  action: "created",
+});
+assert.deepEqual(normalizeAuditEvent("git.tag.updated"), {
+  event: "git.tag",
+  action: "updated",
+});
+assert.deepEqual(normalizeAuditEvent("repository.created"), {
+  event: "repo",
+  action: "created",
+});
+assert.deepEqual(normalizeAuditEvent("thread.updated"), {
+  event: "thread",
+  action: "updated",
+});
+assert.equal(normalizeAuditEvent("repository.file.deleted"), null);
+assert.equal(normalizeAuditEvent("repository.commit.created"), null);
+assert.equal(normalizeAuditEvent("git.ref.updated"), null);
 assert.equal(normalizeAuditEvent("repository.files.staged"), null);
 const pushEvent = createPushWebhookEvent({
   id: "push-1",
@@ -50,7 +70,20 @@ const pushEvent = createPushWebhookEvent({
 });
 assert.equal(pushEvent.event, "git.push");
 assert.equal(pushEvent.action, "pushed");
-assert.equal(pushEvent.details.changes.length, 2);
+assert.deepEqual(pushEvent, {
+  id: "push-1",
+  org: "owned",
+  event: "git.push",
+  action: "pushed",
+  occurredAt: "now",
+  object: "owned/repo",
+  details: {
+    changes: [
+      { ref: "refs/heads/main", before: "a", after: "b", action: "updated" },
+      { ref: "refs/tags/v1", before: null, after: "b", action: "created" },
+    ],
+  },
+});
 assert.deepEqual(JSON.parse(serializeWebhookPayload(pushEvent)), pushEvent);
 assert.equal(await validateTarget("http://example.com"), false);
 assert.equal(await validateTarget("https://user:pass@example.com"), false);
@@ -101,24 +134,28 @@ await store.create({
   org: "owned",
   url: "https://example.com/hook",
   secret: "secret",
-  events: ["repository.created"],
+  events: ["repo"],
   createdAt: "now",
 });
 assert.notEqual(rows[0].secret, "secret");
-assert.deepEqual((await store.list("owned"))[0].events, ["repository.created"]);
-assert.equal((await store.matching("owned", "repository.created"))[0].secret, "secret");
+assert.deepEqual((await store.list("owned"))[0].events, ["repo"]);
+assert.equal((await store.matching("owned", "repo"))[0].secret, "secret");
 await store.create({
   id: "family",
   org: "owned",
   url: "https://example.com/hook",
   secret: "secret",
-  events: ["repository"],
+  events: ["git"],
   createdAt: "now",
 });
-assert.equal((await store.matching("owned", "repository.commit"))[0].id, "family");
+assert.equal((await store.matching("owned", "git.push"))[0].id, "family");
+assert.equal(
+  (await store.matching("owned", "repo")).some((hook) => hook.id === "family"),
+  false,
+);
 assert.equal(
   (await store.matching("owned", "git.branch")).some((hook) => hook.id === "family"),
-  false,
+  true,
 );
 await store.create({
   id: "legacy-branch",

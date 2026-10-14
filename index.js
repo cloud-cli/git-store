@@ -16,6 +16,7 @@ import {
   createWebhookStore,
   deliver as deliverWebhook,
   events as webhookEvents,
+  isWebhookEvent,
   normalizeAuditEvent,
   createPushWebhookEvent,
   validateTarget,
@@ -132,7 +133,7 @@ async function recordAuditEvent(req, event, object = "", details = {}, org = aud
     process.stderr.write(`[audit] event persistence failed: ${error.message}\n`);
   }
   const webhookEvent = normalizeAuditEvent(event);
-  if (webhookEvent && webhookEvents.has(webhookEvent.event) && app.locals.webhookStore && !req.suppressWebhook) {
+  if (webhookEvent && isWebhookEvent(webhookEvent.event) && app.locals.webhookStore) {
     void deliverWebhook(app.locals.webhookStore, {
       id: crypto.randomUUID(),
       org,
@@ -875,7 +876,6 @@ async function gitSmartHttp(req, res) {
           const refsAfter = await readRepositoryRefs(repoPath);
           const changedRefs = new Set([...refsBefore.keys(), ...refsAfter.keys()]);
           const changes = [];
-          req.suppressWebhook = true;
           for (const ref of changedRefs) {
             const before = refsBefore.get(ref) || null;
             const after = refsAfter.get(ref) || null;
@@ -891,7 +891,6 @@ async function gitSmartHttp(req, res) {
               after,
             });
           }
-          req.suppressWebhook = false;
           if (changes.length && app.locals.webhookStore) {
             void deliverWebhook(
               app.locals.webhookStore,
@@ -905,7 +904,6 @@ async function gitSmartHttp(req, res) {
             ).catch((error) => process.stderr.write(`[webhooks] delivery failed: ${error.message}\n`));
           }
         } catch (error) {
-          req.suppressWebhook = false;
           process.stderr.write(`[audit] unable to inspect push refs: ${error.message}\n`);
         }
       }
@@ -2462,7 +2460,7 @@ function makeApiSpec() {
                 type: "array",
                 minItems: 1,
                 uniqueItems: true,
-                items: { type: "string", enum: [...webhookEvents] },
+                items: { type: "string", enum: ["git", "repo", "thread"] },
               },
             },
             ["url", "events"],

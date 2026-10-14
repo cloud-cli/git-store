@@ -6,35 +6,36 @@ import net from "node:net";
 const MAX_SUBSCRIPTIONS = 20;
 const MAX_QUEUE = 100;
 const CONCURRENCY = 4;
-const events = new Set([
-  "repository",
-  "repository.commit",
-  "repository.file",
-  "git",
-  "git.branch",
-  "git.tag",
-  "git.ref",
-  "git.push",
-]);
+const events = new Set(["git", "repo", "thread"]);
+function isWebhookEvent(event) {
+  return events.has(event) || (event.startsWith("git.") && events.has("git"));
+}
 function normalizeAuditEvent(event) {
-  const match = /^(repository\.(?:branch|tag)|git\.(?:branch|tag|ref))\.(created|updated|deleted)$/.exec(event);
+  const match = /^(?:repository\.(?:branch|tag)|git\.(?:branch|tag))\.(created|updated|deleted)$/.exec(event);
   if (match) {
-    const [, family, action] = match;
-    return { event: family.replace("repository.", "git."), action };
+    const [, action] = match;
+    return { event: `git.${event.split(".")[1]}`, action };
   }
-  const repositoryEvent = /^repository\.(created|deleted)$/.exec(event);
-  if (repositoryEvent) {
-    return { event: "repository", action: repositoryEvent[1] };
+  const repoEvent = /^repository\.(created|deleted)$/.exec(event);
+  if (repoEvent) {
+    return { event: "repo", action: repoEvent[1] };
   }
-  const eventMatch = /^(repository\.(?:commit|file))\.(created|uploaded|deleted)$/.exec(event);
-  if (eventMatch) {
-    const [, family, action] = eventMatch;
-    return { event: family, action };
+  const threadEvent = /^thread\.(created|updated|deleted)$/.exec(event);
+  if (threadEvent) {
+    return { event: "thread", action: threadEvent[1] };
   }
   return null;
 }
 function createPushWebhookEvent({ id, org, occurredAt, object, changes }) {
-  return { id, org, event: "git.push", action: "pushed", occurredAt, object, details: { changes } };
+  return {
+    id,
+    org,
+    event: "git.push",
+    action: "pushed",
+    occurredAt,
+    object,
+    details: { changes },
+  };
 }
 function serializeWebhookPayload(record) {
   return JSON.stringify({
@@ -126,7 +127,7 @@ function createWebhookStore(client, key) {
         .filter((row) => {
           const subscriptions = JSON.parse(row.events);
           const legacy = {
-            repository: ["repository.created", "repository.deleted"],
+            repo: ["repository.created", "repository.deleted", "repository"],
             "repository.commit": ["repository.commit.created"],
             "repository.branch": ["repository.branch.created", "repository.branch.deleted"],
             "repository.tag": ["repository.tag.created", "repository.tag.deleted"],
@@ -145,17 +146,35 @@ function createWebhookStore(client, key) {
               "repository.tag.created",
               "repository.tag.deleted",
             ],
-            "git.ref": ["git.ref.created", "git.ref.deleted", "git.ref.updated"],
+            git: [
+              "git.push",
+              "git.branch.created",
+              "git.branch.deleted",
+              "git.branch.updated",
+              "git.tag.created",
+              "git.tag.deleted",
+              "git.tag.updated",
+              "repository.branch.created",
+              "repository.branch.deleted",
+              "repository.branch.updated",
+              "repository.tag.created",
+              "repository.tag.deleted",
+              "repository.tag.updated",
+            ],
+            thread: ["thread.created", "thread.updated", "thread.deleted"],
           };
-          const aliases = { "git.branch": ["repository.branch"], "git.tag": ["repository.tag"] };
           return (
             subscriptions.includes(event) ||
-            subscriptions.includes(event.split(".")[0]) ||
-            (aliases[event] || []).some((name) => subscriptions.includes(name)) ||
+            (event.startsWith("git.") && subscriptions.includes("git")) ||
+            (event === "repo" && subscriptions.includes("repo")) ||
             (legacy[event] || []).some((name) => subscriptions.includes(name))
           );
         })
-        .map((row) => ({ id: row.id, url: row.url, secret: decryptSecret(row.secret, key) }));
+        .map((row) => ({
+          id: row.id,
+          url: row.url,
+          secret: decryptSecret(row.secret, key),
+        }));
     },
   };
 }
@@ -242,7 +261,12 @@ async function resolveTarget(raw) {
     if (!addresses.length || addresses.some(({ address }) => !isPublicAddress(address))) {
       return null;
     }
-    return { url, hostname, address: addresses[0].address, family: addresses[0].family };
+    return {
+      url,
+      hostname,
+      address: addresses[0].address,
+      family: addresses[0].family,
+    };
   } catch {
     return null;
   }
@@ -337,6 +361,7 @@ export {
   createWebhookStore,
   deliver,
   events,
+  isWebhookEvent,
   normalizeAuditEvent,
   createPushWebhookEvent,
   serializeWebhookPayload,

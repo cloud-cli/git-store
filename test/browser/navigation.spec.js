@@ -449,26 +449,27 @@ test("organization settings navigate to repositories and manage webhook subscrip
   await expect(page).toHaveURL(/section=webhooks/);
   await expect(navigation.getByRole("link", { name: "Webhooks" })).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { name: "Webhooks", exact: true })).toBeVisible();
+  const webhookPanel = page.locator("org-webhooks");
 
   await page.getByLabel("Webhook URL").fill("https://hooks.example.test/events");
-  await page.getByLabel("Repository (all)").check();
-  await page.getByText("Choose individual families").last().click();
-  await page.getByLabel("git.branch").check();
+  await expect(webhookPanel.getByRole("checkbox")).toHaveCount(3);
+  await page.getByLabel("git", { exact: true }).check();
+  await page.getByLabel("repo", { exact: true }).check();
+  await page.getByLabel("thread", { exact: true }).check();
   await page.getByRole("button", { name: "Create webhook" }).click();
   await expect
     .poll(() => createdOrgWebhookRequest)
     .toEqual({
       url: "https://hooks.example.test/events",
-      events: ["repository", "git.branch"],
+      events: ["git", "repo", "thread"],
     });
   await expect(page.getByRole("status")).toContainText("This secret is shown only once.");
   await expect(page.getByText("whsec_one_time_test", { exact: true })).toBeVisible();
   const subscription = page.getByRole("listitem").filter({ hasText: "https://hooks.example.test/events" });
-  await expect(subscription).toContainText("repository, git.branch");
+  await expect(subscription).toContainText("git, repo, thread");
   await subscription.getByRole("button", { name: "Delete" }).click();
   await expect(subscription).toHaveCount(0);
   await expect(page).toHaveURL(/settings=organizations&org=example&section=webhooks/);
-  const webhookPanel = page.locator("org-webhooks");
   expect(await webhookPanel.evaluate((element) => element.getBoundingClientRect().width)).toBeLessThanOrEqual(
     page.viewportSize().width,
   );
