@@ -472,6 +472,10 @@ test("uploads and branch, tag, and commit mutations update without document relo
   await page.locator("#branch-popover input").fill("feature/ui");
   await page.locator("#branch-popover button[type=submit]").click();
   await expect(sidebar.locator("details").nth(1).getByText("feature/ui", { exact: true })).toHaveCount(1);
+  await expect
+    .poll(() => page.locator("#branch-popover").evaluate((element) => element.matches(":popover-open")))
+    .toBe(false);
+  await expect(page.locator("#branch-popover input")).toHaveValue("");
   await sidebar.locator("details").nth(1).locator("summary").click();
   await expect(page.getByRole("link", { name: "feature/ui" })).toBeVisible();
 
@@ -479,6 +483,10 @@ test("uploads and branch, tag, and commit mutations update without document relo
   await page.locator("#tag-popover input").fill("v1.0");
   await page.locator("#tag-popover button[type=submit]").click();
   await expect(sidebar.locator("details").nth(2).getByText("v1.0", { exact: true })).toHaveCount(1);
+  await expect
+    .poll(() => page.locator("#tag-popover").evaluate((element) => element.matches(":popover-open")))
+    .toBe(false);
+  await expect(page.locator("#tag-popover input")).toHaveValue("");
   await sidebar.locator("details").nth(2).locator("summary").click();
   await expect(page.getByRole("link", { name: "v1.0" })).toBeVisible();
 
@@ -499,6 +507,10 @@ test("uploads and branch, tag, and commit mutations update without document relo
   await page.locator("#add-file-popover input").fill("src/created.md");
   await page.locator("#add-file-popover button[type=submit]").click();
   await expect(page.getByRole("link", { name: /created\.md/ })).toBeVisible();
+  await expect
+    .poll(() => page.locator("#add-file-popover").evaluate((element) => element.matches(":popover-open")))
+    .toBe(false);
+  await expect(page.locator("#add-file-popover input")).toHaveValue("");
   expect(await page.evaluate(() => window.__documentNavigationCount)).toBe(initialCount);
 });
 
@@ -519,8 +531,8 @@ test("organization event stream displays actors, actions, and objects", async ({
   currentEvents = Array.from({ length: 55 }, (_, index) => ({
     id: `event-${index + 1}`,
     occurredAt: "2026-01-01T00:00:00.000Z",
-    subject: `subject-${index + 1}`,
-    actorName: `Actor ${index + 1}`,
+    subject: index === 54 ? `pat:${"a".repeat(64)}` : `subject-${index + 1}`,
+    actorName: index === 54 ? null : `Actor ${index + 1}`,
     event: "git.branch.created",
     object: `example/project-${index + 1}@refs/heads/main`,
     origin: "git-token",
@@ -535,6 +547,8 @@ test("organization event stream displays actors, actions, and objects", async ({
   await expect(eventStream.locator("li")).toHaveCount(50);
   await page.getByRole("button", { name: "Load more events" }).click();
   await expect(eventStream.locator("li")).toHaveCount(55);
+  await expect(eventStream.getByText("Personal access token", { exact: true })).toBeVisible();
+  await expect(eventStream.getByText(`pat:${"a".repeat(64)}`, { exact: true })).toHaveCount(0);
   if (page.viewportSize().width >= 768) {
     await expect.poll(() => eventStream.evaluate((list) => list.scrollHeight > list.clientHeight)).toBe(true);
     await expect(eventStream).toHaveCSS("overflow-y", "auto");
@@ -576,7 +590,25 @@ test("header uses the GitMini home logo", async ({ page }) => {
   const homeLink = page.getByRole("link", { name: "Home" });
   await expect(page).toHaveTitle("GitMini");
   await expect(homeLink).toBeVisible();
+  await expect(homeLink).toContainText("gitmini.");
+  await expect(homeLink).toHaveCSS("width", "256px");
   await expect(homeLink.getByTestId("home-indicator")).toHaveAttribute("width", "32");
+  await expect(homeLink.getByTestId("home-indicator").locator("rect")).toHaveAttribute("rx", "4");
+  const breadcrumbs = page.getByTestId("workspace-breadcrumbs");
+  await expect(breadcrumbs.getByRole("link")).toHaveCount(2);
+  await expect(breadcrumbs.locator("span").nth(0)).toHaveCSS("display", "none");
+  await expect(breadcrumbs.locator("span").nth(1)).not.toHaveCSS("display", "none");
+  expect(
+    await breadcrumbs.evaluate((nav) => {
+      const bounds = nav.getBoundingClientRect();
+      return Math.abs(bounds.left + bounds.width / 2 - window.innerWidth / 2);
+    }),
+  ).toBeLessThan(2);
+  expect(
+    await breadcrumbs.evaluate(
+      (nav) => nav.compareDocumentPosition(document.querySelector("main")) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ),
+  ).toBeTruthy();
   const userCard = page.locator('button[title="Settings"]');
   await expect(userCard).toHaveClass(/rounded-full/);
   await expect(userCard.locator("span[aria-hidden='true']")).toHaveCSS("width", "32px");
@@ -593,6 +625,7 @@ test("anonymous landing welcomes returning users", async ({ page }) => {
   await page.route("**/ui/session", (route) => route.fulfill({ json: { authenticated: false } }));
   await page.goto("/ui/");
 
+  await expect(page.getByTestId("workspace-breadcrumbs").locator("xpath=..")).toBeHidden();
   await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
   await expect(page.getByText("Sign in to access your organizations and repositories.")).toBeVisible();
   await expect(page.getByRole("link", { name: "Continue to GitMini" })).toBeVisible();
@@ -616,6 +649,11 @@ test("SPA navigation, file pages, history, and read-only controls", async ({ pag
   await page.getByText("notes.txt", { exact: true }).first().click();
   await expect(page.getByTestId("file-page")).toBeVisible();
   await expect(page.getByTestId("file-code-block")).toContainText("plain text preview");
+  const fileBackButton = page.getByTestId("file-back-button");
+  await expect(fileBackButton).toHaveAccessibleName("Back to files");
+  await expect(fileBackButton.locator("lucide-icon")).toHaveJSProperty("icon", "chevron-left");
+  await expect(fileBackButton.locator(".sr-only")).toHaveText("Back to files");
+  await expect(fileBackButton).toHaveJSProperty("previousElementSibling", null);
   const filePageDuration = Date.now() - filePageStartedAt;
   test.info().annotations.push({
     type: "file-page-load-ms",
@@ -648,7 +686,7 @@ test("organization and repository navigation replaces the displayed page", async
   await page.goto("/ui/?org=example&repo=demo");
   await expect(page.getByText("notes.txt", { exact: true }).first()).toBeVisible();
 
-  await page.getByRole("banner").getByRole("link", { name: "example" }).click();
+  await page.getByTestId("workspace-breadcrumbs").getByRole("link", { name: "example" }).click();
   await expect(page.getByRole("navigation", { name: "Folder path" })).toHaveCount(0);
   await expect(page.locator("[data-repository-view]")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Event stream" })).toHaveCount(1);

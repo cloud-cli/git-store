@@ -6,28 +6,25 @@
     <header
       class="flex min-h-[76px] shrink-0 items-center gap-3 border-b border-gray-200 bg-[#f8faf9] px-4 py-3 dark:border-[#344039] dark:bg-[#1d2620] sm:px-5"
     >
+      <button
+        type="button"
+        on-click="backToFiles()"
+        data-testid="file-back-button"
+        class="-my-3 flex w-8 shrink-0 self-stretch items-center justify-center rounded-l-lg border-r border-gray-200 text-gray-600 transition-colors hover:bg-gray-100 dark:border-[#344039] dark:text-gray-300 dark:hover:bg-gray-800"
+        aria-label="Back to files"
+      >
+        <lucide-icon icon="chevron-left" size="18"></lucide-icon>
+        <span class="sr-only">Back to files</span>
+      </button>
       <div class="flex min-w-0 flex-1 items-center gap-3">
         <span
           class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-white text-brand dark:bg-[#111713] dark:text-[#a4d1ae]"
         >
-          <lucide-icon
-            data-testid="file-page-icon"
-            bind-icon="icon"
-            size="18"
-          ></lucide-icon>
+          <lucide-icon data-testid="file-page-icon" bind-icon="icon" size="18"></lucide-icon>
         </span>
         <div class="min-w-0">
-          <h1
-            class="truncate text-sm font-semibold text-gray-900 dark:text-gray-100"
-          >
-            {{ fileName }}
-          </h1>
-          <p
-            class="truncate text-xs text-gray-500 dark:text-gray-400"
-            attr-title="path"
-          >
-            {{ path }}
-          </p>
+          <h1 class="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">{{ fileName }}</h1>
+          <p class="truncate text-xs text-gray-500 dark:text-gray-400" attr-title="path">{{ path }}</p>
         </div>
       </div>
       <span
@@ -35,15 +32,6 @@
         class="hidden shrink-0 rounded-md bg-white px-2 py-1 font-mono text-[11px] text-gray-500 dark:bg-[#111713] dark:text-gray-300 sm:inline-flex"
         >{{ language }}</span
       >
-      <button
-        type="button"
-        on-click="backToFiles()"
-        class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-700 dark:bg-[#111713] dark:text-gray-200 dark:hover:bg-gray-800"
-        aria-label="Back to files"
-      >
-        <lucide-icon icon="arrow-left" size="14"></lucide-icon>
-        <span>Back to files</span>
-      </button>
     </header>
     <div class="flex min-h-0 flex-1 overflow-hidden">
       <template if="loading"
@@ -55,14 +43,8 @@
         </div></template
       >
       <template if="!loading && imageUrl"
-        ><div
-          class="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-gray-50 p-4 dark:bg-[#111713]"
-        >
-          <img
-            attr-src="imageUrl"
-            attr-alt="fileName"
-            class="max-h-full max-w-full object-contain"
-          /></div
+        ><div class="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-gray-50 p-4 dark:bg-[#111713]">
+          <img attr-src="imageUrl" attr-alt="fileName" class="max-h-full max-w-full object-contain" /></div
       ></template>
       <template if="!loading && !imageUrl"
         ><div
@@ -91,12 +73,8 @@
       const icon = defineProp("icon", { default: "file" });
       const darkMode = defineProp("darkMode", { default: false });
       const emitBack = defineEvent("back");
-      const fileName = computed(
-        () => path.value.split("/").at(-1) || path.value,
-      );
-      const theme = computed(() =>
-        darkMode.value ? "atom-one-dark" : "github",
-      );
+      const fileName = computed(() => path.value.split("/").at(-1) || path.value);
+      const theme = computed(() => (darkMode.value ? "atom-one-dark" : "github"));
       const backToFiles = () => emitBack();
       return {
         path,

@@ -26,6 +26,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <style type="text/tailwindcss">
+      @source inline("hidden");
       @custom-variant dark (&:where(.dark, .dark *));
       @theme {
         --color-app-bg: #eef2ec;
@@ -52,7 +53,7 @@
             >
               <lucide-icon icon="menu" size="20"></lucide-icon></button
           ></template>
-          <a href="/" class="flex shrink-0 items-center rounded-lg overflow-hidden" aria-label="Home"
+          <a href="/" class="flex h-full w-64 shrink-0 items-center gap-3 overflow-hidden" aria-label="Home"
             ><svg
               data-testid="home-indicator"
               xmlns="http://www.w3.org/2000/svg"
@@ -66,27 +67,14 @@
               stroke-linejoin="round"
               aria-hidden="true"
             >
-              <rect width="24" height="24" fill="#263d32" stroke="none" />
+              <rect x="0.5" y="0.5" width="23" height="23" rx="4" fill="#263d32" stroke="none" />
               <path d="M15 6a9 9 0 0 0-9 9V3" stroke="#c8e6a8" />
               <circle cx="18" cy="6" r="3" stroke="#c8e6a8" />
               <circle cx="6" cy="18" r="3" stroke="#c8e6a8" /></svg
-          ></a>
-          <nav
-            aria-label="Workspace breadcrumbs"
-            data-testid="workspace-breadcrumbs"
-            class="flex min-w-0 items-center gap-4 overflow-hidden"
+            ><span class="text-2xl font-bold tracking-tight text-[#263d32] dark:text-[#c8e6a8]"
+              >gitmini<span class="text-brand">.</span></span
+            ></a
           >
-            <template for="breadcrumb of breadcrumbs"
-              ><span class="shrink-0 text-gray-400" aria-hidden="true">/</span
-              ><a
-                data-testid="workspace-breadcrumb"
-                attr-href="breadcrumb.href"
-                attr-title="breadcrumb.label"
-                class="max-w-[20vw] truncate text-base font-semibold hover:text-brand md:max-w-80 md:text-lg"
-                >{{ breadcrumb.label }}</a
-              ></template
-            >
-          </nav>
         </div>
         <div class="flex flex-shrink-0 items-center gap-2 sm:gap-4">
           <button
@@ -126,6 +114,27 @@
           >
         </div>
       </header>
+      <div
+        class="flex h-12 shrink-0 items-center justify-center bg-app-bg px-6 dark:bg-[#111713] max-md:px-4"
+        class-hidden="!breadcrumbs.length"
+      >
+        <nav
+          aria-label="Workspace breadcrumbs"
+          data-testid="workspace-breadcrumbs"
+          class="flex min-w-0 items-center gap-4 overflow-hidden"
+        >
+          <template for="breadcrumb of breadcrumbs"
+            ><span class="shrink-0 text-gray-400" aria-hidden="true" class-hidden="!breadcrumb.showSeparator">/</span
+            ><a
+              data-testid="workspace-breadcrumb"
+              attr-href="breadcrumb.href"
+              attr-title="breadcrumb.label"
+              class="max-w-[20vw] truncate text-base font-semibold hover:text-brand md:max-w-80 md:text-lg"
+              >{{ breadcrumb.label }}</a
+            ></template
+          >
+        </nav>
+      </div>
       <div
         class="flex min-h-0 flex-1 gap-6 overflow-hidden bg-app-bg px-6 pb-6 pt-2 dark:bg-[#111713] max-md:min-h-[calc(100dvh-72px)] max-md:gap-4 max-md:overflow-visible max-md:p-4"
       >
@@ -949,12 +958,14 @@
                   items.push({
                     label: routeOrg.value,
                     href: orgHref.value,
+                    showSeparator: false,
                   });
                 }
                 if (routeOrg.value && routeRepo.value) {
                   items.push({
                     label: routeRepo.value,
                     href: repoHref.value,
+                    showSeparator: true,
                   });
                 }
                 return items;
@@ -1161,6 +1172,16 @@
               );
               const setRepoName = (value) => {
                 repoName.value = value;
+              };
+              const resetAndClosePopover = (id) => {
+                const popover = document.getElementById(id);
+                if (!popover) {
+                  return;
+                }
+                popover.querySelector("form")?.reset();
+                if (popover.matches(":popover-open")) {
+                  popover.hidePopover();
+                }
               };
               const createOrganization = async (requestedSlug) => {
                 if (!canWrite.value) {
@@ -1689,6 +1710,9 @@
                         : `${result.error || "Repository creation failed"} (${result.code || response.status})`,
                     );
                   }
+                  repoName.value = "";
+                  errorMessage.value = "";
+                  resetAndClosePopover("create-repo-popover");
                   await navigate(repositoryNavHref({ repo: name }));
                 } catch (error) {
                   errorMessage.value = error.message || "Repository creation failed.";
@@ -1711,6 +1735,8 @@
                   });
                   if (response.ok) {
                     branchName.value = "";
+                    errorMessage.value = "";
+                    resetAndClosePopover("branch-popover");
                     await load();
                   } else throw new Error("Failed to create branch.");
                 } catch (error) {
@@ -1734,6 +1760,8 @@
                   });
                   if (response.ok) {
                     tagName.value = "";
+                    errorMessage.value = "";
+                    resetAndClosePopover("tag-popover");
                     await load();
                   } else throw new Error("Failed to create tag.");
                 } catch (error) {
@@ -1793,6 +1821,9 @@
                     addFileError.value = result.error || `Failed to commit file (${commitResponse.status}).`;
                     return;
                   }
+                  addFilePath.value = "";
+                  addFileError.value = "";
+                  resetAndClosePopover("add-file-popover");
                   await load();
                 } catch (error) {
                   addFileError.value = error.message || "Could not create and commit the file.";
