@@ -11,15 +11,25 @@ participate in organization or repository naming.
   and Git Smart HTTP endpoints; UI-only routes are excluded.
 - Organizations and their repositories are scoped to the authenticated OIDC subject.
   Organization slugs are globally unique, lowercase, and case-insensitive on input.
-- All repository operations require an authenticated OIDC subject. API bearer tokens
-  need `repo:read` for reads and `repo:write` for creation/mutations; `repo:write` also
-  grants read access. The browser UI may use a provider-validated same-origin session.
+- API and Git credentials require both active OIDC introspection and a local authorization
+  record. Introspection scopes are authentication-only and never authorize operations.
+  Local capabilities are `repo:read`, `repo:write` (also reads), `org:create`, and
+  `org:manage` (delete empty organizations and manage webhook settings). Every local
+  credential has explicit organization slug grants; no API/Git token gets owner-wide access.
+  Browser sessions retain owner-wide same-origin UI access.
 - Git Smart HTTP is available at `/git/<org>/<repo>.git`. Git clients use HTTP Basic auth
-  with any username and an active OIDC access token as the password; fetch needs
-  `repo:read` (or `repo:write`) and push needs `repo:write`. Git transport never
+  with any username and an active OIDC access token with a local GitMini authorization
+  record as the password; fetch needs locally granted `repo:read` (or `repo:write`) and
+  push needs locally granted `repo:write`. Git transport never
   falls back to browser sessions. Use HTTPS in deployment; plain HTTP is suitable
-  only for local testing. PATs are not issued by this version; use an OIDC access
-  token until PAT management is added.
+  only for local testing.
+- Active OIDC access tokens can be bound from an authenticated same-origin browser session with
+  `POST /api/v1/token-authorizations` (`token`, `label`, `scopes`, and explicit `orgs`).
+  GitMini verifies the active subject matches the caller and stores only SHA-256 of the
+  opaque token. Token records can later be edited or revoked without resubmitting it.
+  Legacy token records are migrated fail-closed: repository-bound PATs retain only their
+  prior organization grant, while formerly owner-wide PATs receive no organization grants
+  and must be explicitly edited before use. Unrecognized/malformed records stop startup.
 - Browser sign-in identifies an account by the stable OIDC `sub` claim. Username
   claims have no authentication or naming role and are omitted from the UI profile.
   Organization slugs are chosen in GitMini and repositories are routed as

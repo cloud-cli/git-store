@@ -10,13 +10,20 @@ All URLs are relative to the server base URL (`http://localhost:3000` by default
 
 ## Authentication and authorization
 
-API clients send an active OIDC bearer token. The server validates it through the
-configured issuer's introspection endpoint and derives ownership only from its `sub`
-claim. Tokens need scopes as follows:
+API and Git bearer credentials must be active OIDC tokens validated through the configured
+issuer's introspection endpoint and registered in GitMini's local token authorization store.
+Introspection authenticates the token and supplies its `sub`; its scope claim does not grant
+GitMini permissions. GitMini stores only a SHA-256 token fingerprint, the subject hash, local
+capabilities, and explicit organization grants. Unregistered active bearer tokens are denied.
+The local capabilities are:
 
-- Reads (`GET /api/v1/orgs/{org}/repos` and repository `GET` operations): `repo:read` or `repo:write`.
-- Organization creation, repository creation, and all mutations (`POST`, `DELETE`): `repo:write`.
-- `repo:write` includes read access. `repo:read` never grants write access.
+- `repo:read` – read repositories; `repo:write` – mutate repositories and also read them.
+- `org:create` – create organizations; a token is granted only the organization it creates.
+- `org:manage` – delete empty granted organizations and manage their webhook settings.
+- Every bearer token is limited to the organizations explicitly listed in its local grants;
+  organizations the subject owns are not implicitly visible.
+- Listing, creating, binding, editing, or revoking token authorization records requires an
+  authenticated same-origin browser session. Bearer tokens cannot manage token grants.
 - A valid token without the required scope returns **403 Forbidden**. Missing or
   invalid authentication returns **401 Unauthorized**.
 
@@ -40,19 +47,32 @@ GitMini stores it in the encrypted `DATA_PATH` session store and rotates it
 server-side as access tokens approach expiry, and renews the cookie for an active session.
 Neither access nor refresh tokens are sent to the browser. Browser-session scopes come from
 `OIDC_BROWSER_SCOPES`; cookie-authenticated repository writes require same-origin requests.
-Profile nicknames and display names never determine repository ownership. Other applications
-can use scoped opaque bearer tokens validated through OIDC introspection.
+Profile nicknames and display names never determine repository ownership.
 
 Git Smart HTTP uses HTTP Basic authentication at `/git/{org}/{repo}.git`. The username is
-ignored; the password must be an active OIDC access token with a non-empty subject.
-Git fetch (`git-upload-pack`) requires `repo:read` or `repo:write`; Git push
-(`git-receive-pack`) requires `repo:write`. Git transport does not accept browser
-session cookies. Use HTTPS so the Basic credential is encrypted in transit. This
-version accepts OIDC access tokens as the Basic password; it does not yet issue PATs.
+ignored; the password must be an active, locally authorized OIDC access token. Git fetch
+(`git-upload-pack`) requires locally granted `repo:read` or `repo:write`; Git push
+(`git-receive-pack`) requires locally granted `repo:write`. Git transport does not accept
+browser session cookies. Use HTTPS so the Basic credential is encrypted in transit. GitMini
+also issues local personal access tokens; both credential kinds use the same local grants.
 
 Public endpoints (`/api`, `/api/v1/health`, `/ui/config`, `/ui/session`) do not require authentication.
 
 ## Endpoints
+
+### Token authorization management
+
+Token metadata and grants are managed only from an authenticated same-origin browser session.
+`GET /api/v1/personal-access-tokens` lists records; `POST` creates a GitMini token from
+`{ "label": "Notes app", "scopes": ["repo:read"], "orgs": ["notes"] }` and returns the
+generated secret once. `PATCH /api/v1/personal-access-tokens/{id}` edits its label, local
+capabilities and organization grants; `DELETE` revokes it. A valid external OIDC token can be
+bound with `POST /api/v1/token-authorizations` using `{ "token": "<opaque-token>", "label":
+"Notes app", "scopes": ["repo:read"], "orgs": ["notes"] }`. GitMini verifies the token is
+active, was issued for GitMini's configured OIDC client, and belongs to the signed-in subject,
+then stores only its hash. The raw external token is not returned or stored. Auth introspection
+is client-bound, so tokens issued for a different OIDC client cannot be bound by this service.
+Both credential types use the same local grant enforcement.
 
 ### GET /api/v1/health
 
@@ -142,7 +162,8 @@ token's validated OIDC `sub`. Git Smart HTTP is also listed in the OpenAPI docum
 
 ### GET /api/v1/orgs
 
-List organizations owned by the authenticated subject.
+List organizations owned by the authenticated subject and, for bearer tokens, explicitly
+granted to that token. Browser sessions list all organizations owned by the user.
 
 ```http
 GET /api/v1/orgs
@@ -175,7 +196,8 @@ Invalid slugs return **400**; an existing slug returns **409**.
 
 ### GET /api/v1/orgs/{org}/repos
 
-List repositories in an organization owned by the authenticated subject.
+List repositories in an organization owned by the authenticated subject and explicitly granted
+to the bearer token, if applicable.
 
 ```http
 GET /api/v1/orgs/my-org/repos
@@ -461,6 +483,12 @@ DELETE /api/v1/orgs/{org}/repos/{repo}/branches/{name}
 
 # Organization webhooks
 
-Owned organizations can manage webhook subscriptions at `/api/v1/orgs/{org}/webhooks`. Listing requires `repo:read`; creation and deletion require `repo:write`. Configure `WEBHOOK_ENCRYPTION_KEY` as exactly 32 random bytes encoded in 64 hexadecimal characters; without this distinct key, webhook storage and create/list/delete APIs are disabled. Generated secrets are returned only at creation and stored encrypted using AES-256-GCM; changing the key makes existing encrypted secrets undecryptable. Verify `X-GitMini-Signature` (`sha256=<hex>`) as HMAC-SHA-256 of the exact JSON request body. Delivery uses `X-GitMini-Event` and `X-GitMini-Delivery` headers. Subscriptions accept only allowlisted event names and public HTTPS endpoints; resolved addresses are checked and pinned to the HTTPS connection, and redirects are not followed. Each organization is limited to 20 subscriptions. Delivery is best effort: at most four deliveries run concurrently, up to 100 wait in the in-memory queue (excess deliveries are dropped), with up to three attempts and a five-second request timeout. Pending deliveries are lost on process restart. Security-denial, PAT and staging events are not subscribed by default.
+Owned, token-granted organizations can manage webhook subscriptions at `/api/v1/orgs/{org}/webhooks`. Listing requires `repo:read`; creation and deletion require `org:manage`. Configure `WEBHOOK_ENCRYPTION_KEY` as exactly 32 random bytes encoded in 64 hexadecimal characters; without this distinct key, webhook storage and create/list/delete APIs are disabled. Generated secrets are returned only at creation and stored encrypted using AES-256-GCM; changing the key makes existing encrypted secrets undecryptable. Verify `X-GitMini-Signature` (`sha256=<hex>`) as HMAC-SHA-256 of the exact JSON request body. Delivery uses `X-GitMini-Event` and `X-GitMini-Delivery` headers. Subscriptions accept only allowlisted event names and public HTTPS endpoints; resolved addresses are checked and pinned to the HTTPS connection, and redirects are not followed. Each organization is limited to 20 subscriptions. Delivery is best effort: at most four deliveries run concurrently, up to 100 wait in the in-memory queue (excess deliveries are dropped), with up to three attempts and a five-second request timeout. Pending deliveries are lost on process restart. Security-denial, PAT and staging events are not subscribed by default.
 
 Subscriptions accept exactly `git`, `repo`, and `thread`. `repo` delivers only repository creation and deletion. `git` delivers one `git.push` after each successful push, with top-level `action: "pushed"` and `details.changes[]` entries containing `ref`, `before`, `after`, and `action`; it also delivers `git.branch` and `git.tag` for each changed branch/tag ref, including refs changed by a push and API branch/tag operations. These ref events use top-level `action` (`created`, `updated`, or `deleted`); ref is a payload detail and is not selectable. The audit stream retains detailed per-ref events. Legacy stored subscriptions are retained where feasible. `thread` can be selected but currently has no source and does not deliver events. Its planned future payload anchors a thread to an immutable commit SHA and includes repository, ref, path, line ranges, selected lines, and immutable comments with comment IDs and bodies; no thread storage or API is implemented. Payload details can contain repository-controlled values, so configure only trusted receivers. Event IDs support consumer-side deduplication. Organization lifecycle, working-tree file, API commit, staging/unstaging, PAT, and security events are not delivered.
+
+# Atomic commits
+
+`POST /api/v1/orgs/{org}/repos/{repo}/commits` creates one commit on `refs/heads/main` and returns `{ "commit": "<sha>", "ref": "refs/heads/main" }`. It requires `repo:write` and an explicit organization grant.
+
+Send `{ "expectedRef": "<main-sha>", "message": "...", "changes": [{ "path": "file.txt", "content": "<base64>" }, { "path": "old.txt", "delete": true }] }`. For an unborn main, `expectedRef` may be `null`; otherwise it must match the current main SHA. A mismatch or concurrent ref update returns 409. All members are validated before Git objects are written. Paths must be relative and unique, cannot contain comma or NUL, cannot conflict as file/directory paths, and may not contain a `.git` component; each content is strict base64, at most 10 MiB total, 200 changes maximum, and messages are limited to 10,000 characters. Deleting a nonexistent path is a no-op. Changes are based on committed `main` (not staged or working-tree content); the shared working tree and index are left unchanged.

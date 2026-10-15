@@ -19,6 +19,7 @@ process.env.OIDC_CLIENT_SECRET = "test-client-secret";
 
 const app = (await import("../index.js")).default;
 const organizations = await import("../organizations.js");
+const { hashSubject } = await import("../storage.js");
 organizations.create("introspected-subject", "introspected-org");
 const auditEvents = [];
 app.locals.auditStore = {
@@ -56,6 +57,9 @@ const tokenSubjects = new Map([
   ["read-only", { active: true, sub: "read-only-subject", scope: "repo:read" }],
   ["unscoped", { active: true, sub: "unscoped-subject" }],
   ["browser-session-token", { active: true, sub: "browser-subject", scope: "repo:read repo:write" }],
+  ["opaque-api-token", { active: true, sub: "oidc-subject-a", scope: "repo:read repo:write" }],
+  ["foreign-subject-token", { active: true, sub: "oidc-subject-b", scope: "repo:write org:create" }],
+  ["unregistered-active", { active: true, sub: "oidc-subject-a", scope: "repo:write" }],
 ]);
 
 const organizationsByToken = {
@@ -70,6 +74,25 @@ const organizationsByToken = {
 // This injects verification inside this test process only. No fake token is
 // accepted by production HTTP requests unless a test explicitly installs it.
 app.locals.verifyToken = async (token) => tokenSubjects.get(token) || null;
+for (const [token, claims] of tokenSubjects) {
+  if (
+    claims.active &&
+    claims.sub !== "introspected-subject" &&
+    !["unscoped", "opaque-api-token", "foreign-subject-token", "unregistered-active"].includes(token)
+  ) {
+    app.locals.tokenAuthorizations.bindExternal({
+      token,
+      ownerHash: hashSubject(claims.sub),
+      label: `test ${token}`,
+      scopes: token === "read-only" ? ["repo:read"] : ["repo:read", "repo:write", "org:create", "org:manage"],
+      orgs: [],
+    });
+  }
+}
+const readOnlyOwner = hashSubject("read-only-subject");
+organizations.createForOwnerHash(readOnlyOwner, "reader-org");
+const readOnlyAuthorization = app.locals.tokenAuthorizations.findByToken("read-only");
+app.locals.tokenAuthorizations.grantOrg(readOnlyAuthorization.id, readOnlyOwner, "reader-org");
 
 // Legacy-shaped test paths are shorthand for the actor's organization; rawPath
 // bypasses this test-only mapping to assert removed public routes stay absent.
@@ -207,18 +230,22 @@ async function run() {
   try {
     assert.strictEqual((await request(port, "GET", "/api/v1/orgs", undefined, "unscoped")).status, 403);
     assert.strictEqual((await request(port, "POST", "/api/v1/orgs", { slug: "blocked" }, "unscoped")).status, 403);
-    assert.strictEqual((await request(port, "POST", "/api/v1/orgs", { slug: "bad slug" }, "token-a")).status, 400);
+    const badSlugResult = await request(port, "POST", "/api/v1/orgs", { slug: "bad slug" }, "token-a");
+    assert.strictEqual(badSlugResult.status, 400, badSlugResult.body);
     const orgCreated = await request(port, "POST", "/api/v1/orgs", { slug: "Team-One" }, "token-a");
     assert.strictEqual(orgCreated.status, 201);
     assert.deepStrictEqual(JSON.parse(orgCreated.body), {
       org: { slug: "team-one" },
     });
+    assert.strictEqual(
+      (await request(port, "GET", "/api/v1/orgs", undefined, "unregistered-active")).status,
+      403,
+      "active but unregistered bearer is denied",
+    );
     assert.strictEqual((await request(port, "POST", "/api/v1/orgs", { slug: "team-one" }, "token-b")).status, 409);
     for (const [token, slug] of [
       ["token-a", "team-extra"],
       ["token-b", "team-two"],
-      ["read-only", "reader-org"],
-      ["unscoped", "unscoped-org"],
       ["browser-session-token", "browser-org"],
     ]) {
       const oldClaims = tokenSubjects.get(token);
@@ -227,6 +254,7 @@ async function run() {
       assert.strictEqual(created.status, 201);
       tokenSubjects.set(token, oldClaims);
     }
+    assert.strictEqual((await request(port, "POST", "/api/v1/orgs", { slug: "reader-org" }, "read-only")).status, 403);
     assert.deepStrictEqual(JSON.parse((await request(port, "GET", "/api/v1/orgs", undefined, "token-a")).body), {
       orgs: [{ slug: "team-extra" }, { slug: "team-one" }],
     });
@@ -243,7 +271,7 @@ async function run() {
     );
     assert.strictEqual(
       (await request(port, "GET", "/api/v1/orgs/team-one/events", undefined, "token-b")).status,
-      404,
+      403,
       "users cannot read another organization's event stream",
     );
     const organizationMetadata = fs.readFileSync(path.join(dataPath, "orgs", "team-one", ".organization.json"), "utf8");
@@ -327,7 +355,7 @@ async function run() {
       { path: "denied.txt", content: "" },
       "read-only",
     );
-    assert.strictEqual(readOnlyScopedWrite.status, 403, "organization-scoped writes still enforce repo:write");
+    assert.strictEqual(readOnlyScopedWrite.status, 403, "repo:read grants no repository write access");
     const orgClonePath = path.join(dataPath, "clone-org");
     const orgAuthHeader = `Authorization: Basic ${Buffer.from("arbitrary-user:token-a").toString("base64")}`;
     const orgGitUrl = `http://127.0.0.1:${port}/git/team-one/inside.git`;
@@ -407,7 +435,8 @@ async function run() {
     assert.strictEqual((await request(port, "POST", "/api/v1/repos/git-http", undefined, "token-a")).status, 201);
     const gitRepoPath = path.join(dataPath, "orgs", "team-one", "git-http");
     fs.writeFileSync(path.join(gitRepoPath, "initial.txt"), "initial\n");
-    await git(["-C", gitRepoPath, "add", "initial.txt"]);
+    fs.writeFileSync(path.join(gitRepoPath, "old-atomic.txt"), "remove from committed tree\n");
+    await git(["-C", gitRepoPath, "add", "initial.txt", "old-atomic.txt"]);
     await git([
       "-C",
       gitRepoPath,
@@ -457,6 +486,78 @@ async function run() {
       "token-a",
     );
     assert.strictEqual(invalidRefFile.status, 400);
+    const atomicRepo = gitRepoPath;
+    const atomicDraftPath = path.join(atomicRepo, "atomic-draft.txt");
+    fs.writeFileSync(atomicDraftPath, "draft state must remain staged\n");
+    await git(["-C", atomicRepo, "add", "atomic-draft.txt"]);
+    const indexBeforeAtomic = fs.readFileSync(path.join(atomicRepo, ".git", "index"));
+    const stagedEntriesBeforeAtomic = await git(["-C", atomicRepo, "ls-files", "--stage"]);
+    const worktreeBeforeAtomic = fs.readFileSync(path.join(atomicRepo, "initial.txt"));
+    const atomicCommitResponse = await request(
+      port,
+      "POST",
+      "/api/v1/orgs/team-one/repos/git-http/commits",
+      {
+        expectedRef: commitSha.trim(),
+        message: "Atomic API change",
+        changes: [
+          { path: "atomic.txt", content: Buffer.from("atomic content\n").toString("base64") },
+          { path: "old-atomic.txt", delete: true },
+        ],
+      },
+      "token-a",
+    );
+    assert.strictEqual(atomicCommitResponse.status, 201, atomicCommitResponse.body);
+    const atomicResult = JSON.parse(atomicCommitResponse.body);
+    assert.strictEqual(atomicResult.ref, "refs/heads/main");
+    assert.strictEqual(
+      (
+        await git(["-C", atomicRepo, "rev-list", "--count", `${commitSha.trim()}..${atomicResult.commit}`])
+      ).stdout.trim(),
+      "1",
+      "atomic changes create exactly one commit",
+    );
+    assert.strictEqual((await git(["-C", atomicRepo, "show", "main:atomic.txt"])).stdout, "atomic content\n");
+    assert.strictEqual(fs.existsSync(path.join(atomicRepo, ".git", "index")), true);
+    assert.deepStrictEqual(fs.readFileSync(path.join(atomicRepo, ".git", "index")), indexBeforeAtomic);
+    assert.deepStrictEqual(fs.readFileSync(path.join(atomicRepo, "initial.txt")), worktreeBeforeAtomic);
+    assert.strictEqual(
+      (await git(["-C", atomicRepo, "ls-files", "--stage"])).stdout,
+      stagedEntriesBeforeAtomic.stdout,
+      "atomic commit leaves the shared staged state untouched",
+    );
+    const staleAtomic = await request(
+      port,
+      "POST",
+      "/api/v1/orgs/team-one/repos/git-http/commits",
+      {
+        expectedRef: commitSha.trim(),
+        message: "Must not commit stale data",
+        changes: [{ path: "stale.txt", content: Buffer.from("stale").toString("base64") }],
+      },
+      "token-a",
+    );
+    assert.strictEqual(staleAtomic.status, 409);
+    const invalidAtomic = await request(
+      port,
+      "POST",
+      "/api/v1/orgs/team-one/repos/git-http/commits",
+      {
+        expectedRef: atomicResult.commit,
+        message: "Invalid change set",
+        changes: [
+          { path: "would-not-appear.txt", content: Buffer.from("nope").toString("base64") },
+          { path: "nested/.GIT/config", content: Buffer.from("bad").toString("base64") },
+        ],
+      },
+      "token-a",
+    );
+    assert.strictEqual(invalidAtomic.status, 400);
+    assert.strictEqual(
+      (await git(["-C", atomicRepo, "rev-parse", "refs/heads/main"])).stdout.trim(),
+      atomicResult.commit,
+      "invalid changes do not partially move main",
+    );
     const gitClonePath = path.join(dataPath, "clone-a");
     const authHeader = `Authorization: Basic ${Buffer.from("arbitrary-user:token-a").toString("base64")}`;
     const gitUrl = `http://127.0.0.1:${port}/git/team-one/git-http.git`;
@@ -949,7 +1050,8 @@ async function run() {
       "/api": ["get"],
       "/api/v1/orgs": ["get", "post"],
       "/api/v1/personal-access-tokens": ["get", "post"],
-      "/api/v1/personal-access-tokens/{id}": ["delete"],
+      "/api/v1/personal-access-tokens/{id}": ["delete", "patch"],
+      "/api/v1/token-authorizations": ["post"],
       "/api/v1/orgs/{org}": ["delete"],
       "/api/v1/orgs/{org}/events": ["get"],
       "/api/v1/orgs/{org}/webhooks": ["get", "post"],
@@ -966,6 +1068,7 @@ async function run() {
       "/api/v1/orgs/{org}/repos/{repo}/stage": ["post"],
       "/api/v1/orgs/{org}/repos/{repo}/unstage": ["post"],
       "/api/v1/orgs/{org}/repos/{repo}/commit": ["post"],
+      "/api/v1/orgs/{org}/repos/{repo}/commits": ["post"],
       "/api/v1/orgs/{org}/repos/{repo}/tags/{name}": ["delete"],
       "/api/v1/orgs/{org}/repos/{repo}/branches/{name}": ["delete"],
       "/api/v1/repos": ["get"],
@@ -986,6 +1089,7 @@ async function run() {
       "/api/v1/repos/{repo}/stage": ["post"],
       "/api/v1/repos/{repo}/unstage": ["post"],
       "/api/v1/repos/{repo}/commit": ["post"],
+      "/api/v1/repos/{repo}/commits": ["post"],
       "/api/v1/repos/{repo}/tags/{name}": ["delete"],
       "/api/v1/repos/{repo}/branches/{name}": ["delete"],
     };
@@ -1169,6 +1273,239 @@ async function run() {
         canWrite: true,
       },
     });
+
+    const sessionHeaders = {
+      Cookie: sessionCookie,
+      Origin: `http://127.0.0.1:${port}`,
+    };
+    const privateOrg = await request(
+      port,
+      "POST",
+      "/api/v1/orgs",
+      { slug: "browser-private-org" },
+      undefined,
+      sessionHeaders,
+    );
+    assert.strictEqual(privateOrg.status, 201);
+    assert.strictEqual(
+      (await request(port, "GET", "/api/v1/personal-access-tokens", undefined, "browser-session-token")).status,
+      403,
+      "bearer tokens cannot inspect or manage token grants",
+    );
+    const importedToken = "browser-bound-token";
+    tokenSubjects.set(importedToken, {
+      active: true,
+      sub: "browser-subject",
+      scope: "repo:read repo:write org:create",
+    });
+    const bound = await request(
+      port,
+      "POST",
+      "/api/v1/token-authorizations",
+      {
+        token: importedToken,
+        label: "Browser-bound read token",
+        scopes: ["repo:read"],
+        orgs: ["browser-org"],
+      },
+      undefined,
+      sessionHeaders,
+    );
+    assert.strictEqual(bound.status, 201, bound.body);
+    const boundId = JSON.parse(bound.body).token.id;
+    assert.ok(!bound.body.includes(importedToken));
+    assert.deepStrictEqual(
+      JSON.parse((await request(port, "GET", "/api/v1/orgs", undefined, importedToken)).body),
+      { orgs: [{ slug: "browser-org" }] },
+      "a local authorization record does not grant every owned organization",
+    );
+    assert.strictEqual(
+      (
+        await request(
+          port,
+          "PATCH",
+          `/api/v1/personal-access-tokens/${boundId}`,
+          { label: "Escalated", scopes: ["repo:write"], orgs: ["team-one"] },
+          importedToken,
+        )
+      ).status,
+      403,
+      "a bearer cannot expand its own scopes or organization grants",
+    );
+    assert.strictEqual(
+      (await request(port, "POST", "/api/v1/orgs", { slug: "introspection-scope-must-not-authorize" }, importedToken))
+        .status,
+      403,
+      "introspection scopes do not authorize GitMini operations",
+    );
+    assert.strictEqual(
+      (
+        await request(
+          port,
+          "POST",
+          "/api/v1/token-authorizations",
+          {
+            token: "foreign-subject-token",
+            label: "Wrong subject",
+            scopes: ["repo:read"],
+            orgs: ["browser-org"],
+          },
+          undefined,
+          sessionHeaders,
+        )
+      ).status,
+      403,
+      "cannot bind a different subject's active token",
+    );
+    const generatedPat = await request(
+      port,
+      "POST",
+      "/api/v1/personal-access-tokens",
+      {
+        label: "scoped generated",
+        scopes: ["repo:read"],
+        orgs: ["browser-org"],
+      },
+      undefined,
+      sessionHeaders,
+    );
+    assert.strictEqual(generatedPat.status, 201, generatedPat.body);
+    const generatedPatBody = JSON.parse(generatedPat.body);
+    assert.match(generatedPatBody.token, /^gmpat_/);
+    assert.ok(
+      !fs.readFileSync(path.join(dataPath, "personal-access-tokens.json"), "utf8").includes(generatedPatBody.token),
+    );
+    assert.strictEqual(
+      (await request(port, "GET", "/api/v1/orgs", undefined, generatedPatBody.token)).status,
+      200,
+      "generated PAT uses its local scope and explicit organization grant",
+    );
+    for (const repo of ["repo-bound-one", "repo-bound-two"]) {
+      const createdRepo = await request(
+        port,
+        "POST",
+        `/api/v1/orgs/browser-org/repos/${repo}`,
+        undefined,
+        undefined,
+        sessionHeaders,
+      );
+      assert.strictEqual(createdRepo.status, 201, createdRepo.body);
+    }
+    const repositoryBoundPat = await request(
+      port,
+      "POST",
+      "/api/v1/personal-access-tokens",
+      {
+        label: "single repository",
+        scopes: ["repo:read"],
+        orgs: ["browser-org"],
+        org: "browser-org",
+        repo: "repo-bound-one",
+      },
+      undefined,
+      sessionHeaders,
+    );
+    assert.strictEqual(repositoryBoundPat.status, 201, repositoryBoundPat.body);
+    const repositoryBoundSecret = JSON.parse(repositoryBoundPat.body).token;
+    assert.strictEqual(
+      (
+        await request(
+          port,
+          "GET",
+          "/api/v1/orgs/browser-org/repos/repo-bound-one/tree",
+          undefined,
+          repositoryBoundSecret,
+        )
+      ).status,
+      200,
+    );
+    assert.strictEqual(
+      (
+        await request(
+          port,
+          "GET",
+          "/api/v1/orgs/browser-org/repos/repo-bound-two/tree",
+          undefined,
+          repositoryBoundSecret,
+        )
+      ).status,
+      403,
+      "repository-scoped PAT is denied other repositories in its granted org",
+    );
+    assert.strictEqual(
+      (
+        await request(
+          port,
+          "DELETE",
+          `/api/v1/personal-access-tokens/${generatedPatBody.record.id}`,
+          undefined,
+          undefined,
+          sessionHeaders,
+        )
+      ).status,
+      204,
+    );
+    assert.strictEqual(
+      (await request(port, "GET", "/api/v1/orgs", undefined, generatedPatBody.token)).status,
+      401,
+      "revoked generated PAT is denied",
+    );
+    const orgCreator = "browser-org-creator-token";
+    tokenSubjects.set(orgCreator, {
+      active: true,
+      sub: "browser-subject",
+      scope: "repo:read repo:write org:create",
+    });
+    const orgCreatorBind = await request(
+      port,
+      "POST",
+      "/api/v1/token-authorizations",
+      {
+        token: orgCreator,
+        label: "Scoped org creator",
+        scopes: ["org:create", "repo:read"],
+        orgs: ["browser-org"],
+      },
+      undefined,
+      sessionHeaders,
+    );
+    assert.strictEqual(orgCreatorBind.status, 201, orgCreatorBind.body);
+    const upstreamExpired = { ...tokenSubjects.get(orgCreator), active: false };
+    tokenSubjects.set(orgCreator, upstreamExpired);
+    assert.strictEqual(
+      (await request(port, "GET", "/api/v1/orgs", undefined, orgCreator)).status,
+      401,
+      "local grants do not keep an inactive upstream token alive",
+    );
+    tokenSubjects.set(orgCreator, { ...upstreamExpired, active: true });
+    const createdOnlyByToken = await request(
+      port,
+      "POST",
+      "/api/v1/orgs",
+      { slug: "created-by-limited-token" },
+      orgCreator,
+    );
+    assert.strictEqual(createdOnlyByToken.status, 201);
+    assert.deepStrictEqual(
+      JSON.parse((await request(port, "GET", "/api/v1/orgs", undefined, orgCreator)).body),
+      {
+        orgs: [{ slug: "browser-org" }, { slug: "created-by-limited-token" }],
+      },
+      "org:create grants the creator access only to the newly created org",
+    );
+    assert.deepStrictEqual(JSON.parse((await request(port, "GET", "/api/v1/orgs", undefined, "token-a")).body), {
+      orgs: [{ slug: "team-extra" }, { slug: "team-one" }],
+    });
+    assert.strictEqual(
+      (await request(port, "DELETE", `/api/v1/personal-access-tokens/${boundId}`, undefined, undefined, sessionHeaders))
+        .status,
+      204,
+    );
+    assert.strictEqual(
+      (await request(port, "GET", "/api/v1/orgs", undefined, importedToken)).status,
+      403,
+      "revoking an external binding immediately denies the token",
+    );
 
     oidcAccessToken = "short-lived-browser-token";
     oidcRefreshToken = "short-lived-browser-refresh-token";
@@ -1422,7 +1759,7 @@ async function run() {
     app.locals.verifyToken = null;
     app.locals.authApiClientOverride = null;
     const introspectedList = await request(port, "GET", "/api/v1/repos", undefined, "opaque-api-token");
-    assert.strictEqual(introspectedList.status, 200, "opaque repo:read/write API token should introspect successfully");
+    assert.strictEqual(introspectedList.status, 403, "active opaque token without local grants is denied");
     const introspectedWrite = await request(
       port,
       "POST",
@@ -1430,11 +1767,7 @@ async function run() {
       { name: "v1" },
       "opaque-api-token",
     );
-    assert.strictEqual(
-      introspectedWrite.status,
-      404,
-      "repo:write scope passes authorization before missing repo lookup",
-    );
+    assert.strictEqual(introspectedWrite.status, 403, "introspection scope does not grant repo:write");
     app.locals.verifyToken = tokenVerifier;
     process.env.OIDC_CLIENT_ID = "";
     const logout = await request(port, "POST", "/ui/auth/logout", undefined, undefined, {

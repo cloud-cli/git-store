@@ -1,4 +1,7 @@
 import { execFile, spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
@@ -6,6 +9,28 @@ function execGit(args, options = {}) {
   return execFileAsync("git", args, {
     maxBuffer: 10 * 1024 * 1024,
     ...options,
+  });
+}
+
+function execGitInput(args, input, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn("git", args, { cwd: options.cwd, env: options.env });
+    const stdout = [];
+    const stderr = [];
+    child.stdout.on("data", (chunk) => stdout.push(chunk));
+    child.stderr.on("data", (chunk) => stderr.push(chunk));
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(Buffer.concat(stderr).toString() || `git exited with ${code}`));
+      } else {
+        resolve({
+          stdout: Buffer.concat(stdout).toString(),
+          stderr: Buffer.concat(stderr).toString(),
+        });
+      }
+    });
+    child.stdin.end(input);
   });
 }
 
@@ -46,10 +71,7 @@ async function unstageFiles(repoPath, files) {
     await execGit(["reset", "HEAD", "--", ...fileList], { cwd: repoPath });
   } else {
     // If no commits yet, rm --cached
-    await execGit(
-      ["rm", "--cached", "-r", "--ignore-unmatch", "--", ...fileList],
-      { cwd: repoPath },
-    );
+    await execGit(["rm", "--cached", "-r", "--ignore-unmatch", "--", ...fileList], { cwd: repoPath });
   }
 }
 
@@ -87,13 +109,9 @@ function streamLog(repoPath, res) {
     res.write("[\n");
 
     // delimiter format: %H%x00%an%x00%ae%x00%aI%x00%s%x01
-    const git = spawn(
-      "git",
-      ["log", "--pretty=format:%H%x00%an%x00%ae%x00%aI%x00%s%x01"],
-      {
-        cwd: repoPath,
-      },
-    );
+    const git = spawn("git", ["log", "--pretty=format:%H%x00%an%x00%ae%x00%aI%x00%s%x01"], {
+      cwd: repoPath,
+    });
 
     let buffer = "";
     let isFirst = true;
@@ -108,8 +126,7 @@ function streamLog(repoPath, res) {
         if (!trimmed) {
           continue;
         }
-        const [hash, author_name, author_email, date, message] =
-          trimmed.split("\x00");
+        const [hash, author_name, author_email, date, message] = trimmed.split("\x00");
         const entry = JSON.stringify({
           hash,
           author_name,
@@ -143,9 +160,7 @@ function streamLog(repoPath, res) {
 
     git.on("close", (code) => {
       if (buffer.trim()) {
-        const [hash, author_name, author_email, date, message] = buffer
-          .trim()
-          .split("\x00");
+        const [hash, author_name, author_email, date, message] = buffer.trim().split("\x00");
         const entry = JSON.stringify({
           hash,
           author_name,
@@ -215,6 +230,76 @@ async function listBranches(repoPath) {
     .filter(Boolean);
 }
 
+async function atomicCommit(repoPath, expectedRef, message, changes) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "gitmini-index-"));
+  const indexPath = path.join(tempDir, "index");
+  const git = (args, options = {}) =>
+    execGit(args, {
+      cwd: repoPath,
+      env: { ...process.env, GIT_INDEX_FILE: indexPath, ...options.env },
+      ...options,
+    });
+  try {
+    const ref = "refs/heads/main";
+    const current = await execGit(["rev-parse", "--verify", ref], {
+      cwd: repoPath,
+    })
+      .then(({ stdout }) => stdout.trim())
+      .catch(() => null);
+    if (current !== expectedRef) {
+      return { stale: true };
+    }
+    if (current) {
+      await git(["read-tree", current]);
+    } else {
+      await git(["read-tree", "--empty"]);
+    }
+    for (const change of changes) {
+      if (change.delete) {
+        await git(["update-index", "--force-remove", "--", change.path]);
+      } else {
+        const { stdout: blob } = await execGitInput(
+          ["hash-object", "-w", "--stdin"],
+          Buffer.from(change.content, "base64"),
+          { cwd: repoPath },
+        );
+        await git(["update-index", "--add", "--cacheinfo", `100644,${blob.trim()},${change.path}`]);
+      }
+    }
+    const { stdout: tree } = await git(["write-tree"]);
+    const commitArgs = ["commit-tree", tree.trim()];
+    if (current) {
+      commitArgs.push("-p", current);
+    }
+    commitArgs.push("-m", message);
+    const { stdout: commit } = await execGit(commitArgs, {
+      cwd: repoPath,
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "GitMini",
+        GIT_AUTHOR_EMAIL: "gitmini@local",
+        GIT_COMMITTER_NAME: "GitMini",
+        GIT_COMMITTER_EMAIL: "gitmini@local",
+      },
+    });
+    const { stdout: objectFormat } = await execGit(["rev-parse", "--show-object-format"], { cwd: repoPath });
+    const zeroObjectId = "0".repeat(objectFormat.trim() === "sha256" ? 64 : 40);
+    try {
+      await execGit(["update-ref", ref, commit.trim(), expectedRef || zeroObjectId], {
+        cwd: repoPath,
+      });
+    } catch (error) {
+      if (/is at .* but expected /.test(error.message)) {
+        return { stale: true };
+      }
+      throw error;
+    }
+    return { commit: commit.trim(), ref };
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
 export {
   execGit,
   initRepo,
@@ -229,4 +314,5 @@ export {
   addBranch,
   removeBranch,
   listBranches,
+  atomicCommit,
 };

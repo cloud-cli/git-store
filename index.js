@@ -8,11 +8,11 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import * as oidc from "openid-client";
 import { createOidcConfigurations } from "./oidc-client.js";
-import { validateRepoName, getSubjectHash } from "./storage.js";
+import { validateRepoName, getSubjectHash, hashSubject } from "./storage.js";
 import * as organizations from "./organizations.js";
 import { createDatabaseClient, createAuditStore, createTokenFingerprint } from "./audit.js";
 import { PersonalAccessTokenStore, normalizeTokenExpiry } from "./personal-access-tokens.js";
-import { execGit } from "./git.js";
+import { execGit, atomicCommit } from "./git.js";
 import {
   createWebhookStore,
   deliver as deliverWebhook,
@@ -66,6 +66,7 @@ const browserSessionStorePath = process.env.DATA_PATH ? path.join(process.env.DA
 const personalAccessTokens = new PersonalAccessTokenStore(
   path.join(process.env.DATA_PATH, "personal-access-tokens.json"),
 );
+app.locals.tokenAuthorizations = personalAccessTokens;
 const browserSessionMaxAge = 30 * 24 * 60 * 60 * 1000;
 const accessTokenRefreshSkew = 60 * 1000;
 
@@ -517,7 +518,7 @@ async function requireAuthentication(req, res, next) {
     try {
       const personalToken = personalAccessTokens.authenticate(token);
       const claims = personalToken.recognized ? personalToken.claims : await introspectAccessToken(token);
-      if (!claims || !claims.active) {
+      if (!claims || claims.active !== true) {
         auditSecurityFailure(req, "security.auth.denied", {
           reason: "inactive_token",
         });
@@ -529,7 +530,24 @@ async function requireAuthentication(req, res, next) {
         });
         return res.status(401).json({ error: "Unauthorized: missing subject claim" });
       }
-      req.user = claims;
+      if (!personalToken.recognized) {
+        const local = personalAccessTokens.findByToken(token);
+        if (!local || local.ownerHash !== hashSubject(claims.sub)) {
+          auditSecurityFailure(req, "security.access.denied", {
+            reason: "missing_local_authorization",
+          });
+          return res.status(403).json({ error: "Forbidden: token has no local authorization" });
+        }
+        req.user = {
+          ...claims,
+          scope: local.scopes.join(" "),
+          ownerHash: local.ownerHash,
+          tokenId: local.id,
+          orgs: local.orgs,
+        };
+      } else {
+        req.user = claims;
+      }
       req.authType = personalToken.recognized ? "personal-access-token" : "bearer";
       return next();
     } catch {
@@ -572,7 +590,22 @@ function getTokenScopes(claims) {
 }
 
 function getAuthenticatedSubjectHash(req) {
-  return req.authType === "personal-access-token" ? req.user.ownerHash : getSubjectHash(req);
+  return req.user?.ownerHash || getSubjectHash(req);
+}
+
+function tokenAllowsOrg(req, org) {
+  return req.authType === "session" || (Array.isArray(req.user?.orgs) && req.user.orgs.includes(org));
+}
+
+function callerCanGrantScope(req, scope) {
+  const scopes = getTokenScopes(req.user);
+  if (scope === "repo:read") {
+    return scopes.has("repo:read") || scopes.has("repo:write");
+  }
+  if (req.authType === "session" && (scope === "org:create" || scope === "org:manage")) {
+    return scopes.has("repo:write");
+  }
+  return scopes.has(scope);
 }
 
 function tokenResourceAllowsRequest(req) {
@@ -595,9 +628,7 @@ function sanitizeUserProfile(profile, subject) {
 
 function requireScope(scope) {
   return (req, res, next) => {
-    const scopes = getTokenScopes(req.user);
-    const allowed =
-      scope === "repo:read" ? scopes.has("repo:read") || scopes.has("repo:write") : scopes.has("repo:write");
+    const allowed = callerCanGrantScope(req, scope);
     if (!tokenResourceAllowsRequest(req)) {
       auditSecurityFailure(req, "security.access.denied", {
         reason: "token_resource_mismatch",
@@ -605,6 +636,10 @@ function requireScope(scope) {
       return res.status(403).json({
         error: "Forbidden: token is restricted to a different repository",
       });
+    }
+    const resourceOrg = req.organizationSlug || req.organization?.slug || req.params?.org;
+    if (resourceOrg && !tokenAllowsOrg(req, resourceOrg)) {
+      return res.status(403).json({ error: "Forbidden: token is not granted this organization" });
     }
     if (!allowed) {
       auditSecurityFailure(req, "security.access.denied", {
@@ -646,14 +681,28 @@ function requireGitBasicAuth(req, res, next) {
   const personalToken = personalAccessTokens.authenticate(token);
   Promise.resolve(personalToken.recognized ? personalToken.claims : introspectAccessToken(token))
     .then((claims) => {
-      if (!claims?.active || typeof claims.sub !== "string" || !claims.sub.trim()) {
+      if (claims?.active !== true || typeof claims.sub !== "string" || !claims.sub.trim()) {
         auditSecurityFailure(req, "security.auth.denied", {
           reason: claims?.active ? "missing_subject" : "inactive_token",
         });
         res.set("WWW-Authenticate", 'Basic realm="GitMini", charset="UTF-8"');
         return res.status(401).send("Invalid Git credentials");
       }
-      req.user = claims;
+      if (!personalToken.recognized) {
+        const local = personalAccessTokens.findByToken(token);
+        if (!local || local.ownerHash !== hashSubject(claims.sub)) {
+          return res.status(403).send("Token has no local authorization");
+        }
+        req.user = {
+          ...claims,
+          scope: local.scopes.join(" "),
+          ownerHash: local.ownerHash,
+          tokenId: local.id,
+          orgs: local.orgs,
+        };
+      } else {
+        req.user = claims;
+      }
       req.authType = personalToken.recognized ? "personal-access-token" : "git-token";
       return next();
     })
@@ -698,6 +747,9 @@ async function gitSmartHttp(req, res) {
     });
     return res.status(404).send("Repository not found");
   }
+  if (!tokenAllowsOrg(req, organization.slug)) {
+    return res.status(404).send("Repository not found");
+  }
   req.organization = organization;
   req.organizationSlug = organization.slug;
   if (
@@ -726,7 +778,10 @@ async function gitSmartHttp(req, res) {
     return res.status(405).send("Method not allowed");
   }
   const scopes = getTokenScopes(req.user);
-  if (write ? !scopes.has("repo:write") : !scopes.has("repo:read") && !scopes.has("repo:write")) {
+  if (
+    !tokenAllowsOrg(req, organization.slug) ||
+    (write ? !scopes.has("repo:write") : !scopes.has("repo:read") && !scopes.has("repo:write"))
+  ) {
     if (write) {
       auditSecurityFailure(req, "security.access.denied", {
         reason: "insufficient_scope",
@@ -767,7 +822,10 @@ async function gitSmartHttp(req, res) {
     requestBodyPath = path.join(os.tmpdir(), `gitmini-http-${crypto.randomUUID()}`);
     try {
       await new Promise((resolve, reject) => {
-        const file = fs.createWriteStream(requestBodyPath, { flags: "wx", mode: 0o600 });
+        const file = fs.createWriteStream(requestBodyPath, {
+          flags: "wx",
+          mode: 0o600,
+        });
         req.once("aborted", () => reject(new Error("Git request aborted")));
         file.once("error", reject);
         file.once("finish", resolve);
@@ -1758,99 +1816,194 @@ app.post("/ui/auth/logout", async (req, res) => {
   return res.clearCookie(sessionCookieName, clearOptions).redirect(303, "/");
 });
 
-function requireNonPersonalAccessToken(req, res, next) {
-  if (req.authType === "personal-access-token") {
+function requireInteractiveBrowserSession(req, res, next) {
+  // requireAuthentication sets this only after validating the same-origin
+  // session cookie; bearer credentials never qualify, including imported ones.
+  if (req.authType !== "session") {
     return res.status(403).json({
-      error: "Personal access tokens cannot manage other personal access tokens",
+      error: "Token authorization management requires a browser session",
     });
   }
   return next();
 }
 
-app.get("/api/v1/personal-access-tokens", requireAuthentication, requireNonPersonalAccessToken, (req, res) => {
+app.get("/api/v1/personal-access-tokens", requireAuthentication, requireInteractiveBrowserSession, (req, res) => {
   res.set("Cache-Control", "no-store");
   return res.json({
     tokens: personalAccessTokens.listForOwner(getAuthenticatedSubjectHash(req)),
   });
 });
-app.post("/api/v1/personal-access-tokens", requireAuthentication, requireNonPersonalAccessToken, async (req, res) => {
-  const body = req.body || {};
-  const label = typeof body.label === "string" ? body.label.trim() : "";
-  const scopes = body.scopes;
-  if (!label || label.length > 100 || !Array.isArray(scopes) || scopes.length !== 1) {
-    return res.status(400).json({ error: "Provide a label and exactly one supported scope" });
-  }
-  const scope = scopes[0];
-  if (scope !== "repo:read" && scope !== "repo:write") {
-    return res.status(400).json({ error: "Unsupported token scope" });
-  }
-  const callerScopes = getTokenScopes(req.user);
-  if (
-    scope === "repo:write"
-      ? !callerScopes.has("repo:write")
-      : !callerScopes.has("repo:read") && !callerScopes.has("repo:write")
-  ) {
-    return res.status(403).json({ error: `Forbidden: cannot grant ${scope}` });
-  }
-  const expiry = normalizeTokenExpiry(body.expiresAt);
-  if (!expiry.valid) {
-    return res.status(400).json({ error: "Expiry must be a future calendar date or left blank" });
-  }
+app.post(
+  "/api/v1/personal-access-tokens",
+  requireAuthentication,
+  requireInteractiveBrowserSession,
+  async (req, res) => {
+    const body = req.body || {};
+    const label = typeof body.label === "string" ? body.label.trim() : "";
+    const scopes = body.scopes;
+    if (!label || label.length > 100 || !Array.isArray(scopes) || !scopes.length) {
+      return res.status(400).json({ error: "Provide a label and supported scopes" });
+    }
+    if (
+      scopes.some((scope) => !["repo:read", "repo:write", "org:create", "org:manage"].includes(scope)) ||
+      new Set(scopes).size !== scopes.length
+    ) {
+      return res.status(400).json({ error: "Unsupported token scope" });
+    }
+    for (const scope of scopes) {
+      if (!callerCanGrantScope(req, scope)) {
+        return res.status(403).json({ error: `Forbidden: cannot grant ${scope}` });
+      }
+    }
+    const expiry = normalizeTokenExpiry(body.expiresAt);
+    if (!expiry.valid) {
+      return res.status(400).json({ error: "Expiry must be a future calendar date or left blank" });
+    }
 
-  const hasOrg = typeof body.org === "string" && body.org.length > 0;
-  const hasRepo = typeof body.repo === "string" && body.repo.length > 0;
-  if (hasOrg !== hasRepo) {
+    const hasOrg = typeof body.org === "string" && body.org.length > 0;
+    const hasRepo = typeof body.repo === "string" && body.repo.length > 0;
+    if (hasOrg !== hasRepo) {
+      return res.status(400).json({
+        error: "Repository tokens require both organization and repository",
+      });
+    }
+    let org = null;
+    let repo = null;
+    const ownerHash = getAuthenticatedSubjectHash(req);
+    const requestedOrgs = body.orgs;
+    if (!Array.isArray(requestedOrgs) || requestedOrgs.some((slug) => !organizations.normalizeSlug(slug))) {
+      return res.status(400).json({ error: "Provide explicit organization grants" });
+    }
+    const orgs = [...new Set(requestedOrgs.map((slug) => organizations.normalizeSlug(slug)))];
+    for (const slug of orgs) {
+      const organization = organizations.get(slug);
+      if (!organization || organization.ownerHash !== ownerHash) {
+        return res.status(404).json({ error: "Organization not found" });
+      }
+    }
+    if (hasOrg) {
+      org = organizations.normalizeSlug(body.org);
+      repo = body.repo;
+      if (!org || !validateRepoName(repo)) {
+        return res.status(400).json({ error: "Invalid organization or repository" });
+      }
+      const organization = organizations.get(org);
+      if (!organization || organization.ownerHash !== ownerHash) {
+        return res.status(404).json({ error: "Organization not found" });
+      }
+      if (!repositoryExists(org, repo)) {
+        return res.status(404).json({ error: "Repository not found" });
+      }
+    }
+
+    const created = personalAccessTokens.create({
+      ownerHash,
+      label,
+      scopes,
+      orgs: hasOrg ? [...new Set([...orgs, org])] : orgs,
+      org,
+      repo,
+      expiresAt: expiry.expiresAt,
+    });
+    res.set("Cache-Control", "no-store");
+    if (org) {
+      await recordAuditEvent(
+        req,
+        "personal_access_token.created",
+        `${org}/${repo}`,
+        {
+          tokenId: created.record.id,
+          label: created.record.label,
+          scopes: created.record.scopes,
+          expiresAt: created.record.expiresAt,
+        },
+        org,
+      );
+    }
+    return res.status(201).json(created);
+  },
+);
+app.post("/api/v1/token-authorizations", requireAuthentication, requireInteractiveBrowserSession, async (req, res) => {
+  const { token, label, scopes, orgs } = req.body || {};
+  if (
+    typeof token !== "string" ||
+    !token ||
+    token.length > 4096 ||
+    typeof label !== "string" ||
+    !Array.isArray(scopes) ||
+    !Array.isArray(orgs)
+  ) {
     return res.status(400).json({
-      error: "Repository tokens require both organization and repository",
+      error: "Token, label, scopes and explicit organizations are required",
     });
   }
-  let org = null;
-  let repo = null;
+  if (
+    scopes.some((scope) => !["repo:read", "repo:write", "org:create", "org:manage"].includes(scope)) ||
+    new Set(scopes).size !== scopes.length
+  ) {
+    return res.status(400).json({ error: "Unsupported local capability" });
+  }
+  if (scopes.some((scope) => !callerCanGrantScope(req, scope))) {
+    return res.status(403).json({ error: "Cannot grant capabilities not held by the caller" });
+  }
+  const normalizedOrgs = [...new Set(orgs.map((slug) => organizations.normalizeSlug(slug)))];
   const ownerHash = getAuthenticatedSubjectHash(req);
-  if (hasOrg) {
-    org = organizations.normalizeSlug(body.org);
-    repo = body.repo;
-    if (!org || !validateRepoName(repo)) {
-      return res.status(400).json({ error: "Invalid organization or repository" });
-    }
-    const organization = organizations.get(org);
-    if (!organization || organization.ownerHash !== ownerHash) {
-      return res.status(404).json({ error: "Organization not found" });
-    }
-    if (!repositoryExists(org, repo)) {
-      return res.status(404).json({ error: "Repository not found" });
-    }
+  if (
+    orgs.some(
+      (slug, index) => !normalizedOrgs[index] || organizations.get(normalizedOrgs[index])?.ownerHash !== ownerHash,
+    )
+  ) {
+    return res.status(400).json({
+      error: "Organization grants must name organizations owned by the caller",
+    });
   }
-
-  const created = personalAccessTokens.create({
-    ownerHash,
+  try {
+    const claims = await introspectAccessToken(token);
+    if (claims?.active !== true || typeof claims.sub !== "string" || hashSubject(claims.sub) !== ownerHash) {
+      return res.status(403).json({ error: "Token is inactive or belongs to another subject" });
+    }
+    const record = personalAccessTokens.bindExternal({
+      token,
+      ownerHash,
+      label,
+      scopes,
+      orgs: normalizedOrgs,
+    });
+    res.set("Cache-Control", "no-store");
+    return res.status(201).json({ token: record });
+  } catch {
+    return res.status(400).json({ error: "Unable to authorize token" });
+  }
+});
+app.patch("/api/v1/personal-access-tokens/:id", requireAuthentication, requireInteractiveBrowserSession, (req, res) => {
+  const { label, scopes, orgs } = req.body || {};
+  if (!Array.isArray(scopes) || scopes.some((scope) => !callerCanGrantScope(req, scope))) {
+    return res.status(403).json({ error: "Cannot grant capabilities not held by the caller" });
+  }
+  const normalizedOrgs = Array.isArray(orgs)
+    ? [...new Set(orgs.map((slug) => organizations.normalizeSlug(slug)))]
+    : null;
+  if (
+    !normalizedOrgs ||
+    normalizedOrgs.some((slug) => !slug) ||
+    orgs.some(
+      (slug) =>
+        !organizations.normalizeSlug(slug) || organizations.get(slug)?.ownerHash !== getAuthenticatedSubjectHash(req),
+    )
+  ) {
+    return res.status(400).json({ error: "Invalid organization grants" });
+  }
+  const record = personalAccessTokens.update(req.params.id, getAuthenticatedSubjectHash(req), {
     label,
-    scopes: [scope],
-    org,
-    repo,
-    expiresAt: expiry.expiresAt,
+    scopes,
+    orgs: normalizedOrgs,
   });
-  res.set("Cache-Control", "no-store");
-  if (org) {
-    await recordAuditEvent(
-      req,
-      "personal_access_token.created",
-      `${org}/${repo}`,
-      {
-        tokenId: created.record.id,
-        label: created.record.label,
-        scopes: created.record.scopes,
-        expiresAt: created.record.expiresAt,
-      },
-      org,
-    );
-  }
-  return res.status(201).json(created);
+  return record ? res.json({ token: record }) : res.status(400).json({ error: "Invalid token authorization" });
 });
 app.delete(
   "/api/v1/personal-access-tokens/:id",
   requireAuthentication,
-  requireNonPersonalAccessToken,
+  requireInteractiveBrowserSession,
   async (req, res) => {
     const ownerHash = getAuthenticatedSubjectHash(req);
     const record = personalAccessTokens.listForOwner(ownerHash).find((item) => item.id === req.params.id);
@@ -1879,10 +2032,12 @@ app.delete(
 // List, create, and remove organizations for the authenticated subject.
 app.get("/api/v1/orgs", requireAuthentication, requireScope("repo:read"), (req, res) =>
   res.json({
-    orgs: organizations.listForOwnerHash(getAuthenticatedSubjectHash(req)),
+    orgs: organizations
+      .listForOwnerHash(getAuthenticatedSubjectHash(req))
+      .filter((org) => tokenAllowsOrg(req, org.slug)),
   }),
 );
-app.post("/api/v1/orgs", requireAuthentication, requireScope("repo:write"), async (req, res) => {
+app.post("/api/v1/orgs", requireAuthentication, requireScope("org:create"), async (req, res) => {
   const result = organizations.createForOwnerHash(getAuthenticatedSubjectHash(req), req.body?.slug);
   if (result === null) {
     return res.status(400).json({ error: "Invalid organization slug" });
@@ -1890,10 +2045,21 @@ app.post("/api/v1/orgs", requireAuthentication, requireScope("repo:write"), asyn
   if (result === false) {
     return res.status(409).json({ error: "Organization already exists" });
   }
+  if (req.user.tokenId) {
+    try {
+      if (!personalAccessTokens.grantOrg(req.user.tokenId, req.user.ownerHash, result.slug)) {
+        organizations.deleteEmptyForOwnerHash(req.user.ownerHash, result.slug);
+        return res.status(500).json({ error: "Unable to grant access to created organization" });
+      }
+    } catch {
+      organizations.deleteEmptyForOwnerHash(req.user.ownerHash, result.slug);
+      return res.status(500).json({ error: "Unable to grant access to created organization" });
+    }
+  }
   await recordAuditEvent(req, "organization.created", result.slug, {}, result.slug);
   return res.status(201).json({ org: result });
 });
-app.delete("/api/v1/orgs/:org", requireAuthentication, requireScope("repo:write"), async (req, res) => {
+app.delete("/api/v1/orgs/:org", requireAuthentication, requireScope("org:manage"), async (req, res) => {
   const result = organizations.deleteEmptyForOwnerHash(getAuthenticatedSubjectHash(req), req.params.org);
   if (result === null) {
     return res.status(400).json({ error: "Invalid organization slug" });
@@ -1916,7 +2082,9 @@ function accessibleWebhookOrg(req, res) {
   }
   const org = organizations.get(req.params.org);
   if (!org || org.ownerHash !== getAuthenticatedSubjectHash(req)) {
-    auditSecurityFailure(req, "security.access.denied", { reason: "organization_not_accessible" });
+    auditSecurityFailure(req, "security.access.denied", {
+      reason: "organization_not_accessible",
+    });
     res.status(404).json({ error: "Organization not found" });
     return null;
   }
@@ -1931,12 +2099,14 @@ app.get("/api/v1/orgs/:org/webhooks", requireAuthentication, requireScope("repo:
     return res.status(503).json({ error: "Webhook storage is not configured" });
   }
   try {
-    return res.json({ webhooks: await app.locals.webhookStore.list(org.slug) });
+    return res.json({
+      webhooks: await app.locals.webhookStore.list(org.slug),
+    });
   } catch {
     return res.status(503).json({ error: "Webhook storage is temporarily unavailable" });
   }
 });
-app.post("/api/v1/orgs/:org/webhooks", requireAuthentication, requireScope("repo:write"), async (req, res) => {
+app.post("/api/v1/orgs/:org/webhooks", requireAuthentication, requireScope("org:manage"), async (req, res) => {
   const org = accessibleWebhookOrg(req, res);
   if (!org) {
     return;
@@ -1953,9 +2123,9 @@ app.post("/api/v1/orgs/:org/webhooks", requireAuthentication, requireScope("repo
     new Set(events).size !== events.length ||
     !(await validateTarget(url))
   ) {
-    return res
-      .status(400)
-      .json({ error: "Provide an HTTPS public endpoint and an allowlisted, unique event subscription" });
+    return res.status(400).json({
+      error: "Provide an HTTPS public endpoint and an allowlisted, unique event subscription",
+    });
   }
   if ((await app.locals.webhookStore.list(org.slug)).length >= MAX_SUBSCRIPTIONS) {
     return res.status(409).json({ error: `Organization webhook limit is ${MAX_SUBSCRIPTIONS}` });
@@ -1971,14 +2141,20 @@ app.post("/api/v1/orgs/:org/webhooks", requireAuthentication, requireScope("repo
   try {
     await app.locals.webhookStore.create(webhook);
     return res.status(201).json({
-      webhook: { id: webhook.id, org: webhook.org, url, events, createdAt: webhook.createdAt },
+      webhook: {
+        id: webhook.id,
+        org: webhook.org,
+        url,
+        events,
+        createdAt: webhook.createdAt,
+      },
       secret: webhook.secret,
     });
   } catch {
     return res.status(503).json({ error: "Webhook storage is temporarily unavailable" });
   }
 });
-app.delete("/api/v1/orgs/:org/webhooks/:id", requireAuthentication, requireScope("repo:write"), async (req, res) => {
+app.delete("/api/v1/orgs/:org/webhooks/:id", requireAuthentication, requireScope("org:manage"), async (req, res) => {
   const org = accessibleWebhookOrg(req, res);
   if (!org) {
     return;
@@ -2033,8 +2209,10 @@ app.get("/api/v1/orgs/:org/events", requireAuthentication, requireScope("repo:re
     return res.status(503).json({ error: "Audit events are temporarily unavailable" });
   }
 });
-app.get("/api/v1/recent", requireAuthentication, async (req, res) => {
-  const ownedOrganizations = organizations.listForOwnerHash(getAuthenticatedSubjectHash(req));
+app.get("/api/v1/recent", requireAuthentication, requireScope("repo:read"), async (req, res) => {
+  const ownedOrganizations = organizations
+    .listForOwnerHash(getAuthenticatedSubjectHash(req))
+    .filter((org) => tokenAllowsOrg(req, org.slug));
   const allCommits = [];
   for (const org of ownedOrganizations) {
     const orgReposPath = path.join(process.env.DATA_PATH, "orgs", org.slug);
@@ -2087,6 +2265,9 @@ app.use("/api/v1/orgs/:org/repos", requireAuthentication, (req, res, next) => {
     });
     return res.status(404).json({ error: "Organization not found" });
   }
+  if (!tokenAllowsOrg(req, organization.slug)) {
+    return res.status(404).json({ error: "Organization not found" });
+  }
   req.organization = organization;
   req.organizationSlug = organization.slug;
   req.organizationPath = path.join(process.env.DATA_PATH, "orgs", organization.slug);
@@ -2094,7 +2275,10 @@ app.use("/api/v1/orgs/:org/repos", requireAuthentication, (req, res, next) => {
     if (req.method !== "GET") {
       return next();
     }
-    if (!getTokenScopes(req.user).has("repo:read") && !getTokenScopes(req.user).has("repo:write")) {
+    if (
+      (!getTokenScopes(req.user).has("repo:read") && !getTokenScopes(req.user).has("repo:write")) ||
+      !tokenAllowsOrg(req, organization.slug)
+    ) {
       return res.status(403).json({ error: "Forbidden: requires repo:read scope" });
     }
     const reposPath = req.organizationPath;
@@ -2181,6 +2365,96 @@ app.post("/api/v1/repos/:repo/unstage", requireAuthentication, requireScope("rep
     await getGit(repoPath).reset(["--mixed", ...(req.body.files || [])]);
     await recordAuditEvent(req, "repository.files.unstaged", `${req.organization.slug}/${repo}`);
     return res.json({ message: "Files unstaged successfully" });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+app.post("/api/v1/repos/:repo/commits", requireAuthentication, requireScope("repo:write"), async (req, res) => {
+  const repo = req.params.repo;
+  const repoPath = getSafeRepoPath(repo, req);
+  if (!repoPath) {
+    return res.status(400).json({ error: "Invalid repository name" });
+  }
+  if (!fs.existsSync(repoPath) || !fs.existsSync(path.join(repoPath, ".git"))) {
+    return res.status(404).json({ error: "Repo not found" });
+  }
+  const { expectedRef, message, changes } = req.body || {};
+  if (
+    !(
+      expectedRef === null ||
+      (typeof expectedRef === "string" && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(expectedRef))
+    ) ||
+    typeof message !== "string" ||
+    !message.trim() ||
+    message.length > 10000 ||
+    !Array.isArray(changes) ||
+    changes.length < 1 ||
+    changes.length > 200
+  ) {
+    return res.status(400).json({ error: "Invalid commit request" });
+  }
+  const seen = new Set();
+  let bytes = 0;
+  for (const change of changes) {
+    if (
+      !change ||
+      typeof change.path !== "string" ||
+      change.path.length > 1024 ||
+      change.path.includes("\0") ||
+      change.path.includes(",") ||
+      change.path.startsWith("/") ||
+      change.path.includes("\\") ||
+      change.path.split("/").some((part) => !part || part === "." || part === "..") ||
+      change.path.split("/").some((part) => part.toLowerCase() === ".git") ||
+      seen.has(change.path)
+    ) {
+      return res.status(400).json({ error: "Invalid or duplicate change path" });
+    }
+    if (Object.keys(change).some((key) => !["path", "delete", "content"].includes(key))) {
+      return res.status(400).json({ error: "Unknown change member" });
+    }
+    seen.add(change.path);
+    if (
+      [...seen].some(
+        (existing) =>
+          existing !== change.path &&
+          (existing.startsWith(`${change.path}/`) || change.path.startsWith(`${existing}/`)),
+      )
+    ) {
+      return res.status(400).json({ error: "Conflicting change paths" });
+    }
+    if (Object.hasOwn(change, "delete") && typeof change.delete !== "boolean") {
+      return res.status(400).json({ error: "Delete must be a boolean" });
+    }
+    if (change.delete === true && Object.keys(change).some((key) => !["path", "delete"].includes(key))) {
+      return res.status(400).json({ error: "Delete changes may contain only path and delete" });
+    }
+    if (
+      change.delete !== true &&
+      (typeof change.content !== "string" ||
+        change.content.length > Math.ceil((10 * 1024 * 1024) / 3) * 4 ||
+        !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(change.content))
+    ) {
+      return res.status(400).json({ error: "Content must be strict base64" });
+    }
+    if (change.content) {
+      const content = Buffer.from(change.content, "base64");
+      if (content.toString("base64") !== change.content) {
+        return res.status(400).json({ error: "Content must be strict base64" });
+      }
+      bytes += content.length;
+    }
+  }
+  if (bytes > 10 * 1024 * 1024) {
+    return res.status(413).json({ error: "Commit content exceeds 10 MiB" });
+  }
+  try {
+    const result = await atomicCommit(repoPath, expectedRef, message, changes);
+    if (result.stale) {
+      return res.status(409).json({ error: "Expected ref is stale" });
+    }
+    await recordAuditEvent(req, "repository.committed", `${req.organization.slug}/${repo}`, { commit: result.commit });
+    return res.status(201).json(result);
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
@@ -2360,7 +2634,12 @@ function makeApiSpec() {
 
   const apiSpec = {
     openapi: "3.0.3",
-    info: { title: "GitMini API", version: "1.0.0" },
+    info: {
+      title: "GitMini API",
+      version: "1.0.0",
+      description:
+        "Introspection authenticates only. API/Git bearer credentials require a local authorization record with explicit org grants; repo:write implies repo:read. Capabilities: repo:read, repo:write, org:create, org:manage (delete empty orgs and manage webhook settings).",
+    },
     servers: [{ url: "/", description: "This GitMini server" }],
     paths: {
       "/api/v1/health": {
@@ -2403,7 +2682,7 @@ function makeApiSpec() {
             [],
           ),
           security: [{ bearerAuth: [] }],
-          "x-required-scope": "repo:write",
+          "x-required-scope": "org:create",
         },
       },
       "/api/v1/orgs/{org}": {
@@ -2418,7 +2697,7 @@ function makeApiSpec() {
             },
           ],
           security: [{ bearerAuth: [] }],
-          "x-required-scope": "repo:write",
+          "x-required-scope": "org:manage",
           responses: {
             204: { description: "Organization deleted" },
             400: { description: "Invalid organization slug" },
@@ -2434,32 +2713,37 @@ function makeApiSpec() {
       "/api/v1/personal-access-tokens": {
         get: {
           summary: "List personal access token metadata for the authenticated subject",
-          security: [{ bearerAuth: [] }],
+          security: [{ cookieSession: [] }],
           responses: {
             200: { description: "Token metadata without token values" },
             401: unauthorized,
-            403: {
-              description: "Personal access tokens cannot manage other tokens",
-            },
+            403: { description: "Browser session required" },
           },
         },
         post: {
           summary: "Create a scoped personal access token, returned once",
-          security: [{ bearerAuth: [] }],
+          security: [{ cookieSession: [] }],
           requestBody: jsonBody(
             {
               label: { type: "string", minLength: 1, maxLength: 100 },
               scopes: {
                 type: "array",
-                items: { type: "string", enum: ["repo:read", "repo:write"] },
+                items: {
+                  type: "string",
+                  enum: ["repo:read", "repo:write", "org:create", "org:manage"],
+                },
                 minItems: 1,
-                maxItems: 1,
+              },
+              orgs: {
+                type: "array",
+                items: { type: "string" },
+                description: "Explicit organization grants",
               },
               expiresAt: { type: "string", format: "date", nullable: true },
               org: { type: "string" },
               repo: { type: "string" },
             },
-            ["label", "scopes"],
+            ["label", "scopes", "orgs"],
           ),
           responses: {
             201: {
@@ -2467,14 +2751,37 @@ function makeApiSpec() {
             },
             400: { description: "Invalid label, scope, repository, or expiry" },
             401: unauthorized,
-            403: {
-              description: "Insufficient scope to grant the requested permissions",
-            },
+            403: { description: "Browser session required or insufficient scope" },
             404: { description: "Organization or repository not found" },
           },
         },
       },
       "/api/v1/personal-access-tokens/{id}": {
+        patch: {
+          summary: "Update local token label, scopes and explicit organization grants",
+          security: [{ cookieSession: [] }],
+          requestBody: jsonBody(
+            {
+              label: { type: "string", minLength: 1, maxLength: 100 },
+              scopes: {
+                type: "array",
+                items: {
+                  type: "string",
+                  enum: ["repo:read", "repo:write", "org:create", "org:manage"],
+                },
+                minItems: 1,
+              },
+              orgs: { type: "array", items: { type: "string" } },
+            },
+            ["label", "scopes", "orgs"],
+          ),
+          responses: {
+            200: { description: "Updated token metadata" },
+            400: { description: "Invalid grants" },
+            403: { description: "Not permitted" },
+            404: { description: "Unknown token" },
+          },
+        },
         delete: {
           summary: "Revoke a personal access token owned by the authenticated subject",
           parameters: [
@@ -2485,14 +2792,40 @@ function makeApiSpec() {
               schema: { type: "string" },
             },
           ],
-          security: [{ bearerAuth: [] }],
+          security: [{ cookieSession: [] }],
           responses: {
             204: { description: "Token revoked" },
             401: unauthorized,
-            403: {
-              description: "Personal access tokens cannot manage other tokens",
-            },
+            403: { description: "Browser session required" },
             404: { description: "Personal access token not found" },
+          },
+        },
+      },
+      "/api/v1/token-authorizations": {
+        post: {
+          summary: "Bind an active OIDC access token to local capabilities and explicit organization grants",
+          security: [{ cookieSession: [] }],
+          requestBody: jsonBody(
+            {
+              token: { type: "string", format: "password" },
+              label: { type: "string" },
+              scopes: {
+                type: "array",
+                items: {
+                  type: "string",
+                  enum: ["repo:read", "repo:write", "org:create", "org:manage"],
+                },
+              },
+              orgs: { type: "array", items: { type: "string" } },
+            },
+            ["token", "label", "scopes", "orgs"],
+          ),
+          responses: {
+            201: { description: "Bound record; no raw token returned" },
+            400: { description: "Invalid token" },
+            403: {
+              description: "Browser session required, inactive token, or subject mismatch",
+            },
           },
         },
       },
@@ -2518,6 +2851,43 @@ function makeApiSpec() {
           ),
           security: [{ bearerAuth: [] }],
           "x-required-scope": "repo:read or repo:write",
+        },
+      },
+      "/api/v1/orgs/{org}/repos/{repo}/commits": {
+        post: {
+          summary: "Atomically commit multiple changes to main with compare-and-swap",
+          security: [{ bearerAuth: [] }],
+          "x-required-scope": "repo:write",
+          requestBody: jsonBody(
+            {
+              expectedRef: {
+                type: "string",
+                nullable: true,
+                pattern: "^(?:[a-f0-9]{40}|[a-f0-9]{64})$",
+                description: "Current main SHA, or null when main is unborn",
+              },
+              message: { type: "string", minLength: 1, maxLength: 10000 },
+              changes: {
+                type: "array",
+                minItems: 1,
+                maxItems: 200,
+                items: {
+                  type: "object",
+                  description:
+                    "{path,content} where content is base64, or {path,delete:true}; deleting an absent path is a no-op",
+                },
+              },
+            },
+            ["expectedRef", "message", "changes"],
+          ),
+          responses: {
+            201: {
+              description: "Commit created; response includes commit and ref",
+            },
+            400: { description: "Invalid request" },
+            409: { description: "Expected ref is stale or raced" },
+            413: { description: "Content exceeds 10 MiB" },
+          },
         },
       },
       "/api/v1/orgs/{org}/events": {
@@ -2561,7 +2931,14 @@ function makeApiSpec() {
       "/api/v1/orgs/{org}/webhooks": {
         get: {
           summary: "List webhook subscriptions for an owned organization",
-          parameters: [{ name: "org", in: "path", required: true, schema: { type: "string" } }],
+          parameters: [
+            {
+              name: "org",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
           security: [{ bearerAuth: [] }],
           "x-required-scope": "repo:read",
           responses: {
@@ -2573,12 +2950,23 @@ function makeApiSpec() {
         },
         post: {
           summary: "Create a webhook subscription; secret is returned once",
-          parameters: [{ name: "org", in: "path", required: true, schema: { type: "string" } }],
+          parameters: [
+            {
+              name: "org",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
           security: [{ bearerAuth: [] }],
-          "x-required-scope": "repo:write",
+          "x-required-scope": "org:manage",
           requestBody: jsonBody(
             {
-              url: { type: "string", format: "uri", description: "Public HTTPS endpoint" },
+              url: {
+                type: "string",
+                format: "uri",
+                description: "Public HTTPS endpoint",
+              },
               events: {
                 type: "array",
                 minItems: 1,
@@ -2589,7 +2977,9 @@ function makeApiSpec() {
             ["url", "events"],
           ),
           responses: {
-            201: { description: "Created subscription and one-time signing secret" },
+            201: {
+              description: "Created subscription and one-time signing secret",
+            },
             400: { description: "Invalid URL or event subscription" },
             401: unauthorized,
             403: { description: "Insufficient scope" },
@@ -2601,11 +2991,21 @@ function makeApiSpec() {
         delete: {
           summary: "Delete a webhook subscription",
           parameters: [
-            { name: "org", in: "path", required: true, schema: { type: "string" } },
-            { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+            {
+              name: "org",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string", format: "uuid" },
+            },
           ],
           security: [{ bearerAuth: [] }],
-          "x-required-scope": "repo:write",
+          "x-required-scope": "org:manage",
           responses: {
             204: { description: "Deleted" },
             401: unauthorized,
@@ -2829,7 +3229,9 @@ function makeApiSpec() {
         head: operation(
           "Read repository file response headers",
           {
-            200: { description: "Same headers as GET, without a response body" },
+            200: {
+              description: "Same headers as GET, without a response body",
+            },
             400: { description: "Invalid path or ref" },
             404: notFound,
           },

@@ -12,6 +12,7 @@ let createdOrgWebhookRequest;
 let webhookApiDisabled;
 let expectedWebhookHttpErrors;
 let createdPersonalAccessTokenRequest;
+let createdTokenAuthorizationRequest;
 let bootstrapSession;
 let runtimeErrors;
 let imageBytes;
@@ -104,6 +105,7 @@ test.beforeEach(async ({ page }) => {
       id: "pat_000000000000000000000001",
       label: "Existing integration",
       scopes: ["repo:read"],
+      orgs: ["example"],
       org: null,
       repo: null,
       createdAt: "2026-05-01T12:00:00.000Z",
@@ -111,6 +113,7 @@ test.beforeEach(async ({ page }) => {
     },
   ];
   createdPersonalAccessTokenRequest = null;
+  createdTokenAuthorizationRequest = null;
   currentOrgWebhooks = [];
   createdOrgWebhookRequest = null;
   webhookApiDisabled = false;
@@ -251,6 +254,14 @@ test.beforeEach(async ({ page }) => {
         json: { token: "gmpat_browser_test_secret", record },
       });
     }
+    if (pathname.startsWith("/api/v1/personal-access-tokens/") && request.method() === "PATCH") {
+      const tokenId = pathname.split("/").at(-1);
+      const update = JSON.parse(request.postData());
+      currentPersonalAccessTokens = currentPersonalAccessTokens.map((token) =>
+        token.id === tokenId ? { ...token, ...update } : token,
+      );
+      return route.fulfill({ json: { token: currentPersonalAccessTokens.find((token) => token.id === tokenId) } });
+    }
     if (pathname.startsWith("/api/v1/personal-access-tokens/") && request.method() === "DELETE") {
       const tokenId = pathname.split("/").at(-1);
       currentPersonalAccessTokens = currentPersonalAccessTokens.filter((token) => token.id !== tokenId);
@@ -258,7 +269,14 @@ test.beforeEach(async ({ page }) => {
     }
     return route.fulfill({ status: 404, json: { error: "Not found" } });
   });
-  await page.route("**/api/v1/orgs", (route) => route.fulfill({ json: [{ slug: "example" }] }));
+  await page.route("**/api/v1/token-authorizations", async (route) => {
+    createdTokenAuthorizationRequest = JSON.parse(route.request().postData());
+    return route.fulfill({
+      status: 201,
+      json: { token: { id: "pat_imported", label: createdTokenAuthorizationRequest.label } },
+    });
+  });
+  await page.route("**/api/v1/orgs", (route) => route.fulfill({ json: { orgs: [{ slug: "example" }] } }));
   await page.route("**/api/v1/recent", (route) =>
     route.fulfill({
       json: {
@@ -408,24 +426,50 @@ test("organization landing renders organizations and recent changes", async ({ p
   await expect(page.getByLabel("Organization name")).toHaveCount(0);
 });
 
-test("token settings lists tokens and creates an owner-wide PAT", async ({ page }) => {
+test("token settings lists tokens and creates a scoped PAT", async ({ page }) => {
   await page.goto("/ui/?settings=tokens");
 
   await expect(page.getByRole("heading", { name: "Personal access tokens" })).toBeVisible();
   await expect(page.getByText("Existing integration", { exact: true })).toBeVisible();
-  await expect(page.getByText("All owned repositories").first()).toBeVisible();
+  await expect(page.getByText(/Organizations: example/).first()).toBeVisible();
 
-  await page.getByLabel("Label", { exact: true }).fill("Automation client");
-  await page.getByRole("combobox", { name: "Scope" }).selectOption("repo:write");
+  const tokenGrantsForm = page.locator("#token-grants-form");
+  await page.getByPlaceholder("e.g. Laptop").fill("Automation client");
+  await tokenGrantsForm.getByLabel("repo:write", { exact: true }).check();
+  await tokenGrantsForm.getByLabel("example", { exact: true }).check();
   await page.getByRole("button", { name: "Create token" }).click();
 
   await expect(page.getByRole("heading", { name: "Copy your token now" })).toBeVisible();
   await expect(page.getByText("gmpat_browser_test_secret", { exact: true })).toBeVisible();
   await expect
     .poll(() => createdPersonalAccessTokenRequest)
-    .toEqual({ label: "Automation client", scopes: ["repo:write"] });
+    .toEqual({ label: "Automation client", scopes: ["repo:write"], orgs: ["example"] });
+
+  const bindForm = page.locator("form").filter({ hasText: "External token" });
+  await bindForm.getByLabel("External token").fill("opaque-imported-secret");
+  await bindForm.getByLabel("Label", { exact: true }).fill("Imported access");
+  await bindForm.getByLabel("repo:write", { exact: true }).check();
+  await bindForm.getByLabel("example", { exact: true }).check();
+  await expect(bindForm.getByLabel("External token")).toHaveAttribute("type", "password");
+  await bindForm.getByRole("button", { name: "Bind token" }).click();
+  await expect
+    .poll(() => createdTokenAuthorizationRequest)
+    .toEqual({
+      token: "opaque-imported-secret",
+      label: "Imported access",
+      scopes: ["repo:read", "repo:write"],
+      orgs: ["example"],
+    });
+  await expect(bindForm.getByLabel("External token")).toHaveValue("");
+  expect(await page.evaluate(() => JSON.stringify(Object.values(localStorage)))).not.toContain(
+    "opaque-imported-secret",
+  );
 
   const existingToken = page.getByRole("listitem").filter({ hasText: "Existing integration" });
+  await existingToken.getByRole("button", { name: "Edit grants" }).click();
+  await tokenGrantsForm.getByLabel("repo:read", { exact: true }).check();
+  await page.getByRole("button", { name: "Save grants" }).click();
+  await expect(page.getByText("Existing integration", { exact: true })).toBeVisible();
   page.once("dialog", (dialog) => dialog.accept());
   await existingToken.getByRole("button", { name: "Revoke" }).click();
   await expect(existingToken).toHaveCount(0);
