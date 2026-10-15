@@ -429,6 +429,18 @@ async function run() {
     );
     assert.strictEqual(committedFile.status, 200);
     assert.strictEqual(committedFile.body, "initial\n", "ref reads committed content instead of the worktree");
+    const { stdout: commitSha } = await git(["-C", gitRepoPath, "rev-parse", "HEAD"]);
+    assert.strictEqual(committedFile.headers["x-git-commit"], commitSha.trim());
+    const headFile = await request(
+      port,
+      "HEAD",
+      "/api/v1/orgs/team-one/repos/git-http/file?path=initial.txt&ref=HEAD",
+      undefined,
+      "token-a",
+    );
+    assert.strictEqual(headFile.status, 200);
+    assert.strictEqual(headFile.body, "", "HEAD returns headers without a response body");
+    assert.strictEqual(headFile.headers["x-git-commit"], commitSha.trim());
     const missingRefFile = await request(
       port,
       "GET",
@@ -946,7 +958,7 @@ async function run() {
       "/api/v1/orgs/{org}/repos/{repo}": ["post", "delete"],
       "/api/v1/orgs/{org}/repos/{repo}/log": ["get"],
       "/api/v1/orgs/{org}/repos/{repo}/tree": ["get"],
-      "/api/v1/orgs/{org}/repos/{repo}/file": ["get"],
+      "/api/v1/orgs/{org}/repos/{repo}/file": ["get", "head"],
       "/api/v1/orgs/{org}/repos/{repo}/history": ["get"],
       "/api/v1/orgs/{org}/repos/{repo}/branches": ["get", "post"],
       "/api/v1/orgs/{org}/repos/{repo}/tags": ["get", "post"],

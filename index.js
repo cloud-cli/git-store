@@ -1228,7 +1228,7 @@ async function readRepoFileAtRef(repoPath, ref, relativePath) {
     error.status = 413;
     throw error;
   }
-  return content.stdout;
+  return { commit, content: content.stdout };
 }
 
 /**
@@ -1278,10 +1278,11 @@ async function getRepoFile(req, res) {
       return res.status(400).json({ error: "Invalid path" });
     }
     try {
-      const content = await readRepoFileAtRef(repoPath, req.query.ref, relativePath);
-      if (!content) {
+      const result = await readRepoFileAtRef(repoPath, req.query.ref, relativePath);
+      if (!result) {
         return res.status(404).json({ error: "Ref or file not found" });
       }
+      res.set("X-Git-Commit", result.commit);
       const imageTypes = {
         ".jpg": "image/jpeg",
         ".jpeg": "image/jpeg",
@@ -1294,8 +1295,8 @@ async function getRepoFile(req, res) {
       res.set("X-Content-Type-Options", "nosniff");
       const detected = imageTypes[path.extname(relativePath).toLowerCase()];
       return detected
-        ? res.type(detected).send(content)
-        : res.type("text/plain").send(content.toString("utf8"));
+        ? res.type(detected).send(result.content)
+        : res.type("text/plain").send(result.content.toString("utf8"));
     } catch (error) {
       if (error.status) {
         return res.status(error.status).json({ error: error.message });
@@ -2133,6 +2134,9 @@ app.get("/api/v1/repos/:repo/tree", requireAuthentication, requireScope("repo:re
 app.get("/api/v1/repos/:repo/file", requireAuthentication, requireScope("repo:read"), async (req, res) => {
   await getRepoFile(req, res);
 });
+app.head("/api/v1/repos/:repo/file", requireAuthentication, requireScope("repo:read"), async (req, res) => {
+  await getRepoFile(req, res);
+});
 app.post("/api/v1/repos/:repo/files", requireAuthentication, requireScope("repo:write"), uploadRepoFile);
 app.delete("/api/v1/repos/:repo/files", requireAuthentication, requireScope("repo:write"), deleteRepoFile);
 app.get("/api/v1/repos/:repo/branches", requireAuthentication, requireScope("repo:read"), async (req, res) => {
@@ -2819,6 +2823,30 @@ function makeApiSpec() {
         ),
       },
       "/api/v1/repos/{repo}/file": {
+        head: operation(
+          "Read repository file response headers",
+          {
+            200: { description: "Same headers as GET, without a response body" },
+            400: { description: "Invalid path or ref" },
+            404: notFound,
+          },
+          null,
+          [
+            ...pathParametersRepo,
+            {
+              name: "path",
+              in: "query",
+              required: true,
+              schema: { type: "string" },
+            },
+            {
+              name: "ref",
+              in: "query",
+              required: false,
+              schema: { type: "string" },
+            },
+          ],
+        ),
         get: operation(
           "Read a repository file",
           {

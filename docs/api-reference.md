@@ -264,6 +264,8 @@ GET /api/v1/orgs/{org}/repos/{repo}/file
 extensions (`.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.avif`, `.bmp`) are returned as their
 image MIME type with original bytes so browsers can preview them. Other file types are returned
 as UTF-8 `text/plain`; SVG and other active formats are not served as inline images.
+When `ref` is supplied, the response includes `X-Git-Commit` with the resolved commit SHA.
+`HEAD` is supported and returns the same headers and status as `GET` without a response body.
 
 **Response (400)** – invalid path or path traversal detected.
 
