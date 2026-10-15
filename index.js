@@ -423,7 +423,9 @@ app.get(["/ui/", "/ui/index.html"], async (req, res, next) => {
   });
   const bootstrapScript = `<script state>${serialized}</script>`;
   res.set("Cache-Control", "no-store");
-  return res.type("html").send(html.replace('<script state>{"serverSession": null}</script>', bootstrapScript));
+  return res
+    .type("html")
+    .send(html.replace(/<script state>\s*\{"serverSession": null\}\s*<\/script>/, bootstrapScript));
 });
 app.use("/ui", express.static(path.join(__dirname, "public")));
 
@@ -1169,10 +1171,10 @@ async function getRepoTree(req, res) {
 async function readRepoFileAtRef(repoPath, ref, relativePath) {
   let commit;
   try {
-    const result = await execGit(
-      ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`],
-      { cwd: repoPath, encoding: "utf8" },
-    );
+    const result = await execGit(["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`], {
+      cwd: repoPath,
+      encoding: "utf8",
+    });
     commit = result.stdout.trim();
   } catch (error) {
     if (Number.isInteger(error.code)) {
@@ -1181,10 +1183,11 @@ async function readRepoFileAtRef(repoPath, ref, relativePath) {
     throw error;
   }
 
-  const treeResult = await execGit(
-    ["ls-tree", "-z", "--full-tree", commit, "--", `:(literal)${relativePath}`],
-    { cwd: repoPath, encoding: "buffer", maxBuffer: 1024 * 1024 },
-  );
+  const treeResult = await execGit(["ls-tree", "-z", "--full-tree", commit, "--", `:(literal)${relativePath}`], {
+    cwd: repoPath,
+    encoding: "buffer",
+    maxBuffer: 1024 * 1024,
+  });
   const entries = treeResult.stdout.toString("utf8").split("\0").filter(Boolean);
   let selected;
   for (const entry of entries) {

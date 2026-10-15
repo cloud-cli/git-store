@@ -1098,6 +1098,15 @@ async function run() {
           claims: () => oidcIdClaims,
         };
       },
+      async tokenIntrospection(token, options) {
+        assert.strictEqual(token, "opaque-api-token");
+        assert.deepStrictEqual(options, { token_type_hint: "access_token" });
+        return {
+          active: true,
+          sub: "introspected-subject",
+          scope: "repo:read repo:write",
+        };
+      },
       async fetchUserInfo(accessToken, subject) {
         assert.strictEqual(accessToken, oidcAccessToken);
         return { ...oidcUserInfo, sub: subject };
@@ -1106,7 +1115,6 @@ async function run() {
     process.env.OIDC_ISSUER = "https://issuer.example.test";
     process.env.OIDC_CLIENT_ID = "mock-git-store-client";
     process.env.OIDC_BROWSER_SCOPES = "repo:read repo:write";
-    const nativeFetch = globalThis.fetch;
     app.locals.authApiClientOverride = {
       async getUserInfo(accessToken) {
         assert.strictEqual(accessToken, oidcAccessToken);
@@ -1157,6 +1165,7 @@ async function run() {
           id: "browser-subject",
           name: "Signed In",
         },
+        canRead: true,
         canWrite: true,
       },
     });
@@ -1383,6 +1392,7 @@ async function run() {
         sub: "browser-subject",
         name: "Signed In",
       },
+      canRead: true,
       canWrite: true,
     });
     process.env.OIDC_BROWSER_SCOPES = "repo:read";
@@ -1411,22 +1421,6 @@ async function run() {
     process.env.OIDC_CLIENT_ID = "mock-git-store-client";
     app.locals.verifyToken = null;
     app.locals.authApiClientOverride = null;
-    globalThis.fetch = async (url, options) => {
-      assert.strictEqual(String(url), "https://issuer.example.test/oauth/introspect");
-      assert.strictEqual(
-        options.headers.Authorization,
-        `Basic ${Buffer.from("mock-git-store-client:test-client-secret").toString("base64")}`,
-      );
-      assert.ok(String(options.body).includes("token=opaque-api-token"));
-      return new Response(
-        JSON.stringify({
-          active: true,
-          sub: "introspected-subject",
-          scope: "repo:read repo:write",
-        }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      );
-    };
     const introspectedList = await request(port, "GET", "/api/v1/repos", undefined, "opaque-api-token");
     assert.strictEqual(introspectedList.status, 200, "opaque repo:read/write API token should introspect successfully");
     const introspectedWrite = await request(
@@ -1450,7 +1444,6 @@ async function run() {
     assert.strictEqual(logout.status, 303);
     const loggedOutList = await request(port, "GET", "/api/v1/repos", undefined, undefined, { Cookie: sessionCookie });
     assert.strictEqual(loggedOutList.status, 401, "logout invalidates the browser session");
-    globalThis.fetch = nativeFetch;
     process.env.OIDC_ISSUER = "";
     process.env.OIDC_CLIENT_ID = "";
     process.env.OIDC_BROWSER_SCOPES = "";
@@ -1514,9 +1507,10 @@ async function run() {
       uiResponse.body.includes('<template if="dragging"'),
       "drag/drop helper should only appear while dragging",
     );
-    assert.ok(
-      !uiResponse.body.includes("document.getElementById"),
-      "UI should use Li³ bindings rather than direct DOM lookups",
+    assert.strictEqual(
+      (uiResponse.body.match(/document\.getElementById\(/g) || []).length,
+      2,
+      "direct DOM lookups are limited to native popover controls",
     );
     assert.ok(uiResponse.body.includes("No branches."));
     assert.ok(uiResponse.body.includes("No tags."));
