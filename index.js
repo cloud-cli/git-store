@@ -12,6 +12,7 @@ import { validateRepoName, getSubjectHash } from "./storage.js";
 import * as organizations from "./organizations.js";
 import { createDatabaseClient, createAuditStore, createTokenFingerprint } from "./audit.js";
 import { PersonalAccessTokenStore, normalizeTokenExpiry } from "./personal-access-tokens.js";
+import { execGit } from "./git.js";
 import {
   createWebhookStore,
   deliver as deliverWebhook,
@@ -27,6 +28,7 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const getGit = (repoPath) => simpleGit.simpleGit(repoPath);
+const MAX_REF_FILE_BYTES = 10 * 1024 * 1024;
 
 const app = express();
 app.locals.auditStore = createAuditStore(createDatabaseClient(process.env.DATABASE_URL, process.env.DB_AUTH_TOKEN));
@@ -1164,6 +1166,71 @@ async function getRepoTree(req, res) {
   }
 }
 
+async function readRepoFileAtRef(repoPath, ref, relativePath) {
+  let commit;
+  try {
+    const result = await execGit(
+      ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`],
+      { cwd: repoPath, encoding: "utf8" },
+    );
+    commit = result.stdout.trim();
+  } catch (error) {
+    if (Number.isInteger(error.code)) {
+      return null;
+    }
+    throw error;
+  }
+
+  const treeResult = await execGit(
+    ["ls-tree", "-z", "--full-tree", commit, "--", `:(literal)${relativePath}`],
+    { cwd: repoPath, encoding: "buffer", maxBuffer: 1024 * 1024 },
+  );
+  const entries = treeResult.stdout.toString("utf8").split("\0").filter(Boolean);
+  let selected;
+  for (const entry of entries) {
+    const tab = entry.indexOf("\t");
+    if (tab < 0 || entry.slice(tab + 1) !== relativePath) {
+      continue;
+    }
+    const [mode, type, objectId] = entry.slice(0, tab).split(" ");
+    selected = { mode, type, objectId };
+    break;
+  }
+  if (!selected) {
+    return null;
+  }
+  if (selected.type !== "blob" || !["100644", "100755"].includes(selected.mode)) {
+    const error = new Error("Ref path is not a regular file");
+    error.status = 400;
+    throw error;
+  }
+
+  const sizeResult = await execGit(["cat-file", "-s", selected.objectId], {
+    cwd: repoPath,
+    encoding: "utf8",
+  });
+  const size = Number(sizeResult.stdout.trim());
+  if (!Number.isSafeInteger(size) || size < 0) {
+    throw new Error("Git returned an invalid object size");
+  }
+  if (size > MAX_REF_FILE_BYTES) {
+    const error = new Error("Committed file exceeds the 10 MiB read limit");
+    error.status = 413;
+    throw error;
+  }
+  const content = await execGit(["cat-file", "blob", selected.objectId], {
+    cwd: repoPath,
+    encoding: "buffer",
+    maxBuffer: MAX_REF_FILE_BYTES + 1,
+  });
+  if (content.stdout.length > MAX_REF_FILE_BYTES) {
+    const error = new Error("Committed file exceeds the 10 MiB read limit");
+    error.status = 413;
+    throw error;
+  }
+  return content.stdout;
+}
+
 /**
  * Read a repository file.
  * Resolves the repo path from the authenticated organization's directory.
@@ -1172,7 +1239,7 @@ async function getRepoTree(req, res) {
  * @param {object} res - Express response object
  * @returns {void}
  */
-function getRepoFile(req, res) {
+async function getRepoFile(req, res) {
   const repo = req.params.repo;
   const repoPath = getSafeRepoPath(repo, req);
 
@@ -1184,9 +1251,58 @@ function getRepoFile(req, res) {
     return res.status(404).json({ error: "Repo not found" });
   }
 
-  const filePath = safeRepoFile(repoPath, req.query.path || "");
+  const refProvided = req.query.ref !== undefined;
+  const requestedPath = req.query.path;
+  if (
+    refProvided &&
+    (typeof requestedPath !== "string" ||
+      !requestedPath ||
+      requestedPath.length > 4096 ||
+      requestedPath.includes("\0") ||
+      path.posix.isAbsolute(requestedPath) ||
+      requestedPath.split("/").some((part) => part === "" || part === "." || part === ".."))
+  ) {
+    return res.status(400).json({ error: "Invalid path" });
+  }
+  const filePath = safeRepoFile(repoPath, requestedPath || "");
   if (!filePath) {
     return res.status(400).json({ error: "Invalid path" });
+  }
+
+  if (refProvided) {
+    if (!isValidGitRef(req.query.ref)) {
+      return res.status(400).json({ error: "Invalid ref" });
+    }
+    const relativePath = path.relative(repoPath, filePath).split(path.sep).join("/");
+    if (relativePath.split("/").some((part) => part.toLowerCase() === ".git")) {
+      return res.status(400).json({ error: "Invalid path" });
+    }
+    try {
+      const content = await readRepoFileAtRef(repoPath, req.query.ref, relativePath);
+      if (!content) {
+        return res.status(404).json({ error: "Ref or file not found" });
+      }
+      const imageTypes = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".avif": "image/avif",
+        ".bmp": "image/bmp",
+      };
+      res.set("X-Content-Type-Options", "nosniff");
+      const detected = imageTypes[path.extname(relativePath).toLowerCase()];
+      return detected
+        ? res.type(detected).send(content)
+        : res.type("text/plain").send(content.toString("utf8"));
+    } catch (error) {
+      if (error.status) {
+        return res.status(error.status).json({ error: error.message });
+      }
+      process.stderr.write(`[git-file-read] ${error.message}\n`);
+      return res.status(500).json({ error: "Unable to read file from ref" });
+    }
   }
 
   if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
@@ -2015,7 +2131,7 @@ app.get("/api/v1/repos/:repo/tree", requireAuthentication, requireScope("repo:re
   getRepoTree(req, res);
 });
 app.get("/api/v1/repos/:repo/file", requireAuthentication, requireScope("repo:read"), async (req, res) => {
-  getRepoFile(req, res);
+  await getRepoFile(req, res);
 });
 app.post("/api/v1/repos/:repo/files", requireAuthentication, requireScope("repo:write"), uploadRepoFile);
 app.delete("/api/v1/repos/:repo/files", requireAuthentication, requireScope("repo:write"), deleteRepoFile);
@@ -2712,6 +2828,7 @@ function makeApiSpec() {
             },
             400: { description: "Invalid path" },
             404: notFound,
+            413: { description: "Committed file exceeds the 10 MiB limit" },
           },
           null,
           [
@@ -2720,6 +2837,13 @@ function makeApiSpec() {
               name: "path",
               in: "query",
               required: true,
+              schema: { type: "string" },
+            },
+            {
+              name: "ref",
+              in: "query",
+              required: false,
+              description: "Branch, tag, or commit; omitted to read the working tree",
               schema: { type: "string" },
             },
           ],

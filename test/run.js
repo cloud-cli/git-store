@@ -419,6 +419,32 @@ async function run() {
       "-m",
       "initial",
     ]);
+    fs.writeFileSync(path.join(gitRepoPath, "initial.txt"), "working tree version\n");
+    const committedFile = await request(
+      port,
+      "GET",
+      "/api/v1/orgs/team-one/repos/git-http/file?path=initial.txt&ref=HEAD",
+      undefined,
+      "token-a",
+    );
+    assert.strictEqual(committedFile.status, 200);
+    assert.strictEqual(committedFile.body, "initial\n", "ref reads committed content instead of the worktree");
+    const missingRefFile = await request(
+      port,
+      "GET",
+      "/api/v1/orgs/team-one/repos/git-http/file?path=initial.txt&ref=missing-branch",
+      undefined,
+      "token-a",
+    );
+    assert.strictEqual(missingRefFile.status, 404);
+    const invalidRefFile = await request(
+      port,
+      "GET",
+      "/api/v1/orgs/team-one/repos/git-http/file?path=initial.txt&ref=--upload-pack=evil",
+      undefined,
+      "token-a",
+    );
+    assert.strictEqual(invalidRefFile.status, 400);
     const gitClonePath = path.join(dataPath, "clone-a");
     const authHeader = `Authorization: Basic ${Buffer.from("arbitrary-user:token-a").toString("base64")}`;
     const gitUrl = `http://127.0.0.1:${port}/git/team-one/git-http.git`;

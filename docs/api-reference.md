@@ -257,6 +257,8 @@ GET /api/v1/orgs/{org}/repos/{repo}/file
 **Query parameters**
 
 - `path` – relative path to the file within the repository.
+- `ref` (optional) – branch, tag, or commit to read committed content. When omitted, the
+  current working-tree file is read.
 
 **Response (200)** – text files are returned as UTF-8 `text/plain`. Supported raster image
 extensions (`.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.avif`, `.bmp`) are returned as their
@@ -266,6 +268,9 @@ as UTF-8 `text/plain`; SVG and other active formats are not served as inline ima
 **Response (400)** – invalid path or path traversal detected.
 
 **Response (404)** – file not found.
+
+**Response (413)** – committed Git object exceeds 10 MiB. Ref reads reject `.git` paths,
+symlinks, and submodules.
 
 ### POST /api/v1/orgs/{org}/repos/{repo}/files
 
