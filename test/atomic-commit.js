@@ -32,6 +32,21 @@ try {
   assert.equal(git("show", `${result.commit}:old.txt`), "updated");
   assert.equal(git("ls-tree", "--name-only", result.commit).includes("staged.txt"), false);
   assert.deepEqual(fs.readFileSync(path.join(repo, ".git", "index")), indexBefore);
+  git("branch", "feature");
+  const featureRef = git("rev-parse", "refs/heads/feature");
+  const featureResult = await atomicCommit(
+    repo,
+    featureRef,
+    "feature change",
+    [{ path: "feature.txt", content: "ZmVhdHVyZQ==" }],
+    "feature",
+  );
+  assert.equal(git("rev-parse", "refs/heads/feature"), featureResult.commit);
+  assert.equal(git("rev-parse", "refs/heads/main"), result.commit);
+  assert.equal(
+    (await atomicCommit(repo, featureRef, "stale feature", [{ path: "x", content: "eA==" }], "feature")).stale,
+    true,
+  );
   assert.equal(fs.readFileSync(path.join(repo, "old.txt"), "utf8"), "old\n");
   assert.equal((await atomicCommit(repo, expected, "stale", [{ path: "x", content: "eA==" }])).stale, true);
   const sha256Repo = path.join(dir, "sha256-repo");

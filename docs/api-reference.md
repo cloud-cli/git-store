@@ -267,6 +267,21 @@ GET /api/v1/orgs/{org}/repos/{repo}/tree
 **Query parameters**
 
 - `path` – optional relative path within the repository to list entries from.
+- `worktreeId` – optional managed worktree ID; omitted selects the primary working tree.
+- `ref` – optional branch, tag, or commit SHA. When supplied, returns a recursive committed-tree
+  response equivalent to `git ls-tree -r` rather than the working-tree directory array:
+
+```json
+{
+  "ref": "wds-artifacts",
+  "commit": "<resolved-commit-sha>",
+  "files": [{ "path": "latest/component.html", "mode": "100644", "type": "blob", "sha": "<blob-sha>" }]
+}
+```
+
+When `ref` and `worktreeId` are both supplied, the ref is resolved using the selected
+worktree's shared object store. File paths, modes, object types, and blob/gitlink SHAs are
+returned; file contents are not.
 
 ### GET /api/v1/orgs/{org}/repos/{repo}/file
 
@@ -337,6 +352,30 @@ DELETE /api/v1/orgs/my-org/repos/my-repo/files?path=README.md
 **Response (403)** – token lacks `repo:write`.
 
 **Response (404)** – organization, repository, or file not found.
+
+### Managed worktrees
+
+Worktrees provide isolated working directories for API-driven automation without requiring a
+clone. Create one from a branch, tag, or commit SHA with `POST
+/api/v1/orgs/{org}/repos/{repo}/worktrees` and `{ "ref": "<ref-or-sha>" }`. GitMini resolves
+the input to a commit SHA and creates a detached worktree. To create a new branch at that
+commit, use the existing branch API with `startPoint` set to the ref or SHA. Worktrees are
+intentionally detached so branch-target atomic commits do not leave a checked-out worktree's
+index stale. The response contains a server-generated `worktreeId`, resolved `ref` SHA, and
+`branch: null`. Clients never provide a filesystem path.
+
+`GET .../worktrees` lists managed worktrees; `DELETE .../worktrees/{id}` removes a clean
+worktree. Dirty worktrees return **409** and are not forcibly removed. Repository deletion is
+also rejected while linked worktrees remain. Worktrees and their IDs survive service restarts.
+
+Pass `worktreeId` as a query parameter to working-tree `GET /tree`, `GET /file`, `POST /files`,
+`DELETE /files`, and `GET /history` operations to select that worktree. Omitting it preserves
+the primary-working-tree behavior. File writes remain unstaged; use the atomic commits API to
+create commits on a target branch. When `ref` is supplied to `GET /tree`, it returns the
+recursive committed tree (equivalent to `git ls-tree -r`) with `path`, `mode`, `type`, and blob
+or gitlink `sha` fields. A `worktreeId` may also be supplied; refs resolve in that worktree's
+shared repository object store. The `ref` response field echoes the requested ref, while
+`commit` is its resolved commit SHA.
 
 ### POST /api/v1/orgs/{org}/repos/{repo}/stage
 
@@ -489,6 +528,8 @@ Subscriptions accept exactly `git`, `repo`, and `thread`. `repo` delivers only r
 
 # Atomic commits
 
-`POST /api/v1/orgs/{org}/repos/{repo}/commits` creates one commit on `refs/heads/main` and returns `{ "commit": "<sha>", "ref": "refs/heads/main" }`. It requires `repo:write` and an explicit organization grant.
+`POST /api/v1/orgs/{org}/repos/{repo}/commits` creates one commit on a local branch and returns `{ "commit": "<sha>", "ref": "refs/heads/<branch>" }`. It requires `repo:write` and an explicit organization grant. `targetBranch` selects the branch and defaults to `main`.
 
-Send `{ "expectedRef": "<main-sha>", "message": "...", "changes": [{ "path": "file.txt", "content": "<base64>" }, { "path": "old.txt", "delete": true }] }`. For an unborn main, `expectedRef` may be `null`; otherwise it must match the current main SHA. A mismatch or concurrent ref update returns 409. All members are validated before Git objects are written. Paths must be relative and unique, cannot contain comma or NUL, cannot conflict as file/directory paths, and may not contain a `.git` component; each content is strict base64, at most 10 MiB total, 200 changes maximum, and messages are limited to 10,000 characters. Deleting a nonexistent path is a no-op. Changes are based on committed `main` (not staged or working-tree content); the shared working tree and index are left unchanged.
+Send `{ "expectedRef": "<branch-head-sha>", "targetBranch": "automation/change-123", "message": "...", "changes": [{ "path": "file.txt", "content": "<base64>" }, { "path": "old.txt", "delete": true }] }`. For an unborn target branch, `expectedRef` may be `null`; otherwise it must match the current target branch SHA. A mismatch or concurrent ref update returns 409. All members are validated before Git objects are written. Paths must be relative and unique, cannot contain comma or NUL, cannot conflict as file/directory paths, and may not contain a `.git` component; each content is strict base64, at most 10 MiB total, 200 changes maximum, and messages are limited to 10,000 characters. Deleting a nonexistent path is a no-op. Changes are based on the selected branch's committed tree (not staged or working-tree content); all shared working trees and indexes are left unchanged.
+
+When creating a tag with `POST /api/v1/orgs/{org}/repos/{repo}/tags`, optional `target` may name a branch, tag, or commit SHA. GitMini resolves it to a commit before creating the tag. Omitting `target` preserves the existing `HEAD` default.

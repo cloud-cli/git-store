@@ -185,3 +185,14 @@ HTTP authentication bypass.
 - [How to get started](docs/getting-started.md): local, Docker, and environment setup.
 - [API reference](docs/api-reference.md): endpoint contracts and examples.
 - [TODO](TODO.md): remaining implementation and verification work.
+
+# Managed worktrees
+
+Organization-scoped repository APIs support managed worktrees at
+`/api/v1/orgs/{org}/repos/{repo}/worktrees`. Create a detached worktree with `POST` JSON `{ "ref": "<branch|tag|commit>" }`.
+Create a branch separately from the same start ref when needed. IDs are server-generated and callers cannot choose paths. `GET` lists IDs;
+`DELETE /.../worktrees/{id}` removes only a clean worktree (dirty worktrees are refused). File upload and delete
+accept `?worktreeId=<id>`; omission retains the primary worktree. `GET /tree?ref=<ref>&worktreeId=<id>` returns
+the recursive committed tree with mode/type/blob SHA metadata for the ref, resolved in that worktree's shared object store.
+Atomic commits accept optional `targetBranch` (default `main`) and compare-and-swap `expectedRef` against that branch.
+Tag creation accepts optional `target` (default `HEAD`).

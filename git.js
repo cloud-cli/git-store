@@ -180,11 +180,11 @@ function streamLog(repoPath, res) {
   });
 }
 
-async function addTag(repoPath, name) {
+async function addTag(repoPath, name, target = "HEAD") {
   if (!name) {
     throw new Error("Tag name is required");
   }
-  await execGit(["tag", name], { cwd: repoPath });
+  await execGit(["tag", name, target], { cwd: repoPath });
 }
 
 async function removeTag(repoPath, name) {
@@ -230,7 +230,7 @@ async function listBranches(repoPath) {
     .filter(Boolean);
 }
 
-async function atomicCommit(repoPath, expectedRef, message, changes) {
+async function atomicCommit(repoPath, expectedRef, message, changes, targetBranch = "main") {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "gitmini-index-"));
   const indexPath = path.join(tempDir, "index");
   const git = (args, options = {}) =>
@@ -240,7 +240,7 @@ async function atomicCommit(repoPath, expectedRef, message, changes) {
       ...options,
     });
   try {
-    const ref = "refs/heads/main";
+    const ref = `refs/heads/${targetBranch}`;
     const current = await execGit(["rev-parse", "--verify", ref], {
       cwd: repoPath,
     })

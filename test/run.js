@@ -486,6 +486,230 @@ async function run() {
       "token-a",
     );
     assert.strictEqual(invalidRefFile.status, 400);
+    await git(["-C", gitRepoPath, "tag", "fixture-tag", commitSha.trim()]);
+    const createDetachedWorktree = await request(
+      port,
+      "POST",
+      "/api/v1/orgs/team-one/repos/git-http/worktrees",
+      { ref: commitSha.trim() },
+      "token-a",
+    );
+    assert.strictEqual(createDetachedWorktree.status, 201, createDetachedWorktree.body);
+    const detachedWorktree = JSON.parse(createDetachedWorktree.body);
+    assert.strictEqual(detachedWorktree.ref, commitSha.trim());
+    assert.strictEqual(detachedWorktree.branch, null);
+    assert.strictEqual(
+      (
+        await git([
+          "-C",
+          path.join(dataPath, "worktrees", "team-one", "git-http", detachedWorktree.worktreeId),
+          "rev-parse",
+          "HEAD",
+        ])
+      ).stdout.trim(),
+      commitSha.trim(),
+    );
+    const createSecondWorktree = await request(
+      port,
+      "POST",
+      "/api/v1/orgs/team-one/repos/git-http/worktrees",
+      { ref: "fixture-tag" },
+      "token-a",
+    );
+    assert.strictEqual(createSecondWorktree.status, 201, createSecondWorktree.body);
+    const secondWorktree = JSON.parse(createSecondWorktree.body);
+    assert.notStrictEqual(secondWorktree.worktreeId, detachedWorktree.worktreeId);
+    assert.strictEqual(secondWorktree.ref, commitSha.trim());
+    const committedTree = await request(
+      port,
+      "GET",
+      `/api/v1/orgs/team-one/repos/git-http/tree?ref=${commitSha.trim()}&worktreeId=${detachedWorktree.worktreeId}`,
+      undefined,
+      "token-a",
+    );
+    assert.strictEqual(committedTree.status, 200, committedTree.body);
+    assert.deepStrictEqual(JSON.parse(committedTree.body), {
+      ref: commitSha.trim(),
+      commit: commitSha.trim(),
+      files: [
+        {
+          path: "initial.txt",
+          mode: "100644",
+          type: "blob",
+          sha: (await git(["-C", gitRepoPath, "rev-parse", `${commitSha.trim()}:initial.txt`])).stdout.trim(),
+        },
+        {
+          path: "old-atomic.txt",
+          mode: "100644",
+          type: "blob",
+          sha: (await git(["-C", gitRepoPath, "rev-parse", `${commitSha.trim()}:old-atomic.txt`])).stdout.trim(),
+        },
+      ],
+    });
+    assert.strictEqual(
+      (
+        await request(
+          port,
+          "GET",
+          "/api/v1/orgs/team-one/repos/git-http/tree?ref=missing-tree-ref",
+          undefined,
+          "token-a",
+        )
+      ).status,
+      404,
+    );
+    assert.strictEqual(
+      (
+        await request(
+          port,
+          "GET",
+          "/api/v1/orgs/team-one/repos/git-http/tree?ref=--upload-pack=evil",
+          undefined,
+          "token-a",
+        )
+      ).status,
+      400,
+    );
+    const worktreeList = await request(
+      port,
+      "GET",
+      "/api/v1/orgs/team-one/repos/git-http/worktrees",
+      undefined,
+      "token-a",
+    );
+    assert.deepStrictEqual(
+      JSON.parse(worktreeList.body)
+        .worktrees.map(({ worktreeId }) => worktreeId)
+        .sort(),
+      [detachedWorktree.worktreeId, secondWorktree.worktreeId].sort(),
+    );
+    assert.strictEqual(
+      (await request(port, "DELETE", "/api/v1/orgs/team-one/repos/git-http", undefined, "token-a")).status,
+      409,
+      "repository deletion is blocked while linked worktrees exist",
+    );
+    assert.strictEqual(
+      (
+        await request(
+          port,
+          "POST",
+          "/api/v1/orgs/team-one/repos/git-http/files?worktreeId=missing",
+          { path: "x", content: "eA==" },
+          "token-a",
+        )
+      ).status,
+      404,
+    );
+    assert.strictEqual(
+      (
+        await request(
+          port,
+          "GET",
+          `/api/v1/orgs/team-one/repos/git-http/file?path=initial.txt&ref=${commitSha.trim()}&worktreeId=missing`,
+          undefined,
+          "token-a",
+        )
+      ).status,
+      404,
+      "an explicitly selected unknown worktree is never silently ignored",
+    );
+    assert.strictEqual(
+      (
+        await request(
+          port,
+          "POST",
+          "/api/v1/orgs/team-one/repos/git-http/files?worktreeId=invalid!",
+          { path: "x", content: "eA==" },
+          "token-a",
+        )
+      ).status,
+      404,
+    );
+    const worktreeUpload = await request(
+      port,
+      "POST",
+      `/api/v1/orgs/team-one/repos/git-http/files?worktreeId=${detachedWorktree.worktreeId}`,
+      { path: "worktree-only.txt", content: Buffer.from("worktree content\n").toString("base64") },
+      "token-a",
+    );
+    assert.strictEqual(worktreeUpload.status, 201, worktreeUpload.body);
+    const worktreeRead = await request(
+      port,
+      "GET",
+      `/api/v1/orgs/team-one/repos/git-http/file?path=worktree-only.txt&worktreeId=${detachedWorktree.worktreeId}`,
+      undefined,
+      "token-a",
+    );
+    assert.strictEqual(worktreeRead.body, "worktree content\n");
+    const worktreeUpdate = await request(
+      port,
+      "POST",
+      `/api/v1/orgs/team-one/repos/git-http/files?worktreeId=${detachedWorktree.worktreeId}`,
+      { path: "worktree-only.txt", content: Buffer.from("updated worktree content\n").toString("base64") },
+      "token-a",
+    );
+    assert.strictEqual(worktreeUpdate.status, 201);
+    assert.strictEqual(
+      (
+        await request(
+          port,
+          "GET",
+          `/api/v1/orgs/team-one/repos/git-http/file?path=worktree-only.txt&worktreeId=${detachedWorktree.worktreeId}`,
+          undefined,
+          "token-a",
+        )
+      ).body,
+      "updated worktree content\n",
+    );
+    assert.strictEqual(
+      (
+        await request(
+          port,
+          "POST",
+          `/api/v1/orgs/team-one/repos/git-http/files?worktreeId=${detachedWorktree.worktreeId}`,
+          { path: ".git", content: Buffer.from("corrupt").toString("base64") },
+          "token-a",
+        )
+      ).status,
+      400,
+      "file writes cannot replace linked-worktree Git metadata",
+    );
+    assert.strictEqual(fs.readFileSync(path.join(gitRepoPath, "initial.txt"), "utf8"), "working tree version\n");
+    const dirtyWorktreeRemove = await request(
+      port,
+      "DELETE",
+      `/api/v1/orgs/team-one/repos/git-http/worktrees/${detachedWorktree.worktreeId}`,
+      undefined,
+      "token-a",
+    );
+    assert.strictEqual(dirtyWorktreeRemove.status, 409);
+    const worktreeDelete = await request(
+      port,
+      "DELETE",
+      `/api/v1/orgs/team-one/repos/git-http/files?path=worktree-only.txt&worktreeId=${detachedWorktree.worktreeId}`,
+      undefined,
+      "token-a",
+    );
+    assert.strictEqual(worktreeDelete.status, 200, worktreeDelete.body);
+    for (const { worktreeId } of [detachedWorktree, secondWorktree]) {
+      const remove = await request(
+        port,
+        "DELETE",
+        `/api/v1/orgs/team-one/repos/git-http/worktrees/${worktreeId}`,
+        undefined,
+        "token-a",
+      );
+      assert.strictEqual(remove.status, 200, remove.body);
+    }
+    assert.strictEqual(
+      (await request(port, "GET", "/api/v1/orgs/team-one/repos/git-http/worktrees", undefined, "token-a")).body,
+      '{"worktrees":[]}',
+    );
+    assert.strictEqual(
+      (await request(port, "DELETE", "/api/v1/orgs/team-one/repos/git-http/worktrees/not-a-uuid", undefined, "token-a"))
+        .status,
+      404,
+    );
     const atomicRepo = gitRepoPath;
     const atomicDraftPath = path.join(atomicRepo, "atomic-draft.txt");
     fs.writeFileSync(atomicDraftPath, "draft state must remain staged\n");
@@ -518,6 +742,50 @@ async function run() {
       "atomic changes create exactly one commit",
     );
     assert.strictEqual((await git(["-C", atomicRepo, "show", "main:atomic.txt"])).stdout, "atomic content\n");
+    const createTargetBranch = await request(
+      port,
+      "POST",
+      "/api/v1/orgs/team-one/repos/git-http/branches",
+      { name: "feature-api", startPoint: atomicResult.commit },
+      "token-a",
+    );
+    assert.strictEqual(createTargetBranch.status, 200, createTargetBranch.body);
+    const targetBranchCommit = await request(
+      port,
+      "POST",
+      "/api/v1/orgs/team-one/repos/git-http/commits",
+      {
+        expectedRef: atomicResult.commit,
+        targetBranch: "feature-api",
+        message: "Atomic non-main target",
+        changes: [{ path: "feature-api.txt", content: Buffer.from("feature branch\n").toString("base64") }],
+      },
+      "token-a",
+    );
+    assert.strictEqual(targetBranchCommit.status, 201, targetBranchCommit.body);
+    const targetBranchResult = JSON.parse(targetBranchCommit.body);
+    assert.strictEqual(targetBranchResult.ref, "refs/heads/feature-api");
+    assert.strictEqual(
+      (await git(["-C", atomicRepo, "show", "feature-api:feature-api.txt"])).stdout,
+      "feature branch\n",
+    );
+    const staleTargetCommit = await request(
+      port,
+      "POST",
+      "/api/v1/orgs/team-one/repos/git-http/commits",
+      {
+        expectedRef: commitSha.trim(),
+        targetBranch: "feature-api",
+        message: "Stale non-main target",
+        changes: [{ path: "stale-feature.txt", content: Buffer.from("stale").toString("base64") }],
+      },
+      "token-a",
+    );
+    assert.strictEqual(staleTargetCommit.status, 409);
+    assert.strictEqual(
+      (await git(["-C", atomicRepo, "rev-parse", "refs/heads/feature-api"])).stdout.trim(),
+      targetBranchResult.commit,
+    );
     assert.strictEqual(fs.existsSync(path.join(atomicRepo, ".git", "index")), true);
     assert.deepStrictEqual(fs.readFileSync(path.join(atomicRepo, ".git", "index")), indexBeforeAtomic);
     assert.deepStrictEqual(fs.readFileSync(path.join(atomicRepo, "initial.txt")), worktreeBeforeAtomic);
@@ -902,8 +1170,24 @@ async function run() {
       404,
     );
 
-    const addTag = await request(port, "POST", "/api/v1/repos/shared-repo/tags", { name: "v1" }, "token-a");
+    const sharedHead = (
+      await git(["-C", path.join(dataPath, "orgs", "team-one", "shared-repo"), "rev-parse", "HEAD"])
+    ).stdout.trim();
+    const addTag = await request(
+      port,
+      "POST",
+      "/api/v1/repos/shared-repo/tags",
+      { name: "v1", target: sharedHead },
+      "token-a",
+    );
     assert.strictEqual(addTag.status, 200);
+    assert.strictEqual(
+      (
+        await git(["-C", path.join(dataPath, "orgs", "team-one", "shared-repo"), "rev-parse", "refs/tags/v1^{commit}"])
+      ).stdout.trim(),
+      sharedHead,
+      "an explicit tag target resolves to the requested commit SHA",
+    );
     const tags = await request(port, "GET", "/api/v1/repos/shared-repo/tags", undefined, "token-a");
     assert.ok(JSON.parse(tags.body).includes("v1"));
     assert.strictEqual(
@@ -1069,6 +1353,8 @@ async function run() {
       "/api/v1/orgs/{org}/repos/{repo}/unstage": ["post"],
       "/api/v1/orgs/{org}/repos/{repo}/commit": ["post"],
       "/api/v1/orgs/{org}/repos/{repo}/commits": ["post"],
+      "/api/v1/orgs/{org}/repos/{repo}/worktrees": ["get", "post"],
+      "/api/v1/orgs/{org}/repos/{repo}/worktrees/{id}": ["delete"],
       "/api/v1/orgs/{org}/repos/{repo}/tags/{name}": ["delete"],
       "/api/v1/orgs/{org}/repos/{repo}/branches/{name}": ["delete"],
       "/api/v1/repos": ["get"],
@@ -1090,6 +1376,8 @@ async function run() {
       "/api/v1/repos/{repo}/unstage": ["post"],
       "/api/v1/repos/{repo}/commit": ["post"],
       "/api/v1/repos/{repo}/commits": ["post"],
+      "/api/v1/repos/{repo}/worktrees": ["get", "post"],
+      "/api/v1/repos/{repo}/worktrees/{id}": ["delete"],
       "/api/v1/repos/{repo}/tags/{name}": ["delete"],
       "/api/v1/repos/{repo}/branches/{name}": ["delete"],
     };
@@ -1132,6 +1420,24 @@ async function run() {
     assert.strictEqual(spec.paths["/api/v1/orgs"]["get"]["x-required-scope"], "repo:read or repo:write");
     assert.strictEqual(spec.paths["/api/v1/orgs/{org}/repos/{repo}"].post["x-required-scope"], "repo:write");
     assert.strictEqual(spec.paths["/api/v1/orgs/{org}/repos/{repo}/tags"].post["x-required-scope"], "repo:write");
+    const worktreeCreateOperation = spec.paths["/api/v1/orgs/{org}/repos/{repo}/worktrees"].post;
+    assert.strictEqual(worktreeCreateOperation["x-required-scope"], "repo:write");
+    assert.ok(
+      spec.paths["/api/v1/orgs/{org}/repos/{repo}/files"].post.parameters.some(
+        (parameter) => parameter.name === "worktreeId" && parameter.in === "query",
+      ),
+      "OpenAPI documents the optional worktree target on file writes",
+    );
+    assert.ok(
+      spec.paths["/api/v1/orgs/{org}/repos/{repo}/commits"].post.requestBody.content["application/json"].schema
+        .properties.targetBranch,
+      "OpenAPI documents atomic commit targetBranch",
+    );
+    assert.ok(
+      spec.paths["/api/v1/orgs/{org}/repos/{repo}/tags"].post.requestBody.content["application/json"].schema.properties
+        .target,
+      "OpenAPI documents explicit tag targets",
+    );
     const deleteFileOperation = spec.paths["/api/v1/orgs/{org}/repos/{repo}/files"].delete;
     assert.strictEqual(deleteFileOperation["x-required-scope"], "repo:write");
     assert.ok(deleteFileOperation.responses["403"], "file deletion documents insufficient scope");

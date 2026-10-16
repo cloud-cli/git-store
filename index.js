@@ -1011,6 +1011,9 @@ function safeRepoFile(repoPath, relativePath) {
   if (typeof relativePath !== "string") {
     return null;
   }
+  if (relativePath.split(/[\\/]/).some((part) => part.toLowerCase() === ".git")) {
+    return null;
+  }
 
   const root = path.resolve(repoPath);
   const target = path.resolve(root, relativePath);
@@ -1143,6 +1146,10 @@ async function deleteRepo(req, res) {
     if (path.dirname(realRepoPath) !== organizationRoot) {
       return res.status(404).json({ error: "Repository not found" });
     }
+    const { stdout: linkedWorktrees } = await execGit(["worktree", "list", "--porcelain"], { cwd: realRepoPath });
+    if (linkedWorktrees.split(/\r?\n/).filter((line) => line.startsWith("worktree ")).length > 1) {
+      return res.status(409).json({ error: "Remove linked worktrees before deleting the repository" });
+    }
     fs.rmSync(realRepoPath, { recursive: true, force: false });
     await recordAuditEvent(req, "repository.deleted", `${req.organization.slug}/${repo}`);
     return res.status(204).end();
@@ -1214,13 +1221,52 @@ async function getRepoTree(req, res) {
     return res.status(404).json({ error: "Repo not found" });
   }
 
-  const directory = safeRepoFile(repoPath, req.query.path || "");
+  const targetRepoPath = await getWorktreeTarget(req, repoPath);
+  if (!targetRepoPath) {
+    return res.status(404).json({ error: "Worktree not found" });
+  }
+  if (req.query.ref !== undefined) {
+    if (!isValidGitRef(req.query.ref)) {
+      return res.status(400).json({ error: "Invalid ref" });
+    }
+    try {
+      const { stdout: resolved } = await execGit(
+        ["rev-parse", "--verify", "--end-of-options", `${req.query.ref}^{commit}`],
+        { cwd: targetRepoPath },
+      );
+      const commit = resolved.trim();
+      const { stdout } = await execGit(["ls-tree", "-r", "-z", "--full-tree", commit], {
+        cwd: targetRepoPath,
+        encoding: "buffer",
+        maxBuffer: 20 * 1024 * 1024,
+      });
+      const files = stdout
+        .toString("utf8")
+        .split("\0")
+        .filter(Boolean)
+        .map((entry) => {
+          const delimiter = entry.indexOf("\t");
+          const [mode, type, sha] = entry.slice(0, delimiter).split(" ");
+          return { path: entry.slice(delimiter + 1), mode, type, sha };
+        });
+      return res.json({ ref: req.query.ref, commit, files });
+    } catch (error) {
+      if (Number.isInteger(error.code)) {
+        return res.status(404).json({ error: "Ref not found" });
+      }
+      if (error.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
+        return res.status(413).json({ error: "Committed tree exceeds the response limit" });
+      }
+      return res.status(500).json({ error: "Unable to list committed tree" });
+    }
+  }
+  const directory = safeRepoFile(targetRepoPath, req.query.path || "");
   if (!directory || !fs.existsSync(directory) || !fs.statSync(directory).isDirectory()) {
     return res.status(404).json({ error: "Directory not found" });
   }
 
   try {
-    return res.json(await treeEntries(directory, path.relative(repoPath, directory)));
+    return res.json(await treeEntries(directory, path.relative(targetRepoPath, directory)));
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
@@ -1312,6 +1358,11 @@ async function getRepoFile(req, res) {
     return res.status(404).json({ error: "Repo not found" });
   }
 
+  const targetRepoPath = await getWorktreeTarget(req, repoPath);
+  if (!targetRepoPath) {
+    return res.status(404).json({ error: "Worktree not found" });
+  }
+
   const refProvided = req.query.ref !== undefined;
   const requestedPath = req.query.path;
   if (
@@ -1325,7 +1376,7 @@ async function getRepoFile(req, res) {
   ) {
     return res.status(400).json({ error: "Invalid path" });
   }
-  const filePath = safeRepoFile(repoPath, requestedPath || "");
+  const filePath = safeRepoFile(targetRepoPath, requestedPath || "");
   if (!filePath) {
     return res.status(400).json({ error: "Invalid path" });
   }
@@ -1334,7 +1385,7 @@ async function getRepoFile(req, res) {
     if (!isValidGitRef(req.query.ref)) {
       return res.status(400).json({ error: "Invalid ref" });
     }
-    const relativePath = path.relative(repoPath, filePath).split(path.sep).join("/");
+    const relativePath = path.relative(targetRepoPath, filePath).split(path.sep).join("/");
     if (relativePath.split("/").some((part) => part.toLowerCase() === ".git")) {
       return res.status(400).json({ error: "Invalid path" });
     }
@@ -1417,7 +1468,11 @@ async function uploadRepoFile(req, res) {
     return res.status(400).json({ error: "Invalid file" });
   }
 
-  const filePath = safeRepoFile(repoPath, req.body.path);
+  const selectedRepoPath = await getWorktreeTarget(req, repoPath);
+  if (!selectedRepoPath) {
+    return res.status(404).json({ error: "Worktree not found" });
+  }
+  const filePath = safeRepoFile(selectedRepoPath, req.body.path);
   if (!filePath) {
     return res.status(400).json({ error: "Invalid path" });
   }
@@ -1425,7 +1480,11 @@ async function uploadRepoFile(req, res) {
   try {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, Buffer.from(req.body.content, "base64"));
-    await recordAuditEvent(req, "repository.file.uploaded", `${req.organization.slug}/${repo}/${req.body.path}`);
+    await recordAuditEvent(
+      req,
+      "repository.file.uploaded",
+      `${req.organization.slug}/${repo}/${req.query.worktreeId || "primary"}/${req.body.path}`,
+    );
     return res.status(201).json({ path: req.body.path, staged: false });
   } catch (error) {
     return res.status(500).json({ error: error.message });
@@ -1449,7 +1508,11 @@ async function deleteRepoFile(req, res) {
   if (segments.includes(".git")) {
     return res.status(400).json({ error: "Invalid path" });
   }
-  const filePath = safeRepoFile(repoPath, relativePath);
+  const selectedRepoPath = await getWorktreeTarget(req, repoPath);
+  if (!selectedRepoPath) {
+    return res.status(404).json({ error: "Worktree not found" });
+  }
+  const filePath = safeRepoFile(selectedRepoPath, relativePath);
   if (!filePath) {
     return res.status(400).json({ error: "Invalid path" });
   }
@@ -1465,7 +1528,7 @@ async function deleteRepoFile(req, res) {
     await recordAuditEvent(
       req,
       "repository.file.deleted",
-      `${req.organization.slug}/${req.params.repo}/${relativePath}`,
+      `${req.organization.slug}/${req.params.repo}/${req.query.worktreeId || "primary"}/${relativePath}`,
     );
     return res.json({ path: relativePath, deleted: true, staged: false });
   } catch (error) {
@@ -1555,7 +1618,11 @@ async function getRepoHistory(req, res) {
     return res.status(404).json({ error: "Repo not found" });
   }
 
-  const filePath = safeRepoFile(repoPath, req.query.path || "");
+  const targetRepoPath = await getWorktreeTarget(req, repoPath);
+  if (!targetRepoPath) {
+    return res.status(404).json({ error: "Worktree not found" });
+  }
+  const filePath = safeRepoFile(targetRepoPath, req.query.path || "");
   if (!filePath) {
     return res.status(400).json({ error: "Invalid path" });
   }
@@ -1565,7 +1632,7 @@ async function getRepoHistory(req, res) {
   }
 
   try {
-    const history = await getGit(repoPath).log({
+    const history = await getGit(targetRepoPath).log({
       file: req.query.path,
       strictDate: false,
     });
@@ -2326,6 +2393,127 @@ app.head("/api/v1/repos/:repo/file", requireAuthentication, requireScope("repo:r
 });
 app.post("/api/v1/repos/:repo/files", requireAuthentication, requireScope("repo:write"), uploadRepoFile);
 app.delete("/api/v1/repos/:repo/files", requireAuthentication, requireScope("repo:write"), deleteRepoFile);
+// Managed worktrees are always located beneath DATA_PATH; clients supply only opaque IDs.
+function managedWorktreePath(req, id) {
+  if (typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id)) {
+    return null;
+  }
+  return path.join(process.env.DATA_PATH, "worktrees", req.organization.slug, req.params.repo, id);
+}
+
+async function getWorktreeTarget(req, repoPath, id = req.query?.worktreeId) {
+  if (id === undefined) {
+    return repoPath;
+  }
+  const target = managedWorktreePath(req, id);
+  if (!target) {
+    return null;
+  }
+  try {
+    const stat = fs.lstatSync(target);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      return null;
+    }
+    const gitEntry = fs.lstatSync(path.join(target, ".git"));
+    if ((!gitEntry.isFile() && !gitEntry.isDirectory()) || gitEntry.isSymbolicLink()) {
+      return null;
+    }
+    const actualRoot = fs.realpathSync(target);
+    const actualRepo = fs.realpathSync(repoPath);
+    const { stdout: topLevel } = await execGit(["rev-parse", "--show-toplevel"], { cwd: actualRoot });
+    const { stdout: commonDir } = await execGit(["rev-parse", "--git-common-dir"], { cwd: actualRoot });
+    if (
+      path.resolve(topLevel.trim()) !== actualRoot ||
+      fs.realpathSync(path.resolve(actualRoot, commonDir.trim())) !== fs.realpathSync(path.join(actualRepo, ".git"))
+    ) {
+      return null;
+    }
+    return actualRoot;
+  } catch {
+    return null;
+  }
+}
+
+app.post("/api/v1/repos/:repo/worktrees", requireAuthentication, requireScope("repo:write"), async (req, res) => {
+  const repoPath = getSafeRepoPath(req.params.repo, req);
+  if (!repoPath || !repositoryExists(req.organization.slug, req.params.repo)) {
+    return res.status(404).json({ error: "Repo not found" });
+  }
+  const { ref } = req.body || {};
+  if (!isValidGitRef(ref)) {
+    return res.status(400).json({ error: "Invalid ref" });
+  }
+  const id = crypto.randomUUID();
+  const target = managedWorktreePath(req, id);
+  let commit;
+  try {
+    const { stdout } = await execGit(["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`], {
+      cwd: repoPath,
+    });
+    commit = stdout.trim();
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    await execGit(["worktree", "add", "--detach", target, commit], { cwd: repoPath });
+  } catch {
+    await execGit(["worktree", "remove", "--force", target], { cwd: repoPath }).catch(() => {});
+    fs.rmSync(target, { recursive: true, force: true });
+    return res.status(400).json({ error: "Unable to create worktree from requested ref" });
+  }
+  await recordAuditEvent(req, "repository.worktree.created", `${req.organization.slug}/${req.params.repo}/${id}`, {
+    ref,
+  });
+  return res.status(201).json({ worktreeId: id, ref: commit, branch: null });
+});
+app.get("/api/v1/repos/:repo/worktrees", requireAuthentication, requireScope("repo:read"), async (req, res) => {
+  const repoPath = getSafeRepoPath(req.params.repo, req);
+  if (!repoPath || !repositoryExists(req.organization.slug, req.params.repo)) {
+    return res.status(404).json({ error: "Repo not found" });
+  }
+  const root = path.join(process.env.DATA_PATH, "worktrees", req.organization.slug, req.params.repo);
+  const worktrees = [];
+  if (fs.existsSync(root)) {
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      const worktreeId = entry.name;
+      const worktreePath = await getWorktreeTarget(req, repoPath, worktreeId);
+      if (!worktreePath) {
+        continue;
+      }
+      try {
+        const { stdout: head } = await execGit(["rev-parse", "HEAD"], { cwd: worktreePath });
+        const { stdout: branch } = await execGit(["symbolic-ref", "--quiet", "--short", "HEAD"], {
+          cwd: worktreePath,
+        }).catch(() => ({ stdout: "" }));
+        worktrees.push({ worktreeId, head: head.trim(), branch: branch.trim() || null });
+      } catch {
+        // Ignore a worktree that becomes unavailable while listing.
+      }
+    }
+  }
+  return res.json({ worktrees });
+});
+app.delete("/api/v1/repos/:repo/worktrees/:id", requireAuthentication, requireScope("repo:write"), async (req, res) => {
+  const repoPath = getSafeRepoPath(req.params.repo, req);
+  if (!repoPath || !repositoryExists(req.organization.slug, req.params.repo)) {
+    return res.status(404).json({ error: "Repo not found" });
+  }
+  const target = await getWorktreeTarget(req, repoPath, req.params.id);
+  if (!target) {
+    return res.status(404).json({ error: "Worktree not found" });
+  }
+  try {
+    await execGit(["worktree", "remove", target], { cwd: repoPath });
+    await recordAuditEvent(
+      req,
+      "repository.worktree.removed",
+      `${req.organization.slug}/${req.params.repo}/${req.params.id}`,
+    );
+    return res.json({ removed: true });
+  } catch {
+    return res.status(409).json({ error: "Worktree is not clean or cannot be removed" });
+  }
+});
 app.get("/api/v1/repos/:repo/branches", requireAuthentication, requireScope("repo:read"), async (req, res) => {
   getRepoBranches(req, res);
 });
@@ -2378,13 +2566,16 @@ app.post("/api/v1/repos/:repo/commits", requireAuthentication, requireScope("rep
   if (!fs.existsSync(repoPath) || !fs.existsSync(path.join(repoPath, ".git"))) {
     return res.status(404).json({ error: "Repo not found" });
   }
-  const { expectedRef, message, changes } = req.body || {};
+  const { expectedRef, message, changes, targetBranch = "main" } = req.body || {};
   if (
     !(
       expectedRef === null ||
       (typeof expectedRef === "string" && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(expectedRef))
     ) ||
     typeof message !== "string" ||
+    typeof targetBranch !== "string" ||
+    !isValidGitRef(targetBranch) ||
+    targetBranch.startsWith("refs/") ||
     !message.trim() ||
     message.length > 10000 ||
     !Array.isArray(changes) ||
@@ -2392,6 +2583,11 @@ app.post("/api/v1/repos/:repo/commits", requireAuthentication, requireScope("rep
     changes.length > 200
   ) {
     return res.status(400).json({ error: "Invalid commit request" });
+  }
+  try {
+    await execGit(["check-ref-format", "--branch", targetBranch], { cwd: repoPath });
+  } catch {
+    return res.status(400).json({ error: "Invalid target branch" });
   }
   const seen = new Set();
   let bytes = 0;
@@ -2449,11 +2645,14 @@ app.post("/api/v1/repos/:repo/commits", requireAuthentication, requireScope("rep
     return res.status(413).json({ error: "Commit content exceeds 10 MiB" });
   }
   try {
-    const result = await atomicCommit(repoPath, expectedRef, message, changes);
+    const result = await atomicCommit(repoPath, expectedRef, message, changes, targetBranch);
     if (result.stale) {
       return res.status(409).json({ error: "Expected ref is stale" });
     }
-    await recordAuditEvent(req, "repository.committed", `${req.organization.slug}/${repo}`, { commit: result.commit });
+    await recordAuditEvent(req, "repository.committed", `${req.organization.slug}/${repo}@${result.ref}`, {
+      commit: result.commit,
+      targetBranch,
+    });
     return res.status(201).json(result);
   } catch (error) {
     return res.status(500).json({ error: error.message });
@@ -2504,11 +2703,27 @@ app.post("/api/v1/repos/:repo/tags", requireAuthentication, requireScope("repo:w
     return res.status(404).json({ error: "Repo not found" });
   }
   try {
-    await getGit(repoPath).addTag(req.body.name);
+    const target = req.body.target ?? "HEAD";
+    if (!isValidGitRef(target)) {
+      return res.status(400).json({ error: "Invalid tag target" });
+    }
+    let stdout;
+    try {
+      ({ stdout } = await execGit(["rev-parse", "--verify", "--end-of-options", `${target}^{commit}`], {
+        cwd: repoPath,
+      }));
+    } catch (error) {
+      if (Number.isInteger(error.code)) {
+        return res.status(404).json({ error: "Tag target not found" });
+      }
+      throw error;
+    }
+    await getGit(repoPath).addTag(req.body.name, stdout.trim());
     await recordAuditEvent(
       req,
       "repository.tag.created",
       `${req.organization.slug}/${repo}@refs/tags/${req.body.name}`,
+      { target: stdout.trim() },
     );
     return res.json({ message: `Tag ${req.body.name} added` });
   } catch (error) {
@@ -2601,6 +2816,13 @@ app.delete(
  */
 function makeApiSpec() {
   const pathParametersRepo = [{ name: "repo", in: "path", required: true, schema: { type: "string" } }];
+  const worktreeParameter = {
+    name: "worktreeId",
+    in: "query",
+    required: false,
+    description: "Server-generated worktree ID; omitted to use the primary working tree",
+    schema: { type: "string", format: "uuid" },
+  };
 
   const jsonBody = (properties, required = []) => ({
     required: required.length > 0,
@@ -2855,7 +3077,7 @@ function makeApiSpec() {
       },
       "/api/v1/orgs/{org}/repos/{repo}/commits": {
         post: {
-          summary: "Atomically commit multiple changes to main with compare-and-swap",
+          summary: "Atomically commit multiple changes to a branch with compare-and-swap",
           security: [{ bearerAuth: [] }],
           "x-required-scope": "repo:write",
           requestBody: jsonBody(
@@ -2864,7 +3086,12 @@ function makeApiSpec() {
                 type: "string",
                 nullable: true,
                 pattern: "^(?:[a-f0-9]{40}|[a-f0-9]{64})$",
-                description: "Current main SHA, or null when main is unborn",
+                description: "Current target branch SHA, or null when that branch is unborn",
+              },
+              targetBranch: {
+                type: "string",
+                default: "main",
+                description: "Local branch to update; do not include refs/heads/",
               },
               message: { type: "string", minLength: 1, maxLength: 10000 },
               changes: {
@@ -3096,6 +3323,7 @@ function makeApiSpec() {
           {
             204: { description: "Repository deleted" },
             400: { description: "Invalid repository name" },
+            409: { description: "Repository has linked worktrees" },
             404: notFound,
           },
           null,
@@ -3112,6 +3340,38 @@ function makeApiSpec() {
             schema: { type: "integer", minimum: 1, maximum: 1000 },
           },
         ]),
+      },
+      "/api/v1/repos/{repo}/worktrees": {
+        post: operation(
+          "Create an isolated worktree from a branch, tag, or commit SHA",
+          {
+            201: { description: "Worktree ID and resolved commit SHA; worktree is detached" },
+            400: { description: "Invalid ref or branch" },
+            404: notFound,
+          },
+          jsonBody({ ref: { type: "string", minLength: 1, description: "Branch, tag, or commit SHA" } }, ["ref"]),
+        ),
+        get: operation(
+          "List managed worktrees",
+          { 200: { description: "Worktree IDs and current heads" } },
+          null,
+          pathParametersRepo,
+        ),
+      },
+      "/api/v1/repos/{repo}/worktrees/{id}": {
+        delete: operation(
+          "Remove a clean managed worktree",
+          {
+            200: { description: "Worktree removed" },
+            404: { description: "Worktree not found" },
+            409: { description: "Worktree is dirty or cannot be removed" },
+          },
+          null,
+          [
+            ...pathParametersRepo,
+            { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+          ],
+        ),
       },
       "/api/v1/repos/{repo}/stage": {
         post: operation(
@@ -3156,7 +3416,13 @@ function makeApiSpec() {
             401: unauthorized,
             404: notFound,
           },
-          jsonBody({ name: { type: "string" } }, ["name"]),
+          jsonBody(
+            {
+              name: { type: "string" },
+              target: { type: "string", description: "Branch, tag, or commit SHA; defaults to HEAD" },
+            },
+            ["name"],
+          ),
         ),
       },
       "/api/v1/repos/{repo}/tags/{name}": {
@@ -3219,10 +3485,15 @@ function makeApiSpec() {
       },
       "/api/v1/repos/{repo}/tree": {
         get: operation(
-          "List repository files",
-          { 200: { description: "Repository tree" }, 404: notFound },
+          "List working-tree files or recursively list files committed at a ref",
+          { 200: { description: "Repository tree or committed file list" }, 404: notFound },
           null,
-          pathParametersRepo,
+          [
+            ...pathParametersRepo,
+            { name: "path", in: "query", required: false, schema: { type: "string" } },
+            { name: "ref", in: "query", required: false, schema: { type: "string" } },
+            worktreeParameter,
+          ],
         ),
       },
       "/api/v1/repos/{repo}/file": {
@@ -3250,6 +3521,7 @@ function makeApiSpec() {
               required: false,
               schema: { type: "string" },
             },
+            worktreeParameter,
           ],
         ),
         get: operation(
@@ -3279,6 +3551,7 @@ function makeApiSpec() {
               description: "Branch, tag, or commit; omitted to read the working tree",
               schema: { type: "string" },
             },
+            worktreeParameter,
           ],
         ),
       },
@@ -3298,6 +3571,7 @@ function makeApiSpec() {
             },
             ["path", "content"],
           ),
+          [...pathParametersRepo, worktreeParameter],
         ),
         delete: operation(
           "Delete an unstaged working-tree file",
@@ -3316,6 +3590,7 @@ function makeApiSpec() {
               required: true,
               schema: { type: "string", minLength: 1 },
             },
+            worktreeParameter,
           ],
         ),
       },
@@ -3336,6 +3611,7 @@ function makeApiSpec() {
               required: true,
               schema: { type: "string" },
             },
+            worktreeParameter,
           ],
         ),
       },
