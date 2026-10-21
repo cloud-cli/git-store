@@ -1,0 +1,84 @@
+<template component="selectable-code">
+  <div class="min-w-max p-5 font-mono text-sm leading-6 [tab-size:2]" role="list" aria-label="Source lines">
+    <template for="line of lines">
+      <div
+        class="flex min-h-6 cursor-text whitespace-pre rounded-sm hover:bg-gray-100 focus-visible:outline-2 focus-visible:outline-brand [&.selected]:bg-emerald-100 dark:hover:bg-[#202a23] dark:[&.selected]:bg-emerald-950"
+        attr-data-line="line.number"
+        role="button"
+        tabindex="0"
+        attr-aria-label="'Line ' + line.number"
+        class-selected="isSelected(line.number)"
+        on-click="selectLine(line.number, $event)"
+        on-keydown="selectKey(line.number, $event)"
+      >
+        <span class="mr-5 w-10 shrink-0 select-none text-right text-gray-400" aria-hidden="true"
+          >{{ line.number }}</span
+        >
+        <span class="source-line">{{ line.text || ' ' }}</span>
+      </div>
+    </template>
+  </div>
+  <script setup>
+    import { computed, defineEvent, defineProp, ref } from "@li3/web";
+    export default function () {
+      const source = defineProp("source", { default: "" });
+      const lines = computed(() =>
+        source.value.split("\n").map((text, index) => ({
+          number: index + 1,
+          text: text.endsWith("\r") ? text.slice(0, -1) : text,
+        })),
+      );
+      const emitSelect = defineEvent("select");
+      let anchorLine = null;
+      const selected = ref({ startLine: 0, endLine: 0 });
+      const emit = (selection) => {
+        selected.value = selection;
+        emitSelect(selection);
+      };
+      const selectLine = (line, event) => {
+        const native = window.getSelection();
+        if (native && !native.isCollapsed && native.anchorNode && native.focusNode) {
+          const anchorElement =
+            native.anchorNode.nodeType === Node.ELEMENT_NODE ? native.anchorNode : native.anchorNode.parentElement;
+          const focusElement =
+            native.focusNode.nodeType === Node.ELEMENT_NODE ? native.focusNode : native.focusNode.parentElement;
+          const anchorText = anchorElement?.closest(".source-line");
+          const focusText = focusElement?.closest(".source-line");
+          const startRow = (anchorText || anchorElement)?.closest("[data-line]");
+          const endRow = (focusText || focusElement)?.closest("[data-line]");
+          if (startRow && endRow) {
+            const first = Number(startRow.dataset.line);
+            const last = Number(endRow.dataset.line);
+            if (first === last && anchorText && focusText && anchorText === focusText) {
+              const startOffset = Math.min(native.anchorOffset, anchorText.textContent.length) + 1;
+              const endOffset = Math.min(native.focusOffset, focusText.textContent.length) + 1;
+              emit({
+                startLine: first,
+                endLine: first,
+                startColumn: Math.min(startOffset, endOffset),
+                endColumn: Math.max(startOffset, endOffset),
+              });
+            } else {
+              emit({ startLine: Math.min(first, last), endLine: Math.max(first, last) });
+            }
+            return;
+          }
+        }
+        if (event.shiftKey && anchorLine !== null) {
+          emit({ startLine: Math.min(anchorLine, line), endLine: Math.max(anchorLine, line) });
+        } else {
+          anchorLine = line;
+          emit({ startLine: line, endLine: line });
+        }
+      };
+      const isSelected = (line) => line >= selected.value.startLine && line <= selected.value.endLine;
+      const selectKey = (line, event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          selectLine(line, event);
+        }
+      };
+      return { lines, selectLine, selectKey, isSelected };
+    }
+  </script>
+</template>

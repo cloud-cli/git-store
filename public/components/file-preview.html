@@ -53,17 +53,17 @@
           aria-label="File source"
           data-testid="file-code-block"
         >
-          <code-block
-            class="block min-h-full min-w-full p-5 font-mono text-sm leading-6 [tab-size:2]"
+          <selectable-code
+            class="block min-h-full min-w-full"
             bind-source="content"
-            bind-language="language"
-            bind-theme="theme"
-          ></code-block></div
+            on-select="select($event)"
+          ></selectable-code></div
       ></template>
     </div>
+    <p class="sr-only" role="status" aria-live="polite">{{ selectionLabel }}</p>
   </section>
   <script setup>
-    import { computed, defineEvent, defineProp } from "@li3/web";
+    import { computed, defineEvent, defineProp, ref } from "@li3/web";
     export default function () {
       const path = defineProp("path", { default: "" });
       const content = defineProp("content", { default: "" });
@@ -72,10 +72,19 @@
       const language = defineProp("language", { default: "plaintext" });
       const icon = defineProp("icon", { default: "file" });
       const darkMode = defineProp("darkMode", { default: false });
+      const commit = defineProp("commit", { default: "" });
       const emitBack = defineEvent("back");
+      const emitSelect = defineEvent("select");
       const fileName = computed(() => path.value.split("/").at(-1) || path.value);
       const theme = computed(() => (darkMode.value ? "atom-one-dark" : "github"));
       const backToFiles = () => emitBack();
+      const selectionLabel = ref("");
+      const select = (event) => {
+        const selection = event?.detail || event;
+        const suffix = selection.startColumn ? `:${selection.startColumn}:${selection.endColumn}` : "";
+        selectionLabel.value = `Selected L${selection.startLine}${selection.endLine !== selection.startLine ? `-L${selection.endLine}` : ""}${suffix}`;
+        emitSelect({ ...selection, commit: commit.value });
+      };
       return {
         path,
         content,
@@ -84,9 +93,12 @@
         language,
         icon,
         darkMode,
+        commit,
+        selectionLabel,
         fileName,
         theme,
         backToFiles,
+        select,
       };
     }
   </script>

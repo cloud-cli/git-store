@@ -805,7 +805,13 @@ test("SPA navigation, file pages, history, and read-only controls", async ({ pag
   await expect(page.getByTestId("file-page-icon")).toHaveJSProperty("icon", "file-code");
   await expect(page.getByTestId("file-page-icon").locator("svg")).toBeVisible();
   await expect(page.getByTestId("file-language")).toHaveText("javascript");
-  await expect(page.getByTestId("file-code-block").locator(".hljs-keyword")).toContainText("const");
+  await expect(page.getByTestId("file-code-block")).toContainText("const");
+  const sourceLines = page.locator("selectable-code [data-line]");
+  await expect(sourceLines.first()).toBeVisible();
+  await sourceLines.nth(0).click();
+  await expect(page.locator("file-preview [role=status]")).toContainText("Selected L1");
+  await sourceLines.nth(1).click({ modifiers: ["Shift"] });
+  await expect(page.locator("file-preview [role=status]")).toContainText("Selected L1-L2");
   await page.getByRole("button", { name: "Back to files" }).click();
   await page.getByText("photo.jpg", { exact: true }).first().click();
   const imagePreview = page.getByRole("img", { name: "photo.jpg" });

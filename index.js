@@ -12,6 +12,7 @@ import { validateRepoName, getSubjectHash, hashSubject } from "./storage.js";
 import * as organizations from "./organizations.js";
 import { createDatabaseClient, createAuditStore, createTokenFingerprint } from "./audit.js";
 import { PersonalAccessTokenStore, normalizeTokenExpiry } from "./personal-access-tokens.js";
+import { createThreadStore } from "./threads.js";
 import { execGit, atomicCommit } from "./git.js";
 import {
   createWebhookStore,
@@ -36,6 +37,7 @@ app.locals.webhookStore = createWebhookStore(
   createDatabaseClient(process.env.DATABASE_URL, process.env.DB_AUTH_TOKEN),
   getEncryptionKey(process.env.WEBHOOK_ENCRYPTION_KEY),
 );
+app.locals.threadStore = createThreadStore(createDatabaseClient(process.env.DATABASE_URL, process.env.DB_AUTH_TOKEN));
 app.use((req, res, next) => {
   req.requestId = crypto.randomUUID();
   res.set("X-Request-Id", req.requestId);
@@ -2688,6 +2690,91 @@ app.post("/api/v1/repos/:repo/commit", requireAuthentication, requireScope("repo
     });
   } catch (error) {
     return res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/api/v1/repos/:repo/threads", requireAuthentication, requireScope("repo:write"), async (req, res) => {
+  const repo = req.params.repo;
+  const repoPath = getSafeRepoPath(repo, req);
+  if (!repoPath || !fs.existsSync(path.join(repoPath, ".git"))) {
+    return res.status(404).json({ error: "Repo not found" });
+  }
+  const { commit, path: filePath, selection, comment } = req.body || {};
+  if (
+    typeof commit !== "string" ||
+    !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(commit) ||
+    typeof filePath !== "string" ||
+    !filePath ||
+    filePath.length > 4096 ||
+    filePath.includes("\0") ||
+    path.posix.isAbsolute(filePath) ||
+    filePath.split("/").some((part) => !part || part === "." || part === "..") ||
+    typeof comment !== "string" ||
+    !comment.trim() ||
+    comment.length > 10000 ||
+    !selection ||
+    !Number.isSafeInteger(selection.startLine) ||
+    !Number.isSafeInteger(selection.endLine) ||
+    selection.startLine < 1 ||
+    selection.endLine < selection.startLine ||
+    (selection.startColumn !== undefined &&
+      (!Number.isSafeInteger(selection.startColumn) || selection.startColumn < 1)) ||
+    (selection.endColumn !== undefined && (!Number.isSafeInteger(selection.endColumn) || selection.endColumn < 1)) ||
+    (selection.startColumn === undefined) !== (selection.endColumn === undefined) ||
+    (selection.startLine === selection.endLine &&
+      selection.startColumn !== undefined &&
+      selection.endColumn < selection.startColumn) ||
+    (selection.startLine !== selection.endLine && selection.startColumn !== undefined)
+  ) {
+    return res.status(400).json({ error: "Invalid thread request" });
+  }
+  try {
+    const file = await readRepoFileAtRef(repoPath, commit, filePath);
+    if (!file || file.commit !== commit) {
+      return res.status(404).json({ error: "Commit or file not found" });
+    }
+    const lines = file.content.toString("utf8").split(/\r?\n/);
+    if (
+      selection.endLine > lines.length ||
+      (selection.startColumn !== undefined &&
+        (selection.endColumn > lines[selection.endLine - 1].length + 1 ||
+          selection.startColumn > lines[selection.startLine - 1].length + 1))
+    ) {
+      return res.status(400).json({ error: "Selection is outside committed content" });
+    }
+    if (!app.locals.threadStore) {
+      return res.status(503).json({ error: "Thread storage unavailable" });
+    }
+    const thread = await app.locals.threadStore.create({
+      org: req.organization.slug,
+      repo,
+      commit,
+      path: filePath,
+      selection: {
+        startLine: selection.startLine,
+        endLine: selection.endLine,
+        ...(selection.startColumn !== undefined
+          ? { startColumn: selection.startColumn, endColumn: selection.endColumn }
+          : {}),
+      },
+      comment: comment.trim(),
+      author: req.user.sub,
+    });
+    const event = normalizeAuditEvent("thread.created");
+    if (app.locals.webhookStore && event) {
+      void deliverWebhook(app.locals.webhookStore, {
+        id: crypto.randomUUID(),
+        org: req.organization.slug,
+        event: event.event,
+        action: event.action,
+        occurredAt: new Date().toISOString(),
+        object: `${req.organization.slug}/${repo}/${thread.id}`,
+        details: { threadId: thread.id },
+      }).catch((error) => process.stderr.write(`[webhooks] delivery failed: ${error.message}\\n`));
+    }
+    return res.status(201).json({ thread });
+  } catch (error) {
+    return res.status(error.status || 500).json({ error: error.status ? error.message : "Unable to create thread" });
   }
 });
 app.post("/api/v1/repos/:repo/tags", requireAuthentication, requireScope("repo:write"), async (req, res) => {

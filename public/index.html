@@ -11,6 +11,7 @@
     <link rel="component" href="https://sodium.static.apphor.de/code-block.html" />
     <link rel="component" href="/ui/components/commit-hash.html" />
     <link rel="component" href="/ui/components/file-preview.html" />
+    <link rel="component" href="/ui/components/selectable-code.html" />
     <link rel="component" href="/ui/components/organization-landing.html" />
     <link rel="component" href="/ui/components/organization-settings.html" />
     <link rel="component" href="/ui/components/org-webhooks.html" />
@@ -877,10 +878,12 @@
                       bind-content="fileContent"
                       bind-image-url="previewUrl"
                       bind-loading="previewLoading"
+                      bind-commit="previewCommit"
                       bind-language="previewLanguage"
                       bind-icon="previewIcon"
                       bind-dark-mode="darkMode"
                       on-back="closePreview()"
+                      on-select="setThreadSelection($event)"
                     ></file-preview
                   ></template>
                 </div>
@@ -1020,6 +1023,8 @@
               const fileContent = ref("");
               const previewUrl = ref("");
               const previewLoading = ref(false);
+              const previewCommit = ref("");
+              const threadSelection = ref(null);
               const repoName = ref("");
               const addFilePath = ref("");
               const commitMessage = ref("");
@@ -1161,12 +1166,16 @@
                 if (requestId === navigationRequest) await load();
               };
               const closePreview = () => {
+                threadSelection.value = null;
                 const current = url();
                 const parentDirectory = (current.searchParams.get("path") || "").split("/").slice(0, -1).join("/");
                 current.searchParams.delete("path");
                 current.searchParams.delete("dir");
                 if (parentDirectory) current.searchParams.set("dir", parentDirectory);
                 return navigate(`${current.pathname}${current.search}${current.hash}`);
+              };
+              const setThreadSelection = (selection) => {
+                threadSelection.value = selection;
               };
               const base = () =>
                 `/api/v1/orgs/${encodeURIComponent(new URL(window.location.href).searchParams.get("org"))}/repos/${encodeURIComponent(repo.value.repo)}`;
@@ -1572,6 +1581,8 @@
                   name: previewPath.value,
                 });
                 fileContent.value = "";
+                previewCommit.value = "";
+                threadSelection.value = null;
                 previewLoading.value = Boolean(previewPath.value);
                 releasePreview();
                 if (!name || !current.searchParams.get("org")) {
@@ -1589,11 +1600,17 @@
                 const previewPromise = previewPath.value
                   ? (async () => {
                       try {
-                        const response = await fetch(`${apiBase}/file?path=${encodeURIComponent(previewPath.value)}`);
+                        const requestedRef = current.searchParams.get("ref") || "HEAD";
+                        const response = await fetch(
+                          `${apiBase}/file?path=${encodeURIComponent(previewPath.value)}&ref=${encodeURIComponent(requestedRef)}`,
+                        );
                         if (requestId !== loadRequest || currentPreviewRequest !== previewRequest) {
                           return;
                         }
                         const mimeType = response.headers.get("content-type")?.split(";")[0];
+                        if (response.ok) {
+                          previewCommit.value = response.headers.get("X-Git-Commit") || "";
+                        }
                         if (response.ok && mimeType?.startsWith("image/")) {
                           const blob = await response.blob();
                           if (requestId === loadRequest && currentPreviewRequest === previewRequest) {
@@ -2079,6 +2096,7 @@
                 isSelected,
                 openSettings,
                 closePreview,
+                setThreadSelection,
                 toggleTheme,
                 toggleSidebar,
                 closeMenu,
@@ -2121,6 +2139,8 @@
                 fileContent,
                 previewUrl,
                 previewLoading,
+                previewCommit,
+                threadSelection,
                 repoName,
                 addFilePath,
                 commitMessage,
