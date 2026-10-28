@@ -11,6 +11,8 @@ import {
   encryptedSecret,
   decryptSecret,
   isPublicAddress,
+  parseAllowedIpRanges,
+  isAddressInAllowedRanges,
   MAX_SUBSCRIPTIONS,
   MAX_QUEUE,
 } from "../webhooks.js";
@@ -25,6 +27,14 @@ assert.throws(() => decryptSecret(encrypted, getEncryptionKey("b".repeat(64))));
 assert.equal(isPublicAddress("::ffff:127.0.0.1"), false);
 assert.equal(isPublicAddress("::ffff:8.8.8.8"), true);
 assert.equal(isPublicAddress("fc00::1"), false);
+assert.deepEqual(parseAllowedIpRanges("\n 192.168.1.20/32 \r\n10.0.0.0/24\n"), ["192.168.1.20/32", "10.0.0.0/24"]);
+assert.deepEqual(parseAllowedIpRanges(["192.168.1.20/32", "192.168.1.20/32"]), ["192.168.1.20/32"]);
+assert.equal(parseAllowedIpRanges("192.168.1.20"), null);
+assert.equal(parseAllowedIpRanges("192.168.1.20/33"), null);
+assert.equal(isAddressInAllowedRanges("192.168.1.20", ["192.168.1.20/32"]), true);
+assert.equal(isAddressInAllowedRanges("192.168.1.21", ["192.168.1.20/32"]), false);
+assert.equal(isAddressInAllowedRanges("10.0.0.18", ["10.0.0.0/24"]), true);
+assert.equal(isAddressInAllowedRanges("2001:db8::1", ["2001:db8::/32"]), true);
 assert.equal(MAX_SUBSCRIPTIONS, 20);
 assert.equal(MAX_QUEUE, 100);
 
@@ -90,6 +100,7 @@ assert.equal(await validateTarget("https://user:pass@example.com"), false);
 assert.equal(await validateTarget("https://127.0.0.1"), false);
 assert.equal(await validateTarget("https://[::1]"), false);
 assert.equal(await validateTarget("https://[::ffff:127.0.0.1]"), false);
+assert.equal(await validateTarget("https://127.0.0.1", ["127.0.0.1/32"]), true);
 
 const rows = [];
 const client = {
@@ -101,19 +112,21 @@ const client = {
         url: bindings[2],
         secret: bindings[3],
         events: bindings[4],
-        createdAt: bindings[5],
+        allowedIpRanges: bindings[5],
+        createdAt: bindings[6],
       });
       return { changes: 1 };
     }
     if (sql.startsWith("SELECT")) {
       return rows
         .filter((row) => row.org === bindings[0])
-        .map(({ id, org, url, secret, events: selectedEvents, createdAt }) => ({
+        .map(({ id, org, url, secret, events: selectedEvents, allowedIpRanges, createdAt }) => ({
           id,
           org,
           url,
           secret,
           events: selectedEvents,
+          allowedIpRanges,
           createdAt,
         }));
     }
@@ -135,11 +148,14 @@ await store.create({
   url: "https://example.com/hook",
   secret: "secret",
   events: ["repo"],
+  allowedIpRanges: ["192.168.1.20/32"],
   createdAt: "now",
 });
 assert.notEqual(rows[0].secret, "secret");
 assert.deepEqual((await store.list("owned"))[0].events, ["repo"]);
+assert.deepEqual((await store.list("owned"))[0].allowedIpRanges, ["192.168.1.20/32"]);
 assert.equal((await store.matching("owned", "repo"))[0].secret, "secret");
+assert.deepEqual((await store.matching("owned", "repo"))[0].allowedIpRanges, ["192.168.1.20/32"]);
 await store.create({
   id: "family",
   org: "owned",

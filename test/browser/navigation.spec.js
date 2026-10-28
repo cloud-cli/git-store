@@ -497,6 +497,7 @@ test("organization settings navigate to repositories and manage webhook subscrip
 
   await page.getByLabel("Webhook URL").fill("https://hooks.example.test/events");
   await page.getByLabel("Webhook secret").fill("my-user-defined-secret");
+  await page.getByLabel("Allowed IP ranges").fill("192.168.1.20/32");
   await expect(webhookPanel.getByRole("checkbox")).toHaveCount(3);
   await page.getByLabel("git", { exact: true }).check();
   await page.getByLabel("repo", { exact: true }).check();
@@ -508,6 +509,7 @@ test("organization settings navigate to repositories and manage webhook subscrip
       url: "https://hooks.example.test/events",
       events: ["git", "repo", "thread"],
       secret: "my-user-defined-secret",
+      allowedIpRanges: "192.168.1.20/32",
     });
   await expect(page.getByLabel("Webhook secret")).toHaveValue("");
   const subscription = page.getByRole("listitem").filter({ hasText: "https://hooks.example.test/events" });

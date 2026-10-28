@@ -77,7 +77,17 @@ function createWebhookStore(client, key) {
   let init;
   async function ready() {
     if (!init) {
-      init = Promise.all(statements.map((sql) => client.query("run", sql))).catch((error) => {
+      init = (async () => {
+        await client.query("run", statements[0]);
+        try {
+          await client.query("run", "ALTER TABLE org_webhooks ADD COLUMN allowed_ip_ranges TEXT NOT NULL DEFAULT '[]'");
+        } catch (error) {
+          if (!/duplicate column|already exists/i.test(error.message || "")) {
+            throw error;
+          }
+        }
+        await client.query("run", statements[1]);
+      })().catch((error) => {
         init = null;
         throw error;
       });
@@ -89,10 +99,14 @@ function createWebhookStore(client, key) {
       await ready();
       const rows = await client.query(
         "all",
-        "SELECT id, org_slug AS org, url, events, created_at AS createdAt FROM org_webhooks WHERE org_slug = ?",
+        "SELECT id, org_slug AS org, url, events, allowed_ip_ranges AS allowedIpRanges, created_at AS createdAt FROM org_webhooks WHERE org_slug = ?",
         [org],
       );
-      return rows.map((row) => ({ ...row, events: JSON.parse(row.events) }));
+      return rows.map((row) => ({
+        ...row,
+        events: JSON.parse(row.events),
+        allowedIpRanges: JSON.parse(row.allowedIpRanges || "[]"),
+      }));
     },
     async create(record) {
       await ready();
@@ -102,13 +116,14 @@ function createWebhookStore(client, key) {
       }
       await client.query(
         "run",
-        "INSERT INTO org_webhooks (id, org_slug, url, secret, events, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO org_webhooks (id, org_slug, url, secret, events, allowed_ip_ranges, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
         [
           record.id,
           record.org,
           record.url,
           encryptedSecret(record.secret, key),
           JSON.stringify(record.events),
+          JSON.stringify(record.allowedIpRanges || []),
           record.createdAt,
         ],
       );
@@ -120,9 +135,11 @@ function createWebhookStore(client, key) {
     },
     async matching(org, event) {
       await ready();
-      const rows = await client.query("all", "SELECT id, url, secret, events FROM org_webhooks WHERE org_slug = ?", [
-        org,
-      ]);
+      const rows = await client.query(
+        "all",
+        "SELECT id, url, secret, events, allowed_ip_ranges AS allowedIpRanges FROM org_webhooks WHERE org_slug = ?",
+        [org],
+      );
       return rows
         .filter((row) => {
           const subscriptions = JSON.parse(row.events);
@@ -174,6 +191,7 @@ function createWebhookStore(client, key) {
           id: row.id,
           url: row.url,
           secret: decryptSecret(row.secret, key),
+          allowedIpRanges: JSON.parse(row.allowedIpRanges || "[]"),
         }));
     },
   };
@@ -243,7 +261,75 @@ function isPublicAddress(address) {
   // Globally routable unicast is 2000::/3. Exclude special-use allocations within it.
   return (first & 0xe0) === 0x20 && !(bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x0d && bytes[3] === 0xb8);
 }
-async function resolveTarget(raw) {
+function parseAllowedIpRanges(input) {
+  if (typeof input === "string") {
+    if (Buffer.byteLength(input, "utf8") > 4096) {
+      return null;
+    }
+    input = input
+      .split(/\r?\n/)
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+  if (!Array.isArray(input) || input.length > 64) {
+    return null;
+  }
+  const output = [];
+  for (const entry of input) {
+    if (typeof entry !== "string" || entry.length > 64) {
+      return null;
+    }
+    const value = entry.trim();
+    const match = /^(.+)\/(\d{1,3})$/.exec(value);
+    if (!match) {
+      return null;
+    }
+    const [, address, prefixText] = match;
+    const family = net.isIP(address);
+    const prefix = Number(prefixText);
+    const bits = family === 4 ? 32 : family === 6 ? 128 : 0;
+    if (!bits || prefix > bits || (prefixText.length > 1 && prefixText.startsWith("0"))) {
+      return null;
+    }
+    output.push(`${address.toLowerCase()}/${prefix}`);
+  }
+  return [...new Set(output)];
+}
+function ipNumber(address) {
+  const family = net.isIP(address);
+  if (family === 4) {
+    return { family, value: address.split(".").reduce((result, part) => (result << 8n) | BigInt(part), 0n) };
+  }
+  const bytes = ipv6Bytes(address);
+  if (!bytes) {
+    return null;
+  }
+  if (bytes.mapped) {
+    return ipNumber(bytes.mapped);
+  }
+  return {
+    family,
+    value: bytes.reduce((result, byte) => (result << 8n) | BigInt(byte), 0n),
+  };
+}
+function isAddressInAllowedRanges(address, ranges = []) {
+  const ip = ipNumber(address);
+  if (!ip) {
+    return false;
+  }
+  return ranges.some((range) => {
+    const [network, prefixText] = range.split("/");
+    const cidrIp = ipNumber(network);
+    const prefix = Number(prefixText);
+    if (!cidrIp || cidrIp.family !== ip.family) {
+      return false;
+    }
+    const bits = ip.family === 4 ? 32 : 128;
+    const shift = BigInt(bits - prefix);
+    return ip.value >> shift === cidrIp.value >> shift;
+  });
+}
+async function resolveTarget(raw, allowedIpRanges = []) {
   let url;
   try {
     url = new URL(raw);
@@ -258,7 +344,10 @@ async function resolveTarget(raw) {
     const addresses = net.isIP(hostname)
       ? [{ address: hostname, family: net.isIP(hostname) }]
       : await dns.lookup(hostname, { all: true, verbatim: true });
-    if (!addresses.length || addresses.some(({ address }) => !isPublicAddress(address))) {
+    if (
+      !addresses.length ||
+      addresses.some(({ address }) => !isPublicAddress(address) && !isAddressInAllowedRanges(address, allowedIpRanges))
+    ) {
       return null;
     }
     return {
@@ -271,8 +360,8 @@ async function resolveTarget(raw) {
     return null;
   }
 }
-async function validateTarget(raw) {
-  return Boolean(await resolveTarget(raw));
+async function validateTarget(raw, allowedIpRanges = []) {
+  return Boolean(await resolveTarget(raw, allowedIpRanges));
 }
 function requestPinned(target, body, headers, signal) {
   return new Promise((resolve, reject) => {
@@ -321,7 +410,7 @@ async function deliver(store, record) {
   for (const target of targets) {
     await runQueue(async () => {
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        const pinned = await resolveTarget(target.url);
+        const pinned = await resolveTarget(target.url, target.allowedIpRanges);
         if (!pinned) {
           return;
         }
@@ -366,6 +455,8 @@ export {
   createPushWebhookEvent,
   serializeWebhookPayload,
   validateTarget,
+  parseAllowedIpRanges,
+  isAddressInAllowedRanges,
   getEncryptionKey,
   encryptedSecret,
   decryptSecret,

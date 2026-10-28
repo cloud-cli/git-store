@@ -22,6 +22,7 @@ import {
   normalizeAuditEvent,
   createPushWebhookEvent,
   validateTarget,
+  parseAllowedIpRanges,
   getEncryptionKey,
   MAX_SUBSCRIPTIONS,
 } from "./webhooks.js";
@@ -2183,21 +2184,23 @@ app.post("/api/v1/orgs/:org/webhooks", requireAuthentication, requireScope("org:
   if (!app.locals.webhookStore) {
     return res.status(503).json({ error: "Webhook storage is not configured" });
   }
-  const { url, events, secret } = req.body || {};
+  const { url, events, secret, allowedIpRanges: rawAllowedIpRanges = "" } = req.body || {};
+  const allowedIpRanges = parseAllowedIpRanges(rawAllowedIpRanges);
   if (
     typeof url !== "string" ||
     typeof secret !== "string" ||
     secret.length < 1 ||
     Buffer.byteLength(secret, "utf8") > 1024 ||
+    !allowedIpRanges ||
     !Array.isArray(events) ||
     !events.length ||
     events.some((event) => !webhookEvents.has(event)) ||
     new Set(events).size !== events.length ||
-    !(await validateTarget(url))
+    !(await validateTarget(url, allowedIpRanges))
   ) {
     return res.status(400).json({
       error:
-        "Provide an HTTPS public endpoint, a 1–1024 byte signing secret, and an allowlisted, unique event subscription",
+        "Provide an HTTPS endpoint resolving only to public or explicitly allowed IPs, a 1–1024 byte signing secret, valid CIDR ranges, and an allowlisted, unique event subscription",
     });
   }
   if ((await app.locals.webhookStore.list(org.slug)).length >= MAX_SUBSCRIPTIONS) {
@@ -2208,6 +2211,7 @@ app.post("/api/v1/orgs/:org/webhooks", requireAuthentication, requireScope("org:
     org: org.slug,
     url,
     events,
+    allowedIpRanges,
     createdAt: new Date().toISOString(),
     secret,
   };
@@ -2219,6 +2223,7 @@ app.post("/api/v1/orgs/:org/webhooks", requireAuthentication, requireScope("org:
         org: webhook.org,
         url,
         events,
+        allowedIpRanges,
         createdAt: webhook.createdAt,
       },
     });
@@ -3295,6 +3300,11 @@ function makeApiSpec() {
                 minLength: 1,
                 maxLength: 1024,
                 description: "User-defined key used to sign payloads; never returned by the API",
+              },
+              allowedIpRanges: {
+                type: "string",
+                maxLength: 4096,
+                description: "Optional newline-separated IPv4 or IPv6 CIDR ranges permitted for this endpoint",
               },
             },
             ["url", "events", "secret"],

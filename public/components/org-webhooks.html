@@ -3,8 +3,9 @@
     <div>
       <h3 class="text-xl font-semibold">Webhooks</h3>
       <p class="mt-1 text-sm text-gray-600 dark:text-gray-300">
-        Deliveries require a public HTTPS URL. Delivery is best effort: retries are limited, queued deliveries may be
-        dropped, and pending deliveries are lost on restart.
+        Deliveries require an HTTPS URL. Private or otherwise non-public addresses are blocked unless they match an
+        allowed CIDR range below. Delivery is best effort: retries are limited, queued deliveries may be dropped, and
+        pending deliveries are lost on restart.
       </p>
       <details class="rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-800">
         <summary class="cursor-pointer font-medium">What data is sent?</summary>
@@ -63,6 +64,18 @@
           >
         </div>
       </fieldset>
+      <label class="text-sm font-medium"
+        >Allowed IP ranges (optional)<textarea
+          aria-label="Allowed IP ranges"
+          rows="3"
+          placeholder="192.168.1.20/32&#10;10.0.0.0/24"
+          class="mt-1 block w-full rounded-lg border bg-white px-3 py-2 font-mono dark:bg-gray-900"
+          on-input="setAllowedIpRanges($event.target.value)"
+        ></textarea>
+        <span class="mt-1 block font-normal text-gray-600 dark:text-gray-300"
+          >One IPv4 or IPv6 CIDR range per line. Only matching resolved endpoint IPs are permitted.</span
+        ></label
+      >
       <button class="self-start rounded-lg bg-brand px-4 py-2 font-medium text-white" type="submit">
         Create webhook
       </button>
@@ -74,6 +87,11 @@
           <div class="min-w-0">
             <strong class="break-all">{{ hook.url }}</strong>
             <p class="text-sm">{{ hook.events.join(', ') }}</p>
+            <template if="hook.allowedIpRanges.length"
+              ><p class="break-all text-xs text-gray-600 dark:text-gray-300">
+                Allowed IP ranges: {{ hook.allowedIpRanges.join(', ') }}
+              </p></template
+            >
           </div>
           <button type="button" class="rounded-lg px-3 py-2 text-red-700" on-click="remove(hook.id)">Delete</button>
         </li></template
@@ -90,6 +108,7 @@
       const selected = ref([]);
       const endpoint = ref("");
       const secret = ref("");
+      const allowedIpRanges = ref("");
       const error = ref("");
       const path = () => `/api/v1/orgs/${encodeURIComponent(org.value)}/webhooks`;
       const load = async () => {
@@ -103,6 +122,9 @@
       };
       const setSecret = (value) => {
         secret.value = value;
+      };
+      const setAllowedIpRanges = (value) => {
+        allowedIpRanges.value = value;
       };
       const toggleEvent = (event, checked) => {
         selected.value = checked
@@ -119,6 +141,7 @@
               url: endpoint.value,
               events: selected.value,
               secret: secret.value,
+              allowedIpRanges: allowedIpRanges.value,
             }),
           });
           const result = await response.json();
@@ -126,6 +149,8 @@
           endpoint.value = "";
           secret.value = "";
           document.querySelector('[aria-label="Webhook secret"]').value = "";
+          allowedIpRanges.value = "";
+          document.querySelector('[aria-label="Allowed IP ranges"]').value = "";
           selected.value = [];
           await load();
         } catch (cause) {
@@ -157,6 +182,7 @@
         error,
         setUrl,
         setSecret,
+        setAllowedIpRanges,
         toggleEvent,
         create,
         remove,
