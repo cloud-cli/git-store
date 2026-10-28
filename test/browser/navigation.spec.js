@@ -310,7 +310,7 @@ test.beforeEach(async ({ page }) => {
         url: createdOrgWebhookRequest.url,
         events: createdOrgWebhookRequest.events,
       });
-      return route.fulfill({ status: 201, json: { secret: "whsec_one_time_test" } });
+      return route.fulfill({ status: 201, json: { webhook: { id: "hook" } } });
     }
     if (request.method() === "DELETE") {
       currentOrgWebhooks = currentOrgWebhooks.filter((hook) => !request.url().endsWith(`/${hook.id}`));
@@ -496,6 +496,7 @@ test("organization settings navigate to repositories and manage webhook subscrip
   const webhookPanel = page.locator("org-webhooks");
 
   await page.getByLabel("Webhook URL").fill("https://hooks.example.test/events");
+  await page.getByLabel("Webhook secret").fill("my-user-defined-secret");
   await expect(webhookPanel.getByRole("checkbox")).toHaveCount(3);
   await page.getByLabel("git", { exact: true }).check();
   await page.getByLabel("repo", { exact: true }).check();
@@ -506,9 +507,9 @@ test("organization settings navigate to repositories and manage webhook subscrip
     .toEqual({
       url: "https://hooks.example.test/events",
       events: ["git", "repo", "thread"],
+      secret: "my-user-defined-secret",
     });
-  await expect(page.getByRole("status")).toContainText("This secret is shown only once.");
-  await expect(page.getByText("whsec_one_time_test", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Webhook secret")).toHaveValue("");
   const subscription = page.getByRole("listitem").filter({ hasText: "https://hooks.example.test/events" });
   await expect(subscription).toContainText("git, repo, thread");
   await subscription.getByRole("button", { name: "Delete" }).click();
@@ -519,6 +520,7 @@ test("organization settings navigate to repositories and manage webhook subscrip
   );
 
   await page.getByLabel("Webhook URL").fill("https://hooks.example.test/events");
+  await page.getByLabel("Webhook secret").fill("my-user-defined-secret");
   expectedWebhookHttpErrors += 1;
   await page.getByRole("button", { name: "Create webhook" }).click();
   await expect(page.getByRole("alert")).toHaveText("At least one event is required");

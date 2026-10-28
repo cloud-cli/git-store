@@ -2183,9 +2183,12 @@ app.post("/api/v1/orgs/:org/webhooks", requireAuthentication, requireScope("org:
   if (!app.locals.webhookStore) {
     return res.status(503).json({ error: "Webhook storage is not configured" });
   }
-  const { url, events } = req.body || {};
+  const { url, events, secret } = req.body || {};
   if (
     typeof url !== "string" ||
+    typeof secret !== "string" ||
+    secret.length < 1 ||
+    Buffer.byteLength(secret, "utf8") > 1024 ||
     !Array.isArray(events) ||
     !events.length ||
     events.some((event) => !webhookEvents.has(event)) ||
@@ -2193,7 +2196,8 @@ app.post("/api/v1/orgs/:org/webhooks", requireAuthentication, requireScope("org:
     !(await validateTarget(url))
   ) {
     return res.status(400).json({
-      error: "Provide an HTTPS public endpoint and an allowlisted, unique event subscription",
+      error:
+        "Provide an HTTPS public endpoint, a 1–1024 byte signing secret, and an allowlisted, unique event subscription",
     });
   }
   if ((await app.locals.webhookStore.list(org.slug)).length >= MAX_SUBSCRIPTIONS) {
@@ -2205,7 +2209,7 @@ app.post("/api/v1/orgs/:org/webhooks", requireAuthentication, requireScope("org:
     url,
     events,
     createdAt: new Date().toISOString(),
-    secret: `whsec_${crypto.randomBytes(32).toString("hex")}`,
+    secret,
   };
   try {
     await app.locals.webhookStore.create(webhook);
@@ -2217,7 +2221,6 @@ app.post("/api/v1/orgs/:org/webhooks", requireAuthentication, requireScope("org:
         events,
         createdAt: webhook.createdAt,
       },
-      secret: webhook.secret,
     });
   } catch {
     return res.status(503).json({ error: "Webhook storage is temporarily unavailable" });
@@ -3263,7 +3266,7 @@ function makeApiSpec() {
           },
         },
         post: {
-          summary: "Create a webhook subscription; secret is returned once",
+          summary: "Create a webhook subscription with a user-defined signing secret",
           parameters: [
             {
               name: "org",
@@ -3287,12 +3290,18 @@ function makeApiSpec() {
                 uniqueItems: true,
                 items: { type: "string", enum: ["git", "repo", "thread"] },
               },
+              secret: {
+                type: "string",
+                minLength: 1,
+                maxLength: 1024,
+                description: "User-defined key used to sign payloads; never returned by the API",
+              },
             },
-            ["url", "events"],
+            ["url", "events", "secret"],
           ),
           responses: {
             201: {
-              description: "Created subscription and one-time signing secret",
+              description: "Created subscription; signing secret is not returned",
             },
             400: { description: "Invalid URL or event subscription" },
             401: unauthorized,
