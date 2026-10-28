@@ -480,8 +480,11 @@ test("organization settings navigate to repositories and manage webhook subscrip
   await page.goto("/ui/");
   await page.locator('button[title="Settings"]').click();
   await expect(page).toHaveURL(/settings=organizations/);
+  const organizationForm = page.locator("form").filter({ has: page.getByLabel("Organization slug") });
+  await expect(organizationForm).toBeVisible();
   await page.getByRole("link", { name: "example", exact: true }).click();
   await expect(page).toHaveURL(/settings=organizations&org=example/);
+  await expect(organizationForm).toHaveCount(0);
 
   const navigation = page.getByRole("navigation", { name: "Organization settings" });
   await expect(navigation.getByRole("link", { name: "General" })).toHaveAttribute("aria-current", "page");

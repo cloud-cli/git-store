@@ -20,7 +20,7 @@
     <div class="w-full min-w-0 flex-1">
       <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h2 class="text-2xl font-bold">Organizations</h2>
-        <template if="!canWrite"
+        <template if="!selectedOrg && !canWrite"
           ><button
             class="rounded-lg border border-gray-300 px-4 py-2 font-medium text-gray-400 dark:border-gray-700 dark:text-gray-500"
             type="button"
@@ -95,7 +95,40 @@
           </section></template
         >
       </template>
+      <template if="!selectedOrg && canWrite"
+        ><form
+          class="mb-6 flex max-w-xl flex-col gap-3 rounded-xl border border-[#e1e5e1] bg-white p-4 shadow-[0_1px_2px_rgba(28,32,30,0.10)] sm:flex-row dark:border-[#344039] dark:bg-[#1a231d]"
+          on-submit.prevent="createOrganization()"
+        >
+          <input
+            aria-label="Organization slug"
+            placeholder="e.g. homebots-inc"
+            class="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 focus:border-brand focus:outline-2 focus:outline-brand/20 focus:outline-offset-1 dark:border-[#46544a] dark:bg-[#111713] dark:text-gray-100 dark:placeholder:text-[#98a49a]"
+            required
+            on-input="setOrganizationName($event.target.value)"
+          /><button
+            class="rounded-lg bg-brand px-4 py-2 font-medium text-white transition-colors hover:bg-brand-hover"
+            type="submit"
+          >
+            Create organization
+          </button>
+        </form></template
+      >
       <template if="!selectedOrg">
+        <template if="!canWrite"
+          ><p class="mb-6 text-sm text-amber-700 dark:text-amber-300" role="status">
+            Read-only access: ask your GitMini administrator to enable repository write access (repo:write).
+          </p></template
+        >
+        <template if="created"
+          ><p role="status" class="mb-3 text-sm text-green-700 dark:text-green-300">Organization created.</p></template
+        >
+        <template if="error"
+          ><p role="alert" class="mb-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
+          <button class="mb-4 text-sm text-brand hover:underline dark:text-green-300" type="button" on-click="retry()">
+            Try again
+          </button></template
+        >
         <ul class="mb-6 space-y-2">
           <template for="item of organizations"
             ><li
@@ -133,39 +166,6 @@
           >
         </ul>
       </template>
-      <template if="canWrite"
-        ><form
-          class="flex max-w-xl flex-col gap-3 rounded-xl border border-[#e1e5e1] bg-white p-4 shadow-[0_1px_2px_rgba(28,32,30,0.10)] sm:flex-row dark:border-[#344039] dark:bg-[#1a231d]"
-          on-submit.prevent="createOrganization()"
-        >
-          <input
-            aria-label="Organization slug"
-            placeholder="e.g. homebots-inc"
-            class="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 focus:border-brand focus:outline-2 focus:outline-brand/20 focus:outline-offset-1 dark:border-[#46544a] dark:bg-[#111713] dark:text-gray-100 dark:placeholder:text-[#98a49a]"
-            required
-            on-input="setOrganizationName($event.target.value)"
-          /><button
-            class="rounded-lg bg-brand px-4 py-2 font-medium text-white transition-colors hover:bg-brand-hover"
-            type="submit"
-          >
-            Create organization
-          </button>
-        </form></template
-      >
-      <template if="!canWrite"
-        ><p class="text-sm text-amber-700 dark:text-amber-300" role="status">
-          Read-only access: ask your GitMini administrator to enable repository write access (repo:write).
-        </p></template
-      >
-      <template if="created"
-        ><p role="status" class="mt-3 text-sm text-green-700 dark:text-green-300">Organization created.</p></template
-      >
-      <template if="error"
-        ><p role="alert" class="mt-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
-        <button class="mt-2 text-sm text-brand hover:underline dark:text-green-300" type="button" on-click="retry()">
-          Try again
-        </button></template
-      >
     </div>
   </div>
   <script setup>
