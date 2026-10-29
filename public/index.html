@@ -139,22 +139,17 @@
         <template if="showWorkspace && orgRepositories.length > 0 && !settings">
           <aside
             data-testid="repository-sidebar"
-            class="fixed inset-y-[72px] left-0 z-40 flex h-[calc(100dvh-72px)] w-56 min-h-0 shrink-0 -translate-x-full flex-col overflow-y-auto bg-transparent transition-transform dark:bg-[#111713] max-md:bg-app-bg max-md:shadow-[0_12px_32px_rgba(28,32,30,0.12)] dark:max-md:bg-[#111713] md:relative md:inset-y-auto md:h-full md:min-h-0 md:max-h-full md:translate-x-0"
+            class="fixed inset-y-[72px] left-0 z-40 flex h-[calc(100dvh-72px)] w-56 min-h-0 shrink-0 -translate-x-full flex-col overflow-y-auto bg-app-bg transition-transform dark:bg-[#111713] max-md:shadow-[0_12px_32px_rgba(28,32,30,0.12)] md:relative md:inset-y-auto md:h-full md:min-h-0 md:max-h-full md:translate-x-0"
             class-translate-x-0="menuOpen"
           >
             <div class="relative pb-1">
-              <details class="group open:[&>summary>lucide-icon]:rotate-90" open>
-                <summary
+              <div>
+                <h2
                   data-testid="sidebar-section-heading"
-                  class="flex min-h-[34px] cursor-pointer list-none items-center gap-[7px] border-b border-[#e8ece9] py-0 pl-2 pr-9 text-[11px] font-bold uppercase tracking-[0.08em] text-[#65736a] marker:content-none dark:border-[#29342c] dark:text-[#aab6ac] [&::-webkit-details-marker]:hidden"
+                  class="flex min-h-[34px] items-center border-b border-[#e8ece9] py-0 pl-2 pr-9 text-[11px] font-bold uppercase tracking-[0.08em] text-[#65736a] dark:border-[#29342c] dark:text-[#aab6ac]"
                 >
-                  <lucide-icon
-                    icon="chevron-right"
-                    size="14"
-                    class="block shrink-0 text-[#89958c] transition-transform"
-                  ></lucide-icon
-                  ><span>Repositories</span>
-                </summary>
+                  Repositories
+                </h2>
                 <nav
                   data-testid="repository-sidebar-list"
                   class="flex max-h-[min(50dvh,28rem)] flex-col gap-0.5 overflow-y-auto px-1 pb-2 pt-1 [scrollbar-gutter:stable]"
@@ -171,7 +166,7 @@
                     ></template
                   >
                 </nav>
-              </details>
+              </div>
               <template if="canWrite"
                 ><button
                   popovertarget="create-repo-popover"
@@ -402,9 +397,11 @@
             ><div class="fixed inset-x-0 bottom-0 top-[72px] z-30 bg-black/40 md:hidden" on-click="closeMenu()"></div
           ></template>
         </template>
-        <main class="flex min-w-0 flex-1 flex-col overflow-hidden bg-transparent md:flex-row max-md:overflow-visible">
+        <main
+          class="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-[#dce3dc] bg-white shadow-[0_2px_8px_rgba(28,32,30,0.06)] dark:border-[#344039] dark:bg-[#1a231d] md:flex-row max-md:overflow-visible"
+        >
           <section
-            class="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-transparent p-0 max-md:overflow-visible"
+            class="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-transparent p-4 sm:p-6 max-md:overflow-visible"
             on-dragover.prevent="setDragging(true)"
             on-dragleave="setDragging(false)"
             on-drop.prevent="upload($event)"

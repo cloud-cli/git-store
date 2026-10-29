@@ -131,7 +131,7 @@
               >
             </nav>
           </aside>
-          <section class="min-w-0 flex-1 overflow-y-auto p-6 sm:p-8">
+          <section class="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6">
             <header class="mb-7 border-b border-[#e8ece9] pb-5 dark:border-[#344039]">
               <h2 class="text-2xl font-bold tracking-tight text-[#1c201e] dark:text-gray-100">Recent changes</h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">The latest commits across your repositories</p>
@@ -171,10 +171,6 @@
       </template>
       <template if="org && eventsLoaded"
         ><section class="flex min-h-0 flex-1 flex-col text-left">
-          <div class="mb-5 shrink-0 border-b border-gray-200 pb-4 dark:border-gray-700">
-            <h1 class="text-2xl font-bold">Event stream</h1>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Audited activity in {{ org }}</p>
-          </div>
           <template if="eventsError"
             ><p class="mb-3 text-sm text-red-600 dark:text-red-400" role="alert">{{ eventsError }}</p></template
           >
@@ -183,11 +179,9 @@
               No events have been recorded for this organization yet.
             </p></template
           >
-          <ol data-testid="organization-event-stream" class="min-h-0 flex-1 space-y-3 overflow-y-auto pb-2">
+          <ol data-testid="organization-event-stream" class="min-h-0 flex-1 space-y-2 overflow-y-auto pb-2">
             <template for="item of events"
-              ><li
-                class="rounded-xl border border-[#e1e5e1] bg-white p-4 shadow-[0_1px_2px_rgba(28,32,30,0.08)] dark:border-[#344039] dark:bg-[#1a231d]"
-              >
+              ><li class="rounded-lg border border-[#e1e5e1] bg-white p-3 dark:border-[#344039] dark:bg-[#1a231d]">
                 <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                   <p class="min-w-0 break-words">
                     <span class="font-semibold">{{ actorLabel(item) }}</span>

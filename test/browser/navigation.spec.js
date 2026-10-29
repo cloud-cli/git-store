@@ -838,7 +838,7 @@ test("organization and repository navigation replaces the displayed page", async
   await page.getByTestId("workspace-breadcrumbs").getByRole("link", { name: "example" }).click();
   await expect(page.getByRole("navigation", { name: "Folder path" })).toHaveCount(0);
   await expect(page.locator("[data-repository-view]")).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Event stream" })).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: "Event stream" })).toHaveCount(0);
   await expect(page.getByTestId("organization-event-stream")).toBeVisible();
 
   if (page.viewportSize().width < 768) {
