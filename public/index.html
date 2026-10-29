@@ -170,11 +170,12 @@
               <template if="canWrite"
                 ><button
                   popovertarget="create-repo-popover"
-                  class="[anchor-name:--create-repository-anchor] absolute right-1 top-[3px] inline-flex size-[26px] items-center justify-center rounded-md text-[#66746a] hover:bg-white/75 hover:text-brand dark:text-[#aab6ac] dark:hover:bg-[#202a23] dark:hover:text-[#a4d1ae]"
+                  class="[anchor-name:--create-repository-anchor] absolute right-1 top-[3px] inline-flex items-center gap-1 rounded-md bg-brand px-2 py-1 text-xs font-semibold text-white transition-colors hover:bg-brand-hover"
                   aria-label="Create repository"
                 >
-                  <lucide-icon icon="plus" size="16"></lucide-icon></button
-              ></template>
+                  <lucide-icon icon="plus" size="14"></lucide-icon><span>New</span>
+                </button></template
+              >
               <template if="!canWrite"
                 ><span
                   class="absolute right-2 top-[9px] text-[10px] text-[#87938a]"
@@ -398,13 +399,7 @@
             ><div class="fixed inset-x-0 bottom-0 top-[72px] z-30 bg-black/40 md:hidden" on-click="closeMenu()"></div
           ></template>
         </template>
-        <main
-          class="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-[#dce3dc] md:flex-row max-md:overflow-visible"
-          class-rounded-none="!org"
-          class-border-0="!org"
-          class-bg-transparent="!org"
-          class-shadow-none="!org"
-        >
+        <main class="flex min-w-0 flex-1 flex-col overflow-hidden md:flex-row max-md:overflow-visible">
           <section
             class="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-transparent p-4 sm:p-6 max-md:overflow-visible"
             class-p-0="!org"
@@ -412,14 +407,6 @@
             on-dragleave="setDragging(false)"
             on-drop.prevent="upload($event)"
           >
-            <template if="authStatus === 'loading'"
-              ><div
-                class="flex min-h-full flex-1 items-center justify-center text-gray-600 dark:text-gray-300"
-                role="status"
-              >
-                Checking sign-in status…
-              </div></template
-            >
             <template if="authStatus === 'anonymous'"
               ><sign-in-landing bind-sign-in-url="userUrl"></sign-in-landing
             ></template>
@@ -909,7 +896,7 @@
                   ? serverSession.value.authenticated
                     ? "authenticated"
                     : "anonymous"
-                  : "loading",
+                  : "anonymous",
               );
               const initialSettingsTab = new URL(window.location.href).searchParams.get("settings");
               const settings = ref(initialSettingsTab === "organizations" || initialSettingsTab === "tokens");

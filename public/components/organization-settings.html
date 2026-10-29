@@ -1,23 +1,24 @@
 <template component="organization-settings">
-  <div class="flex min-h-full min-w-0 flex-1 flex-col gap-4 p-4 sm:flex-row sm:gap-6 md:p-8">
-    <nav
-      class="w-full flex-shrink-0 border-b border-gray-200 pb-3 sm:w-44 sm:border-b-0 sm:border-r sm:pb-0 sm:pr-4 dark:border-gray-800"
-      aria-label="Settings navigation"
-    >
-      <h1 class="mb-4 text-xl font-bold">Settings</h1>
+  <div class="flex min-h-full min-w-0 flex-1 flex-col gap-4 md:flex-row md:gap-6">
+    <nav class="w-full flex-shrink-0 pb-2 md:w-52 md:pb-0" aria-label="Settings navigation">
+      <h1 class="mb-4 px-3 text-xs font-bold uppercase tracking-[0.1em] text-[#78847c] dark:text-[#aab6ac]">
+        Settings
+      </h1>
       <a
         href="/?settings=organizations"
         aria-current="page"
-        class="block rounded-lg border border-green-200 bg-green-50 px-3 py-2 font-medium text-green-800 dark:border-green-900 dark:bg-green-950 dark:text-green-200"
+        class="mb-1 block rounded-lg border border-[#cdded0] bg-white px-3 py-2.5 font-semibold text-brand dark:border-[#3d5844] dark:bg-[#1a231d] dark:text-[#a4d1ae]"
         >Organizations</a
       >
       <a
         href="/?settings=tokens"
-        class="mt-2 block rounded-lg px-3 py-2 font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-900"
+        class="block rounded-lg px-3 py-2.5 font-medium text-[#455149] hover:bg-white/60 dark:text-gray-300 dark:hover:bg-white/10"
         >Personal access tokens</a
       >
     </nav>
-    <div class="w-full min-w-0 flex-1">
+    <div
+      class="w-full min-w-0 flex-1 rounded-2xl border border-[#dce3dc] bg-white p-4 shadow-[0_2px_8px_rgba(28,32,30,0.06)] sm:p-6 dark:border-[#344039] dark:bg-[#1a231d]"
+    >
       <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h2 class="text-2xl font-bold">Organizations</h2>
         <template if="!selectedOrg && !canWrite"

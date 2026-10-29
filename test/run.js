@@ -2089,6 +2089,19 @@ async function run() {
     app.locals.oidcClientOverride = null;
     app.locals.authApiClientOverride = null;
 
+    app.locals.oidcClientOverride = {};
+    const unauthenticatedUi = await request(port, "GET", "/ui/?org=team-one&repo=shared-repo");
+    assert.strictEqual(
+      unauthenticatedUi.status,
+      302,
+      "unauthenticated browser requests redirect before serving the UI",
+    );
+    assert.strictEqual(
+      unauthenticatedUi.headers.location,
+      "/ui/auth/login?returnTo=%2Fui%2F%3Forg%3Dteam-one%26repo%3Dshared-repo",
+    );
+    app.locals.oidcClientOverride = null;
+
     const uiResponse = await request(port, "GET", "/ui/");
     assert.strictEqual(uiResponse.status, 200);
     assert.strictEqual((uiResponse.body.match(/<template app>/g) || []).length, 1);
@@ -2122,6 +2135,7 @@ async function run() {
     assert.ok(uiResponse.body.includes("@custom-variant dark (&:where(.dark, .dark *));"));
     assert.ok(uiResponse.body.includes("<span>Sign in</span>"));
     assert.ok(uiResponse.body.includes("authStatus === 'anonymous'"));
+    assert.ok(!uiResponse.body.includes("Checking sign-in status"));
     assert.ok(uiResponse.body.includes('<template if="showWorkspace && orgRepositories.length > 0 && !settings">'));
     assert.ok(uiResponse.body.includes("organization-landing"));
     assert.ok(uiResponse.body.includes("organization-settings"));

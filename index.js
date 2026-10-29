@@ -404,13 +404,21 @@ loadBrowserSessions();
 app.locals.reloadBrowserSessions = loadBrowserSessions;
 
 app.get(["/ui/", "/ui/index.html"], async (req, res, next) => {
+  const session = await getBrowserSession(req, res);
+  const oidcConfigured = Boolean(
+    app.locals.oidcClientOverride ||
+      (process.env.OIDC_ISSUER && process.env.OIDC_CLIENT_ID && process.env.OIDC_CLIENT_SECRET),
+  );
+  if (!session && oidcConfigured) {
+    const returnTo = encodeURIComponent(req.originalUrl);
+    return res.redirect(302, `/ui/auth/login?returnTo=${returnTo}`);
+  }
   let html;
   try {
     html = fs.readFileSync(path.join(__dirname, "public", "index.html"), "utf8");
   } catch (error) {
     return next(error);
   }
-  const session = await getBrowserSession(req, res);
   // Keep the ternary object's indentation aligned with the project's ESLint rule.
   // prettier-ignore
   const bootstrap = session

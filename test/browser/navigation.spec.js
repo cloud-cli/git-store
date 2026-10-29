@@ -613,23 +613,23 @@ test("uploads and branch, tag, and commit mutations update without document relo
   await page.getByRole("button", { name: "Create branch" }).click();
   await page.locator("#branch-popover input").fill("feature/ui");
   await page.locator("#branch-popover button[type=submit]").click();
-  await expect(sidebar.locator("details").nth(1).getByText("feature/ui", { exact: true })).toHaveCount(1);
+  await expect(sidebar.locator("details").nth(0).getByText("feature/ui", { exact: true })).toHaveCount(1);
   await expect
     .poll(() => page.locator("#branch-popover").evaluate((element) => element.matches(":popover-open")))
     .toBe(false);
   await expect(page.locator("#branch-popover input")).toHaveValue("");
-  await sidebar.locator("details").nth(1).locator("summary").click();
+  await sidebar.locator("details").nth(0).locator("summary").click();
   await expect(page.getByRole("link", { name: "feature/ui" })).toBeVisible();
 
   await page.getByRole("button", { name: "Create tag" }).click();
   await page.locator("#tag-popover input").fill("v1.0");
   await page.locator("#tag-popover button[type=submit]").click();
-  await expect(sidebar.locator("details").nth(2).getByText("v1.0", { exact: true })).toHaveCount(1);
+  await expect(sidebar.locator("details").nth(1).getByText("v1.0", { exact: true })).toHaveCount(1);
   await expect
     .poll(() => page.locator("#tag-popover").evaluate((element) => element.matches(":popover-open")))
     .toBe(false);
   await expect(page.locator("#tag-popover input")).toHaveValue("");
-  await sidebar.locator("details").nth(2).locator("summary").click();
+  await sidebar.locator("details").nth(1).locator("summary").click();
   await expect(page.getByRole("link", { name: "v1.0" })).toBeVisible();
 
   if (page.viewportSize().width < 768) {
@@ -661,11 +661,11 @@ test("repository sidebar keeps branches and tags compact and collapsed by defaul
 
   const sidebar = page.getByTestId("repository-sidebar");
   const sections = sidebar.locator("details");
-  await expect(sections).toHaveCount(3);
-  await expect(sections.nth(0)).toHaveAttribute("open", "");
+  await expect(sections).toHaveCount(2);
+  await expect(sections.nth(0)).not.toHaveAttribute("open", "");
   await expect(sections.nth(1)).not.toHaveAttribute("open", "");
-  await expect(sections.nth(2)).not.toHaveAttribute("open", "");
   await expect(sidebar.getByTestId("sidebar-section-heading")).toHaveCount(3);
+  await expect(sidebar.getByTestId("repository-sidebar-list")).toBeVisible();
   await expect(page.locator("repo-panel")).toHaveCount(0);
 });
 

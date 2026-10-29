@@ -16,12 +16,6 @@
       <template if="!org && !organizationsLoaded && !orgError"
         ><p class="text-sm text-gray-600 dark:text-gray-300" role="status">Loading organizations…</p></template
       >
-      <template if="org && !repositoriesLoaded && !orgError"
-        ><p class="text-sm text-gray-600 dark:text-gray-300" role="status">Loading repositories…</p></template
-      >
-      <template if="org && repositoriesLoaded && !eventsLoaded && !orgError"
-        ><p class="text-sm text-gray-600 dark:text-gray-300" role="status">Loading audit events…</p></template
-      >
       <template if="!org && organizationsLoaded && organizations.length === 0"
         ><section
           class="mx-auto w-full max-w-md rounded-xl border border-[#e1e5e1] bg-white p-8 shadow-[0_1px_2px_rgba(28,32,30,0.10)] dark:border-[#344039] dark:bg-[#1a231d]"
@@ -171,19 +165,21 @@
           </section>
         </div>
       </template>
-      <template if="org && eventsLoaded"
-        ><section class="flex min-h-0 flex-1 flex-col text-left">
+      <template if="org"
+        ><section
+          class="flex min-h-0 flex-1 flex-col rounded-2xl border border-[#dce3dc] bg-white p-4 text-left shadow-[0_2px_8px_rgba(28,32,30,0.06)] sm:p-6 dark:border-[#344039] dark:bg-[#1a231d]"
+        >
           <template if="eventsError"
             ><p class="mb-3 text-sm text-red-600 dark:text-red-400" role="alert">{{ eventsError }}</p></template
           >
-          <template if="events.length === 0 && !eventsError"
+          <template if="eventsLoaded && events.length === 0 && !eventsError"
             ><p class="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
               No events have been recorded for this organization yet.
             </p></template
           >
           <ol data-testid="organization-event-stream" class="min-h-0 flex-1 space-y-2 overflow-y-auto pb-2">
             <template for="item of events"
-              ><li class="rounded-lg border border-[#e1e5e1] bg-white p-3 dark:border-[#344039] dark:bg-[#1a231d]">
+              ><li class="px-2 py-3">
                 <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                   <p class="min-w-0 break-words">
                     <span class="font-semibold">{{ actorLabel(item) }}</span>
