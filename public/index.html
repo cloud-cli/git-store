@@ -1103,6 +1103,9 @@
               const removeRepositoryView = () => {
                 document.querySelectorAll("[data-repository-view]").forEach((view) => view.remove());
               };
+              const removeOrganizationSettingsViews = () => {
+                document.querySelectorAll("[data-org-settings-view]").forEach((view) => view.remove());
+              };
               const releasePreview = () => {
                 if (previewUrl.value) URL.revokeObjectURL(previewUrl.value);
                 previewUrl.value = "";
@@ -1117,6 +1120,7 @@
                 ++loadRequest;
                 ++previewRequest;
                 releasePreview();
+                removeOrganizationSettingsViews();
                 const nextOrg = next.searchParams.get("org") || "";
                 routeOrg.value = nextOrg;
                 const nextRepo = next.searchParams.get("repo");

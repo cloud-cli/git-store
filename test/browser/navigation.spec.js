@@ -488,10 +488,16 @@ test("organization settings navigate to repositories and manage webhook subscrip
 
   const navigation = page.getByRole("navigation", { name: "Organization settings" });
   await expect(navigation.getByRole("link", { name: "General" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("heading", { name: "General", exact: true })).toHaveCount(1);
+  await expect(page.getByTestId("organization-settings-content")).toHaveCSS("overflow-y", "auto");
   await navigation.getByRole("link", { name: "Repositories" }).click();
   await expect(page.getByRole("heading", { name: "Repositories", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "General", exact: true })).toHaveCount(0);
   const repositoryLink = page.getByRole("link", { name: "demo", exact: true });
   await expect(repositoryLink).toHaveAttribute("href", "/?org=example&repo=demo");
+  await navigation.getByRole("link", { name: "General" }).click();
+  await expect(page.getByRole("heading", { name: "General", exact: true })).toHaveCount(1);
+  await navigation.getByRole("link", { name: "Repositories" }).click();
   await navigation.getByRole("link", { name: "Webhooks" }).click();
   await expect(page).toHaveURL(/section=webhooks/);
   await expect(navigation.getByRole("link", { name: "Webhooks" })).toHaveAttribute("aria-current", "page");
