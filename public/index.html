@@ -139,7 +139,7 @@
         <template if="showWorkspace && orgRepositories.length > 0 && !settings">
           <aside
             data-testid="repository-sidebar"
-            class="fixed inset-y-[72px] left-0 z-40 flex h-[calc(100dvh-72px)] w-56 min-h-0 shrink-0 -translate-x-full flex-col overflow-y-auto bg-app-bg transition-transform dark:bg-[#111713] max-md:shadow-[0_12px_32px_rgba(28,32,30,0.12)] md:relative md:inset-y-auto md:h-full md:min-h-0 md:max-h-full md:translate-x-0"
+            class="fixed inset-y-[72px] left-0 z-40 flex h-[calc(100dvh-72px)] w-52 min-h-0 shrink-0 -translate-x-full flex-col overflow-y-auto bg-app-bg transition-transform dark:bg-[#111713] max-md:shadow-[0_12px_32px_rgba(28,32,30,0.12)] md:relative md:inset-y-auto md:h-full md:min-h-0 md:max-h-full md:translate-x-0"
             class-translate-x-0="menuOpen"
           >
             <div class="relative pb-1">
@@ -240,7 +240,7 @@
                         <a
                           attr-href="refHref(branch)"
                           class="block min-h-8 rounded-md border border-transparent px-2 py-[5px] text-[13px] text-[#525e56] transition-colors hover:bg-white/55 dark:text-[#c1cbc3] dark:hover:bg-white/10"
-                          >{{ branch }}</a
+                          ><span class="truncate">{{ branch }}</span></a
                         >
                       </li></template
                     >
@@ -325,7 +325,8 @@
                         <a
                           attr-href="refHref(tag)"
                           class="flex min-h-8 items-center gap-2 rounded-md border border-transparent px-2 py-[5px] text-[13px] text-[#525e56] transition-colors hover:bg-white/55 dark:text-[#c1cbc3] dark:hover:bg-white/10"
-                          ><lucide-icon icon="tag" size="14" class="shrink-0 text-gray-400"></lucide-icon>{{ tag }}</a
+                          ><lucide-icon icon="tag" size="14" class="shrink-0 text-gray-400"></lucide-icon
+                          ><span class="truncate">{{ tag }}</span></a
                         >
                       </li></template
                     >
