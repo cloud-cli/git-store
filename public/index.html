@@ -399,9 +399,14 @@
         </template>
         <main
           class="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-[#dce3dc] bg-white shadow-[0_2px_8px_rgba(28,32,30,0.06)] dark:border-[#344039] dark:bg-[#1a231d] md:flex-row max-md:overflow-visible"
+          class-rounded-none="!org"
+          class-border-0="!org"
+          class-bg-transparent="!org"
+          class-shadow-none="!org"
         >
           <section
             class="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-transparent p-4 sm:p-6 max-md:overflow-visible"
+            class-p-0="!org"
             on-dragover.prevent="setDragging(true)"
             on-dragleave="setDragging(false)"
             on-drop.prevent="upload($event)"

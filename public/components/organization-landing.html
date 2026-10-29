@@ -67,10 +67,10 @@
       <template if="!org && organizationsLoaded && organizations.length > 0"
         ><div
           data-testid="landing-dashboard"
-          class="-mx-4 flex h-full min-h-0 w-[calc(100%+2rem)] flex-1 flex-col overflow-hidden rounded-2xl border border-[#dce3dc] bg-white p-4 text-left shadow-[0_2px_8px_rgba(28,32,30,0.06)] dark:border-[#344039] dark:bg-[#1a231d] sm:p-6 md:mx-0 md:w-full md:flex-row md:gap-6"
+          class="-mx-4 flex h-full min-h-0 w-[calc(100%+2rem)] flex-1 flex-col overflow-hidden bg-transparent text-left md:mx-0 md:w-full md:flex-row md:gap-8"
         >
           <aside
-            class="mb-4 flex max-h-[40vh] min-h-0 w-full shrink-0 flex-col overflow-y-auto rounded-2xl border border-[#dce3dc] bg-[#f6f8f6] p-4 dark:border-[#344039] dark:bg-[#171e19] sm:p-6 md:mb-0 md:max-h-full md:w-[min(36%,20rem)] md:min-w-64"
+            class="mb-4 flex max-h-[40vh] min-h-0 w-full shrink-0 flex-col overflow-y-auto bg-app-bg dark:bg-[#111713] md:mb-0 md:max-h-full md:w-[min(36%,24rem)] md:min-w-64"
           >
             <div class="mb-4 flex items-center justify-between gap-2 px-3">
               <h1 class="text-xs font-bold uppercase tracking-[0.1em] text-[#78847c] dark:text-[#aab6ac]">
@@ -131,7 +131,9 @@
               >
             </nav>
           </aside>
-          <section class="min-h-0 min-w-0 flex-1 overflow-y-auto rounded-2xl bg-white p-3 sm:p-6 dark:bg-[#1a231d]">
+          <section
+            class="min-h-0 min-w-0 flex-1 overflow-y-auto rounded-2xl border border-[#dce3dc] bg-white p-4 shadow-[0_2px_8px_rgba(28,32,30,0.06)] sm:p-6 dark:border-[#344039] dark:bg-[#1a231d]"
+          >
             <header class="mb-7 border-b border-[#e8ece9] pb-5 dark:border-[#344039]">
               <h2 class="text-2xl font-bold tracking-tight text-[#1c201e] dark:text-gray-100">Recent changes</h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">The latest commits across your repositories</p>
