@@ -103,8 +103,37 @@ assert.equal(await validateTarget("https://[::ffff:127.0.0.1]"), false);
 assert.equal(await validateTarget("https://127.0.0.1", ["127.0.0.1/32"]), true);
 
 const rows = [];
+for (const hasAllowedIpRanges of [true, false]) {
+  const schemaClient = {
+    hasAllowedIpRanges,
+    alterations: 0,
+    async query(mode, sql) {
+      if (sql.startsWith("CREATE TABLE")) {
+        return { changes: 0 };
+      }
+      if (sql.startsWith("PRAGMA table_info")) {
+        return this.hasAllowedIpRanges ? [{ name: "id" }, { name: "allowed_ip_ranges" }] : [{ name: "id" }];
+      }
+      if (sql.startsWith("ALTER TABLE")) {
+        this.alterations += 1;
+        this.hasAllowedIpRanges = true;
+        return { changes: 0 };
+      }
+      if (mode === "all") {
+        return [];
+      }
+      return { changes: 0 };
+    },
+  };
+  await createWebhookStore(schemaClient, key).list("org");
+  assert.equal(schemaClient.alterations, hasAllowedIpRanges ? 0 : 1);
+}
+
 const client = {
   async query(mode, sql, bindings = []) {
+    if (sql.startsWith("PRAGMA table_info")) {
+      return [{ name: "allowed_ip_ranges" }];
+    }
     if (sql.startsWith("INSERT")) {
       rows.push({
         id: bindings[0],

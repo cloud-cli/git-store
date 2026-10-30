@@ -79,12 +79,9 @@ function createWebhookStore(client, key) {
     if (!init) {
       init = (async () => {
         await client.query("run", statements[0]);
-        try {
+        const columns = await client.query("all", "PRAGMA table_info(org_webhooks)");
+        if (!columns.some((column) => column.name === "allowed_ip_ranges")) {
           await client.query("run", "ALTER TABLE org_webhooks ADD COLUMN allowed_ip_ranges TEXT NOT NULL DEFAULT '[]'");
-        } catch (error) {
-          if (!/duplicate column|already exists/i.test(error.message || "")) {
-            throw error;
-          }
         }
         await client.query("run", statements[1]);
       })().catch((error) => {
