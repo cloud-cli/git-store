@@ -370,7 +370,7 @@ function requestPinned(target, body, headers, signal) {
         headers,
         signal,
         ...(net.isIP(hostname) ? {} : { servername: hostname }),
-        lookup: (_host, _options, callback) => callback(null, address, family),
+        lookup: createPinnedLookup(address, family),
       },
       (response) => {
         response.resume();
@@ -380,6 +380,15 @@ function requestPinned(target, body, headers, signal) {
     request.once("error", reject);
     request.end(body);
   });
+}
+function createPinnedLookup(address, family) {
+  return (_hostname, options, callback) => {
+    if (options.all) {
+      callback(null, [{ address, family }]);
+      return;
+    }
+    callback(null, address, family);
+  };
 }
 let active = 0;
 const queue = [];
@@ -458,6 +467,7 @@ export {
   encryptedSecret,
   decryptSecret,
   isPublicAddress,
+  createPinnedLookup,
   MAX_SUBSCRIPTIONS,
   MAX_QUEUE,
   CONCURRENCY,

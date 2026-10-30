@@ -13,6 +13,7 @@ import {
   isPublicAddress,
   parseAllowedIpRanges,
   isAddressInAllowedRanges,
+  createPinnedLookup,
   MAX_SUBSCRIPTIONS,
   MAX_QUEUE,
 } from "../webhooks.js";
@@ -37,6 +38,31 @@ assert.equal(isAddressInAllowedRanges("10.0.0.18", ["10.0.0.0/24"]), true);
 assert.equal(isAddressInAllowedRanges("2001:db8::1", ["2001:db8::/32"]), true);
 assert.equal(MAX_SUBSCRIPTIONS, 20);
 assert.equal(MAX_QUEUE, 100);
+
+const pinnedLookup = createPinnedLookup("203.0.113.8", 4);
+await new Promise((resolve, reject) => {
+  pinnedLookup("example.com", { all: true }, (error, addresses) => {
+    try {
+      assert.ifError(error);
+      assert.deepEqual(addresses, [{ address: "203.0.113.8", family: 4 }]);
+      resolve();
+    } catch (failure) {
+      reject(failure);
+    }
+  });
+});
+await new Promise((resolve, reject) => {
+  pinnedLookup("example.com", {}, (error, address, family) => {
+    try {
+      assert.ifError(error);
+      assert.equal(address, "203.0.113.8");
+      assert.equal(family, 4);
+      resolve();
+    } catch (failure) {
+      reject(failure);
+    }
+  });
+});
 
 assert.equal(events.has("security.request.denied"), false);
 assert.equal(events.has("personal_access_token.created"), false);
