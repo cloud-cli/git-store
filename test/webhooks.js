@@ -5,6 +5,7 @@ import {
   isWebhookEvent,
   normalizeAuditEvent,
   createPushWebhookEvent,
+  createPingWebhookEvent,
   serializeWebhookPayload,
   validateTarget,
   getEncryptionKey,
@@ -121,6 +122,12 @@ assert.deepEqual(pushEvent, {
   },
 });
 assert.deepEqual(JSON.parse(serializeWebhookPayload(pushEvent)), pushEvent);
+const pingEvent = createPingWebhookEvent("owned");
+assert.equal(pingEvent.event, "webhook.ping");
+assert.equal(pingEvent.action, "ping");
+assert.equal(pingEvent.details.message, "Hello from GitMini");
+assert.equal(JSON.parse(serializeWebhookPayload(pingEvent)).org, "owned");
+assert.equal(JSON.parse(serializeWebhookPayload(pingEvent)).object, "owned");
 assert.equal(await validateTarget("http://example.com"), false);
 assert.equal(await validateTarget("https://user:pass@example.com"), false);
 assert.equal(await validateTarget("https://127.0.0.1"), false);
@@ -173,8 +180,8 @@ const client = {
       return { changes: 1 };
     }
     if (sql.startsWith("SELECT")) {
-      return rows
-        .filter((row) => row.org === bindings[0])
+      const selectedRows = rows
+        .filter((row) => row.org === bindings[0] && (bindings.length < 2 || row.id === bindings[1]))
         .map(({ id, org, url, secret, events: selectedEvents, allowedIpRanges, createdAt }) => ({
           id,
           org,
@@ -184,6 +191,7 @@ const client = {
           allowedIpRanges,
           createdAt,
         }));
+      return mode === "get" ? selectedRows[0] : selectedRows;
     }
     if (sql.startsWith("DELETE")) {
       const index = rows.findIndex((row) => row.org === bindings[0] && row.id === bindings[1]);
@@ -209,6 +217,8 @@ await store.create({
 assert.notEqual(rows[0].secret, "secret");
 assert.deepEqual((await store.list("owned"))[0].events, ["repo"]);
 assert.deepEqual((await store.list("owned"))[0].allowedIpRanges, ["192.168.1.20/32"]);
+assert.equal((await store.target("owned", "id")).secret, "secret");
+assert.equal(await store.target("other", "id"), null);
 assert.equal((await store.matching("owned", "repo"))[0].secret, "secret");
 assert.deepEqual((await store.matching("owned", "repo"))[0].allowedIpRanges, ["192.168.1.20/32"]);
 await store.create({

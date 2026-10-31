@@ -8,6 +8,7 @@ let currentRepositories;
 let currentEvents;
 let currentPersonalAccessTokens;
 let currentOrgWebhooks;
+let testWebhookRequests;
 let createdOrgWebhookRequest;
 let webhookApiDisabled;
 let expectedWebhookHttpErrors;
@@ -115,6 +116,7 @@ test.beforeEach(async ({ page }) => {
   createdPersonalAccessTokenRequest = null;
   createdTokenAuthorizationRequest = null;
   currentOrgWebhooks = [];
+  testWebhookRequests = [];
   createdOrgWebhookRequest = null;
   webhookApiDisabled = false;
   expectedWebhookHttpErrors = 0;
@@ -301,6 +303,10 @@ test.beforeEach(async ({ page }) => {
       return route.fulfill({ json: { webhooks: currentOrgWebhooks } });
     }
     if (request.method() === "POST") {
+      if (request.url().endsWith("/test")) {
+        testWebhookRequests.push(request.url());
+        return route.fulfill({ status: 202, json: { status: "accepted", event: "webhook.ping" } });
+      }
       createdOrgWebhookRequest = JSON.parse(request.postData());
       if (createdOrgWebhookRequest.events.length === 0) {
         return route.fulfill({ status: 400, json: { error: "At least one event is required" } });
@@ -310,7 +316,10 @@ test.beforeEach(async ({ page }) => {
         url: createdOrgWebhookRequest.url,
         events: createdOrgWebhookRequest.events,
       });
-      return route.fulfill({ status: 201, json: { webhook: { id: "hook" } } });
+      return route.fulfill({
+        status: 201,
+        json: { webhook: { id: "hook-1" }, testEvent: { status: "accepted", event: "webhook.ping" } },
+      });
     }
     if (request.method() === "DELETE") {
       currentOrgWebhooks = currentOrgWebhooks.filter((hook) => !request.url().endsWith(`/${hook.id}`));
@@ -554,6 +563,11 @@ test("organization settings navigate to repositories and manage webhook subscrip
   await expect(page.getByLabel("Webhook secret")).toHaveValue("");
   const subscription = page.getByRole("listitem").filter({ hasText: "https://hooks.example.test/events" });
   await expect(subscription).toContainText("git, repo, thread");
+  await expect(page.getByRole("status")).toContainText("Hello event queued for delivery");
+  await subscription.getByRole("button", { name: "Send hello event" }).click();
+  await expect.poll(() => testWebhookRequests.length).toBe(1);
+  expect(new URL(testWebhookRequests[0]).pathname).toBe("/api/v1/orgs/example/webhooks/hook-1/test");
+  await expect(page.getByRole("status")).toContainText("Hello event queued for delivery");
   await subscription.getByRole("button", { name: "Delete" }).click();
   await expect(subscription).toHaveCount(0);
   await expect(page).toHaveURL(/settings=organizations&org=example&section=webhooks/);

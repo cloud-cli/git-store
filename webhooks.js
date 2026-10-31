@@ -191,6 +191,23 @@ function createWebhookStore(client, key) {
           allowedIpRanges: JSON.parse(row.allowedIpRanges || "[]"),
         }));
     },
+    async target(org, id) {
+      await ready();
+      const row = await client.query(
+        "get",
+        "SELECT id, url, secret, allowed_ip_ranges AS allowedIpRanges FROM org_webhooks WHERE org_slug = ? AND id = ?",
+        [org, id],
+      );
+      if (!row) {
+        return null;
+      }
+      return {
+        id: row.id,
+        url: row.url,
+        secret: decryptSecret(row.secret, key),
+        allowedIpRanges: JSON.parse(row.allowedIpRanges || "[]"),
+      };
+    },
   };
 }
 
@@ -394,10 +411,11 @@ let active = 0;
 const queue = [];
 async function runQueue(task) {
   if (queue.length >= MAX_QUEUE) {
-    return;
+    return false;
   }
   queue.push(task);
   pumpQueue();
+  return true;
 }
 function pumpQueue() {
   while (active < CONCURRENCY && queue.length) {
@@ -412,9 +430,13 @@ function pumpQueue() {
   }
 }
 async function deliver(store, record) {
-  const targets = await store.matching(record.org, record.event);
+  const targets = record.targetId
+    ? [await store.target(record.org, record.targetId)].filter(Boolean)
+    : await store.matching(record.org, record.event);
+  let queued = 0;
+  let dropped = 0;
   for (const target of targets) {
-    await runQueue(async () => {
+    const accepted = await runQueue(async () => {
       for (let attempt = 0; attempt < 3; attempt += 1) {
         const pinned = await resolveTarget(target.url, target.allowedIpRanges);
         if (!pinned) {
@@ -450,7 +472,24 @@ async function deliver(store, record) {
         }
       }
     });
+    if (accepted) {
+      queued += 1;
+    } else {
+      dropped += 1;
+    }
   }
+  return { targets: targets.length, queued, dropped };
+}
+function createPingWebhookEvent(org) {
+  return {
+    id: crypto.randomUUID(),
+    org,
+    event: "webhook.ping",
+    action: "ping",
+    occurredAt: new Date().toISOString(),
+    object: org,
+    details: { message: "Hello from GitMini" },
+  };
 }
 export {
   createWebhookStore,
@@ -459,6 +498,7 @@ export {
   isWebhookEvent,
   normalizeAuditEvent,
   createPushWebhookEvent,
+  createPingWebhookEvent,
   serializeWebhookPayload,
   validateTarget,
   parseAllowedIpRanges,

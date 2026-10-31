@@ -21,6 +21,7 @@ import {
   isWebhookEvent,
   normalizeAuditEvent,
   createPushWebhookEvent,
+  createPingWebhookEvent,
   validateTarget,
   parseAllowedIpRanges,
   getEncryptionKey,
@@ -2225,6 +2226,16 @@ app.post("/api/v1/orgs/:org/webhooks", requireAuthentication, requireScope("org:
   };
   try {
     await app.locals.webhookStore.create(webhook);
+    let testEventStatus = "dropped";
+    try {
+      const testDelivery = await deliverWebhook(app.locals.webhookStore, {
+        ...createPingWebhookEvent(org.slug),
+        targetId: webhook.id,
+      });
+      testEventStatus = testDelivery.queued ? "accepted" : "dropped";
+    } catch (error) {
+      process.stderr.write(`[webhooks] test ping enqueue failed: ${error.message}\n`);
+    }
     return res.status(201).json({
       webhook: {
         id: webhook.id,
@@ -2234,7 +2245,36 @@ app.post("/api/v1/orgs/:org/webhooks", requireAuthentication, requireScope("org:
         allowedIpRanges,
         createdAt: webhook.createdAt,
       },
+      testEvent: {
+        status: testEventStatus,
+        event: "webhook.ping",
+      },
     });
+  } catch {
+    return res.status(503).json({ error: "Webhook storage is temporarily unavailable" });
+  }
+});
+app.post("/api/v1/orgs/:org/webhooks/:id/test", requireAuthentication, requireScope("org:manage"), async (req, res) => {
+  const org = accessibleWebhookOrg(req, res);
+  if (!org) {
+    return;
+  }
+  if (!app.locals.webhookStore) {
+    return res.status(503).json({ error: "Webhook storage is not configured" });
+  }
+  try {
+    const delivery = await deliverWebhook(app.locals.webhookStore, {
+      ...createPingWebhookEvent(org.slug),
+      targetId: req.params.id,
+    });
+    if (!delivery.targets) {
+      return res.status(404).json({ error: "Webhook not found" });
+    }
+    if (!delivery.queued) {
+      res.set("Retry-After", "1");
+      return res.status(503).json({ error: "Webhook delivery queue is full; retry shortly" });
+    }
+    return res.status(202).json({ status: "accepted", event: "webhook.ping" });
   } catch {
     return res.status(503).json({ error: "Webhook storage is temporarily unavailable" });
   }
@@ -3329,6 +3369,32 @@ function makeApiSpec() {
         },
       },
       "/api/v1/orgs/{org}/webhooks/{id}": {
+        post: {
+          summary: "Send a signed hello test event to one webhook subscription",
+          parameters: [
+            {
+              name: "org",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string", format: "uuid" },
+            },
+          ],
+          security: [{ bearerAuth: [] }],
+          "x-required-scope": "org:manage",
+          responses: {
+            202: { description: "Test event queued for delivery" },
+            401: unauthorized,
+            403: { description: "Insufficient scope" },
+            404: { description: "Organization or webhook not found" },
+            503: { description: "Webhook storage unavailable or delivery queue full" },
+          },
+        },
         delete: {
           summary: "Delete a webhook subscription",
           parameters: [

@@ -237,6 +237,60 @@ async function run() {
     assert.deepStrictEqual(JSON.parse(orgCreated.body), {
       org: { slug: "team-one" },
     });
+    const tokenAClaims = tokenSubjects.get("token-a");
+    const tokenBClaims = tokenSubjects.get("token-b");
+    tokenSubjects.set("token-a", { ...tokenAClaims, scope: "repo:write org:manage" });
+    tokenSubjects.set("token-b", { ...tokenBClaims, scope: "repo:write org:manage" });
+    const tokenARecord = app.locals.tokenAuthorizations.findByToken("token-a");
+    const tokenAOwner = hashSubject(tokenAClaims.sub);
+    app.locals.tokenAuthorizations.grantOrg(tokenARecord.id, tokenAOwner, "team-one");
+    const previousWebhookStore = app.locals.webhookStore;
+    let targetedWebhookLookups = 0;
+    app.locals.webhookStore = {
+      async target(org, id) {
+        targetedWebhookLookups += 1;
+        if (org !== "team-one" || id !== "hook-1") {
+          return null;
+        }
+        return { id, url: "https://127.0.0.1/hook", secret: "test-secret", allowedIpRanges: [] };
+      },
+    };
+    const testPing = await request(port, "POST", "/api/v1/orgs/team-one/webhooks/hook-1/test", undefined, "token-a");
+    assert.strictEqual(testPing.status, 202, testPing.body);
+    assert.deepStrictEqual(JSON.parse(testPing.body), { status: "accepted", event: "webhook.ping" });
+    const missingWebhook = await request(
+      port,
+      "POST",
+      "/api/v1/orgs/team-one/webhooks/missing/test",
+      undefined,
+      "token-a",
+    );
+    assert.strictEqual(missingWebhook.status, 404);
+    const otherOwnerWebhook = await request(
+      port,
+      "POST",
+      "/api/v1/orgs/team-one/webhooks/hook-1/test",
+      undefined,
+      "token-b",
+    );
+    assert.strictEqual(otherOwnerWebhook.status, 403);
+    const readOnlyWebhook = await request(
+      port,
+      "POST",
+      "/api/v1/orgs/team-one/webhooks/hook-1/test",
+      undefined,
+      "read-only",
+    );
+    assert.strictEqual(readOnlyWebhook.status, 403);
+    assert.strictEqual(targetedWebhookLookups, 2);
+    app.locals.webhookStore = previousWebhookStore;
+    app.locals.tokenAuthorizations.update(tokenARecord.id, tokenAOwner, {
+      label: tokenARecord.label,
+      scopes: tokenARecord.scopes,
+      orgs: tokenARecord.orgs,
+    });
+    tokenSubjects.set("token-a", tokenAClaims);
+    tokenSubjects.set("token-b", tokenBClaims);
     assert.strictEqual(
       (await request(port, "GET", "/api/v1/orgs", undefined, "unregistered-active")).status,
       403,
@@ -1339,7 +1393,7 @@ async function run() {
       "/api/v1/orgs/{org}": ["delete"],
       "/api/v1/orgs/{org}/events": ["get"],
       "/api/v1/orgs/{org}/webhooks": ["get", "post"],
-      "/api/v1/orgs/{org}/webhooks/{id}": ["delete"],
+      "/api/v1/orgs/{org}/webhooks/{id}": ["delete", "post"],
       "/api/v1/orgs/{org}/repos": ["get"],
       "/api/v1/orgs/{org}/repos/{repo}": ["post", "delete"],
       "/api/v1/orgs/{org}/repos/{repo}/log": ["get"],
@@ -1419,6 +1473,7 @@ async function run() {
     }
     assert.strictEqual(spec.paths["/api/v1/orgs"]["get"]["x-required-scope"], "repo:read or repo:write");
     assert.strictEqual(spec.paths["/api/v1/orgs/{org}/repos/{repo}"].post["x-required-scope"], "repo:write");
+    assert.strictEqual(spec.paths["/api/v1/orgs/{org}/webhooks/{id}"].post["x-required-scope"], "org:manage");
     assert.strictEqual(spec.paths["/api/v1/orgs/{org}/repos/{repo}/tags"].post["x-required-scope"], "repo:write");
     const worktreeCreateOperation = spec.paths["/api/v1/orgs/{org}/repos/{repo}/worktrees"].post;
     assert.strictEqual(worktreeCreateOperation["x-required-scope"], "repo:write");

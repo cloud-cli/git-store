@@ -25,6 +25,11 @@
           Receivers should verify <code>X-GitMini-Signature</code> against the exact request body and deduplicate with
           <code>id</code>.
         </p>
+        <p class="mt-2 text-gray-600 dark:text-gray-300">
+          Creating a webhook sends a signed <code>webhook.ping</code> event with the message “Hello from GitMini”. You
+          can send another ping at any time; test events target only that webhook and do not depend on its event
+          subscriptions.
+        </p>
       </details>
     </div>
     <form class="flex flex-col gap-3 rounded-xl border p-4" on-submit.prevent="create()">
@@ -81,6 +86,7 @@
       </button>
     </form>
     <template if="error"><p role="alert" class="text-red-600">{{ error }}</p></template>
+    <template if="notice"><p role="status" class="text-green-700">{{ notice }}</p></template>
     <ul class="space-y-2">
       <template for="hook of hooks"
         ><li class="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4">
@@ -93,7 +99,11 @@
               </p></template
             >
           </div>
-          <button type="button" class="rounded-lg px-3 py-2 text-red-700" on-click="remove(hook.id)">Delete</button>
+          <div class="flex gap-2">
+            <button type="button" class="rounded-lg border px-3 py-2" on-click="sendTest(hook.id)">
+              Send hello event</button
+            ><button type="button" class="rounded-lg px-3 py-2 text-red-700" on-click="remove(hook.id)">Delete</button>
+          </div>
         </li></template
       >
     </ul>
@@ -110,6 +120,7 @@
       const secret = ref("");
       const allowedIpRanges = ref("");
       const error = ref("");
+      const notice = ref("");
       const path = () => `/api/v1/orgs/${encodeURIComponent(org.value)}/webhooks`;
       const load = async () => {
         const response = await fetch(path());
@@ -133,6 +144,7 @@
       };
       const create = async () => {
         error.value = "";
+        notice.value = "";
         try {
           const response = await fetch(path(), {
             method: "POST",
@@ -146,13 +158,31 @@
           });
           const result = await response.json();
           if (!response.ok) throw new Error(result.error || "Unable to create webhook.");
+          notice.value =
+            result.testEvent?.status === "accepted"
+              ? "Webhook created. Hello event queued for delivery."
+              : "Webhook created, but the hello event could not be queued. You can retry it below.";
           endpoint.value = "";
           secret.value = "";
           document.querySelector('[aria-label="Webhook secret"]').value = "";
           allowedIpRanges.value = "";
           document.querySelector('[aria-label="Allowed IP ranges"]').value = "";
           selected.value = [];
-          await load();
+          await load().catch(() => {
+            error.value = "Webhook created, but the list could not be refreshed.";
+          });
+        } catch (cause) {
+          error.value = cause.message;
+        }
+      };
+      const sendTest = async (id) => {
+        error.value = "";
+        notice.value = "";
+        try {
+          const response = await fetch(`${path()}/${encodeURIComponent(id)}/test`, { method: "POST" });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || "Unable to send test event.");
+          notice.value = "Hello event queued for delivery.";
         } catch (cause) {
           error.value = cause.message;
         }
@@ -180,12 +210,14 @@
         selected,
         secret,
         error,
+        notice,
         setUrl,
         setSecret,
         setAllowedIpRanges,
         toggleEvent,
         create,
         remove,
+        sendTest,
       };
     }
   </script>
