@@ -605,25 +605,25 @@
                             {{ cloneUrlError }}
                           </p></template
                         >
-                        <template if="canRead"
+                        <template if="canManageOrg"
                           ><div class="my-4 border-t border-gray-200 dark:border-gray-700"></div>
-                          <form on-submit.prevent="createRepositoryToken()" class="space-y-3">
+                          <form on-submit.prevent="createOrgAccessToken()" class="space-y-3">
                             <div>
-                              <h3 class="text-sm font-semibold">Generate a repository token</h3>
+                              <h3 class="text-sm font-semibold">Generate a repository-scoped Org Access Token</h3>
                               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                Each token is separate and can be revoked in Settings.
+                                This token is restricted to this repository and can be revoked in organization settings.
                               </p>
                             </div>
                             <label class="block text-xs text-gray-600 dark:text-gray-300"
                               >Label<input
                                 class="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-950"
                                 placeholder="Git clone / push"
-                                on-input="setRepositoryTokenLabel($event.target.value)"
+                                on-input="setOrgAccessTokenLabel($event.target.value)"
                             /></label>
                             <label class="block text-xs text-gray-600 dark:text-gray-300"
                               >Access<select
                                 class="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-950"
-                                on-change="setRepositoryTokenScope($event.target.value)"
+                                on-change="setOrgAccessTokenScope($event.target.value)"
                               >
                                 <option value="repo:read">Read and clone only</option>
                                 <template if="canWrite"><option value="repo:write">Read and push</option></template>
@@ -633,22 +633,30 @@
                               >Optional expiry date<input
                                 class="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-950"
                                 type="date"
-                                on-input="setRepositoryTokenExpiry($event.target.value)"
+                                on-input="setOrgAccessTokenExpiry($event.target.value)"
                             /></label>
-                            <template if="repositoryTokenError"
+                            <template if="orgAccessTokenError"
                               ><p class="text-xs text-red-600 dark:text-red-400" role="alert">
-                                {{ repositoryTokenError }}
+                                {{ orgAccessTokenError }}
                               </p></template
                             >
                             <button
                               class="w-full rounded-md bg-brand px-3 py-2 text-sm font-medium text-white hover:bg-brand-hover"
                               type="submit"
                             >
-                              {{ repositoryTokenCreating ? 'Generating…' : 'Generate new token' }}
+                              {{ orgAccessTokenCreating ? 'Generating…' : 'Generate Org Access Token' }}
                             </button>
                           </form>
                         </template>
-                        <template if="repositoryToken"
+                        <template if="canRead && !canManageOrg"
+                          ><p
+                            class="my-4 border-t border-gray-200 pt-3 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400"
+                            role="status"
+                          >
+                            Organization admin access is required to create an Org Access Token.
+                          </p></template
+                        >
+                        <template if="orgAccessToken"
                           ><div
                             class="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/40"
                           >
@@ -657,14 +665,14 @@
                               GitMini stores only its hash. It will not be shown again.
                             </p>
                             <code class="mt-2 block break-all rounded bg-white/80 p-2 text-xs dark:bg-black/20"
-                              >{{ repositoryToken }}</code
+                              >{{ orgAccessToken }}</code
                             >
                             <button
                               class="mt-2 rounded-md border border-amber-500 px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100 dark:text-amber-100 dark:hover:bg-amber-900/40"
                               type="button"
-                              on-click="copyRepositoryToken()"
+                              on-click="copyOrgAccessToken()"
                             >
-                              {{ repositoryTokenCopied ? 'Copied' : 'Copy token' }}
+                              {{ orgAccessTokenCopied ? 'Copied' : 'Copy token' }}
                             </button>
                             <p class="mt-2 text-xs text-amber-800 dark:text-amber-200">
                               Use it as the Git password; keep the clone URL above credential-free.
@@ -940,13 +948,13 @@
               const orgCreated = ref(false);
               const cloneUrlCopied = ref(false);
               const cloneUrlError = ref("");
-              const repositoryTokenLabel = ref("");
-              const repositoryTokenScope = ref("repo:read");
-              const repositoryTokenExpiry = ref("");
-              const repositoryTokenCreating = ref(false);
-              const repositoryTokenError = ref("");
-              const repositoryToken = ref("");
-              const repositoryTokenCopied = ref(false);
+              const orgAccessTokenLabel = ref("");
+              const orgAccessTokenScope = ref("repo:read");
+              const orgAccessTokenExpiry = ref("");
+              const orgAccessTokenCreating = ref(false);
+              const orgAccessTokenError = ref("");
+              const orgAccessToken = ref("");
+              const orgAccessTokenCopied = ref(false);
               const branches = ref([]);
               const tags = ref([]);
               const branchName = ref("");
@@ -1308,24 +1316,24 @@
                   errorMessage.value = error.message || "Repository deletion failed.";
                 }
               };
-              const setRepositoryTokenLabel = (value) => {
-                repositoryTokenLabel.value = value;
+              const setOrgAccessTokenLabel = (value) => {
+                orgAccessTokenLabel.value = value;
               };
-              const setRepositoryTokenScope = (value) => {
-                repositoryTokenScope.value = value === "repo:write" && canWrite.value ? value : "repo:read";
+              const setOrgAccessTokenScope = (value) => {
+                orgAccessTokenScope.value = value === "repo:write" && canWrite.value ? value : "repo:read";
               };
-              const setRepositoryTokenExpiry = (value) => {
-                repositoryTokenExpiry.value = value;
+              const setOrgAccessTokenExpiry = (value) => {
+                orgAccessTokenExpiry.value = value;
               };
-              const clearRepositoryToken = () => {
+              const clearOrgAccessToken = () => {
                 cloneUrlCopied.value = false;
                 cloneUrlError.value = "";
-                repositoryTokenLabel.value = "";
-                repositoryTokenScope.value = "repo:read";
-                repositoryTokenExpiry.value = "";
-                repositoryTokenError.value = "";
-                repositoryToken.value = "";
-                repositoryTokenCopied.value = false;
+                orgAccessTokenLabel.value = "";
+                orgAccessTokenScope.value = "repo:read";
+                orgAccessTokenExpiry.value = "";
+                orgAccessTokenError.value = "";
+                orgAccessToken.value = "";
+                orgAccessTokenCopied.value = false;
               };
               const clonePopover = () => document.getElementById("clone-repo-popover");
               const setClonePopoverOpen = (open) => {
@@ -1352,8 +1360,8 @@
                   if (open) {
                     cloneUrlCopied.value = false;
                     cloneUrlError.value = "";
-                  } else if (!repositoryTokenCreating.value) {
-                    clearRepositoryToken();
+                  } else if (!orgAccessTokenCreating.value) {
+                    clearOrgAccessToken();
                   }
                   return;
                 }
@@ -1388,8 +1396,8 @@
                 if (event.newState === "open") {
                   cloneUrlCopied.value = false;
                   cloneUrlError.value = "";
-                } else if (!repositoryTokenCreating.value) {
-                  clearRepositoryToken();
+                } else if (!orgAccessTokenCreating.value) {
+                  clearOrgAccessToken();
                 }
               };
               const copyCloneUrl = async () => {
@@ -1401,49 +1409,51 @@
                   cloneUrlError.value = "Clipboard access is unavailable. Select and copy the URL above.";
                 }
               };
-              const copyRepositoryToken = async () => {
-                if (!repositoryToken.value) {
+              const copyOrgAccessToken = async () => {
+                if (!orgAccessToken.value) {
                   return;
                 }
                 try {
-                  await navigator.clipboard.writeText(repositoryToken.value);
-                  repositoryTokenCopied.value = true;
-                  repositoryTokenError.value = "";
+                  await navigator.clipboard.writeText(orgAccessToken.value);
+                  orgAccessTokenCopied.value = true;
+                  orgAccessTokenError.value = "";
                 } catch {
-                  repositoryTokenError.value = "Clipboard access is unavailable. Select and copy the token above.";
+                  orgAccessTokenError.value = "Clipboard access is unavailable. Select and copy the token above.";
                 }
               };
-              const createRepositoryToken = async () => {
-                if (!canRead.value) {
-                  repositoryTokenError.value = "Repository read access is required to create a token.";
+              const createOrgAccessToken = async () => {
+                if (!canManageOrg.value) {
+                  orgAccessTokenError.value = "Organization admin access is required to create an Org Access Token.";
                   return;
                 }
-                repositoryTokenCreating.value = true;
-                repositoryTokenError.value = "";
-                repositoryTokenCopied.value = false;
+                orgAccessTokenCreating.value = true;
+                orgAccessTokenError.value = "";
+                orgAccessTokenCopied.value = false;
                 try {
-                  const response = await fetch("/api/v1/personal-access-tokens", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      label: repositoryTokenLabel.value.trim() || `Git ${org.value}/${repoLabel.value}`,
-                      scopes: [repositoryTokenScope.value],
-                      expiresAt: repositoryTokenExpiry.value || null,
-                      org: org.value,
-                      repo: repoLabel.value,
-                    }),
-                  });
+                  const response = await fetch(
+                    `/api/v1/orgs/${encodeURIComponent(org.value)}/machine-git-credentials`,
+                    {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        label: orgAccessTokenLabel.value.trim() || `Git ${org.value}/${repoLabel.value}`,
+                        scopes: [orgAccessTokenScope.value],
+                        expiresAt: orgAccessTokenExpiry.value || null,
+                        repo: repoLabel.value,
+                      }),
+                    },
+                  );
                   const result = await response.json().catch(() => ({}));
                   if (!response.ok || typeof result.token !== "string") {
-                    throw new Error(result.error || "Token generation failed.");
+                    throw new Error(result.error || "Org Access Token generation failed.");
                   }
-                  repositoryToken.value = result.token;
-                  repositoryTokenCreating.value = false;
+                  orgAccessToken.value = result.token;
+                  orgAccessTokenCreating.value = false;
                   setClonePopoverOpen(true);
                 } catch (error) {
-                  repositoryTokenError.value = error.message || "Token generation failed.";
+                  orgAccessTokenError.value = error.message || "Org Access Token generation failed.";
                 } finally {
-                  repositoryTokenCreating.value = false;
+                  orgAccessTokenCreating.value = false;
                 }
               };
               const refreshOrganizations = async () => {
@@ -2168,13 +2178,13 @@
                 cloneUrl,
                 cloneUrlCopied,
                 cloneUrlError,
-                repositoryTokenLabel,
-                repositoryTokenScope,
-                repositoryTokenExpiry,
-                repositoryTokenCreating,
-                repositoryTokenError,
-                repositoryToken,
-                repositoryTokenCopied,
+                orgAccessTokenLabel,
+                orgAccessTokenScope,
+                orgAccessTokenExpiry,
+                orgAccessTokenCreating,
+                orgAccessTokenError,
+                orgAccessToken,
+                orgAccessTokenCopied,
                 entries,
                 commits,
                 directory,
@@ -2214,16 +2224,16 @@
                 refreshOrganizations,
                 createRepository,
                 deleteRepository,
-                setRepositoryTokenLabel,
-                setRepositoryTokenScope,
-                setRepositoryTokenExpiry,
-                clearRepositoryToken,
+                setOrgAccessTokenLabel,
+                setOrgAccessTokenScope,
+                setOrgAccessTokenExpiry,
+                clearOrgAccessToken,
                 setClonePopoverOpen,
                 toggleClonePopover,
                 handleClonePopoverToggle,
                 copyCloneUrl,
-                copyRepositoryToken,
-                createRepositoryToken,
+                copyOrgAccessToken,
+                createOrgAccessToken,
                 addFileToRepo,
                 commitChanges,
                 upload,

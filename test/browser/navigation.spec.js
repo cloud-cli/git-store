@@ -823,17 +823,17 @@ test("organization settings create, revoke, and hide an Org Access Token", async
   await expect(page.getByRole("heading", { name: "Webhooks", exact: true })).toBeHidden();
 
   await page.getByLabel("Access token label").fill("CI deploy");
-  await page.getByLabel("Repository restriction").fill("demo");
+  await expect(page.getByLabel("Repository restriction")).toHaveCount(0);
   await page.getByLabel("repo:write", { exact: true }).check();
   await page.getByRole("button", { name: "Create access token" }).click();
 
   await expect(page.getByRole("heading", { name: "Copy this token now" })).toBeVisible();
   await expect(page.getByText("gmc_browser_test_secret", { exact: true })).toBeVisible();
   expect(machineCredentialRequests).toEqual([
-    { label: "CI deploy", repo: "demo", scopes: ["repo:read", "repo:write"], expiresAt: null },
+    { label: "CI deploy", scopes: ["repo:read", "repo:write"], expiresAt: null },
   ]);
   const credentialRow = page.getByRole("listitem").filter({ hasText: "CI deploy" });
-  await expect(credentialRow).toContainText("demo");
+  await expect(credentialRow).toContainText("All repositories");
   await expect(credentialRow.getByRole("button", { name: "Delete" })).toHaveCount(0);
   page.once("dialog", (dialog) => dialog.accept());
   await credentialRow.getByRole("button", { name: "Revoke" }).click();
@@ -844,6 +844,20 @@ test("organization settings create, revoke, and hide an Org Access Token", async
   await credentialRow.getByRole("button", { name: "Delete" }).click();
   await expect(credentialRow).toHaveCount(0);
   await expect(page.getByRole("status")).toContainText("audit record remains stored");
+});
+
+test("clone panel creates a repository-restricted Org Access Token", async ({ page }) => {
+  await page.goto("/ui/?org=example&repo=demo");
+  await page.getByRole("button", { name: "Clone" }).click();
+  await page.getByLabel("Label", { exact: true }).fill("CI push token");
+  await page.getByRole("combobox").selectOption("repo:write");
+  await page.getByRole("button", { name: "Generate Org Access Token" }).click();
+
+  await expect(page.getByText("gmc_browser_test_secret", { exact: true })).toBeVisible();
+  expect(machineCredentialRequests).toEqual([
+    { label: "CI push token", repo: "demo", scopes: ["repo:write"], expiresAt: null },
+  ]);
+  expect(createdPersonalAccessTokenRequest).toBeNull();
 });
 
 test("organization breadcrumb does not retain a repository crumb", async ({ page }) => {
@@ -1209,6 +1223,9 @@ test("team roles control repository editing and organization administration UI",
   role = "contributor";
   await page.reload();
   await expect(page.getByRole("button", { name: "Create branch" })).toBeVisible();
+  await page.getByRole("button", { name: "Clone" }).click();
+  await expect(page.getByRole("heading", { name: "Generate a repository-scoped Org Access Token" })).toHaveCount(0);
+  await expect(page.getByText("Organization admin access is required to create an Org Access Token.")).toBeVisible();
 
   role = "admin";
   await page.goto("/ui/?settings=organizations&org=example&section=access-tokens");
