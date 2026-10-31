@@ -57,10 +57,19 @@
             class="rounded-lg px-3 py-2 font-medium hover:bg-gray-100 dark:hover:bg-gray-900"
             class-current="section === 'webhooks'"
             >Webhooks</a
+          ><a
+            attr-href="sectionHref('machine-credentials')"
+            attr-aria-current="section === 'machine-credentials' ? 'page' : null"
+            class="rounded-lg px-3 py-2 font-medium hover:bg-gray-100 dark:hover:bg-gray-900"
+            class-current="section === 'machine-credentials'"
+            >Machine Git credentials</a
           >
         </nav>
         <template if="section === 'webhooks'"
           ><org-webhooks data-org-settings-view bind-org="selectedOrg"></org-webhooks
+        ></template>
+        <template if="section === 'machine-credentials'"
+          ><machine-git-credentials data-org-settings-view bind-org="selectedOrg"></machine-git-credentials
         ></template>
         <template if="section === 'repositories'"
           ><section data-org-settings-view aria-labelledby="org-repositories-heading">

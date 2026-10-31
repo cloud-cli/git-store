@@ -8,6 +8,16 @@ All URLs are relative to the server base URL (`http://localhost:3000` by default
 - `{repo}` – string, the repository name (e.g. `myproject`).
 - `{name}` – string, the tag or branch name.
 
+## Organization machine Git credentials
+
+Organization owners can manage headless HTTPS Git credentials in organization settings. These credentials use HTTP Basic authentication only on `/git/{org}/{repo}.git/...`; they are not bearer tokens and never authorize REST API requests. Creation/list/revocation require an interactive browser session and `repo:write` permission for the organization owner. Secrets are returned only once and only their SHA-256 hashes are persisted. Scopes are `repo:read` and/or `repo:write`; credentials are constrained to exactly one organization and can optionally name one repository. Fetch requires read or write; push requires write. `expiresAt` is an optional future calendar date (`YYYY-MM-DD`).
+
+- `GET /api/v1/orgs/{org}/machine-git-credentials` – list non-secret metadata.
+- `POST /api/v1/orgs/{org}/machine-git-credentials` – create with `{ "label": "build agent", "scopes": ["repo:read"], "repo": "optional-repo", "expiresAt": "optional-date" }`; response includes the one-time `token` and public `record`.
+- `DELETE /api/v1/orgs/{org}/machine-git-credentials/{id}` – revoke.
+
+Use the token as the Basic-auth password (the username is ignored), for example `https://USER:TOKEN@git.example/git/acme/widgets.git`. Avoid embedding secrets in shell history or repository remotes; use a credential helper or CI secret store.
+
 ## Authentication and authorization
 
 API and Git bearer credentials must be active OIDC tokens validated through the configured

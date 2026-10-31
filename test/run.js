@@ -962,6 +962,119 @@ async function run() {
     );
     assert.strictEqual(foreignGitRepo.status, 404);
 
+    const machineReadOnly = app.locals.machineGitCredentials.create({
+      org: "team-one",
+      repo: "git-http",
+      label: "CI read",
+      scopes: ["repo:read"],
+    });
+    const machineHeader = `Basic ${Buffer.from(`machine:${machineReadOnly.token}`).toString("base64")}`;
+    const machineRefs = await request(
+      port,
+      "GET",
+      "/git/team-one/git-http.git/info/refs?service=git-upload-pack",
+      undefined,
+      undefined,
+      { Authorization: machineHeader },
+    );
+    assert.strictEqual(machineRefs.status, 200, "machine credential can read scoped Smart HTTP refs");
+    const machineClonePath = path.join(dataPath, "machine-clone");
+    await git([
+      "-c",
+      `http.extraheader=Authorization: ${machineHeader}`,
+      "clone",
+      `http://127.0.0.1:${port}/git/team-one/git-http.git`,
+      machineClonePath,
+    ]);
+    const machinePush = await request(
+      port,
+      "GET",
+      "/git/team-one/git-http.git/info/refs?service=git-receive-pack",
+      undefined,
+      undefined,
+      { Authorization: machineHeader },
+    );
+    assert.strictEqual(machinePush.status, 403, "read-only machine credential cannot push");
+    const machineApi = await request(port, "GET", "/api/v1/orgs", undefined, machineReadOnly.token);
+    assert.notStrictEqual(machineApi.status, 200, "machine credential does not authorize API requests");
+    const wrongOrg = await request(
+      port,
+      "GET",
+      "/git/introspected-org/git-http.git/info/refs?service=git-upload-pack",
+      undefined,
+      undefined,
+      { Authorization: machineHeader },
+    );
+    assert.strictEqual(wrongOrg.status, 404, "machine credential cannot cross organization boundary");
+    const wrongRepo = await request(
+      port,
+      "GET",
+      "/git/team-one/inside.git/info/refs?service=git-upload-pack",
+      undefined,
+      undefined,
+      { Authorization: machineHeader },
+    );
+    assert.strictEqual(wrongRepo.status, 404, "machine credential cannot cross repository restriction");
+    const anonymousManagement = await request(port, "GET", "/api/v1/orgs/team-one/machine-git-credentials");
+    assert.strictEqual(
+      anonymousManagement.status,
+      401,
+      "credential management requires an authenticated browser session",
+    );
+    const bearerManagement = await request(
+      port,
+      "GET",
+      "/api/v1/orgs/team-one/machine-git-credentials",
+      undefined,
+      "token-a",
+    );
+    assert.strictEqual(bearerManagement.status, 403, "bearer tokens cannot manage machine Git credentials");
+    app.locals.machineGitCredentials.revoke("team-one", machineReadOnly.record.id);
+    const revokedMachineGit = await request(
+      port,
+      "GET",
+      "/git/team-one/git-http.git/info/refs?service=git-upload-pack",
+      undefined,
+      undefined,
+      { Authorization: machineHeader },
+    );
+    assert.strictEqual(revokedMachineGit.status, 401, "revoked machine credential no longer authenticates");
+    const machineReadWrite = app.locals.machineGitCredentials.create({
+      org: "team-one",
+      repo: "git-http",
+      label: "CI push",
+      scopes: ["repo:read", "repo:write"],
+    });
+    const machineWriteHeader = `Basic ${Buffer.from(`machine:${machineReadWrite.token}`).toString("base64")}`;
+    fs.writeFileSync(path.join(machineClonePath, "machine-credential.txt"), "machine push\n");
+    await git(["-C", machineClonePath, "add", "machine-credential.txt"]);
+    await git([
+      "-C",
+      machineClonePath,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.test",
+      "commit",
+      "-m",
+      "machine credential push",
+    ]);
+    await git([
+      "-c",
+      `http.extraheader=Authorization: ${machineWriteHeader}`,
+      "-C",
+      machineClonePath,
+      "push",
+      "origin",
+      "HEAD:refs/heads/machine-credential",
+    ]);
+    const machinePushDeniedApi = await request(port, "GET", "/api/v1/orgs", undefined, machineReadWrite.token);
+    assert.notStrictEqual(
+      machinePushDeniedApi.status,
+      200,
+      "write-capable machine credential still cannot authorize API requests",
+    );
+
     const listA = await request(port, "GET", "/api/v1/repos", undefined, "token-a");
     const listB = await request(port, "GET", "/api/v1/repos", undefined, "token-b");
     assert.deepStrictEqual(JSON.parse(listA.body), {
@@ -1392,6 +1505,8 @@ async function run() {
       "/api/v1/token-authorizations": ["post"],
       "/api/v1/orgs/{org}": ["delete"],
       "/api/v1/orgs/{org}/events": ["get"],
+      "/api/v1/orgs/{org}/machine-git-credentials": ["get", "post"],
+      "/api/v1/orgs/{org}/machine-git-credentials/{id}": ["delete"],
       "/api/v1/orgs/{org}/webhooks": ["get", "post"],
       "/api/v1/orgs/{org}/webhooks/{id}": ["delete", "post"],
       "/api/v1/orgs/{org}/repos": ["get"],

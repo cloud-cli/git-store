@@ -12,6 +12,7 @@ import { validateRepoName, getSubjectHash, hashSubject } from "./storage.js";
 import * as organizations from "./organizations.js";
 import { createDatabaseClient, createAuditStore, createTokenFingerprint } from "./audit.js";
 import { PersonalAccessTokenStore, normalizeTokenExpiry } from "./personal-access-tokens.js";
+import { MachineGitCredentialStore } from "./machine-git-credentials.js";
 import { createThreadStore } from "./threads.js";
 import { execGit, atomicCommit } from "./git.js";
 import {
@@ -71,6 +72,10 @@ const personalAccessTokens = new PersonalAccessTokenStore(
   path.join(process.env.DATA_PATH, "personal-access-tokens.json"),
 );
 app.locals.tokenAuthorizations = personalAccessTokens;
+const machineGitCredentials = new MachineGitCredentialStore(
+  path.join(process.env.DATA_PATH, "machine-git-credentials.json"),
+);
+app.locals.machineGitCredentials = machineGitCredentials;
 const browserSessionMaxAge = 30 * 24 * 60 * 60 * 1000;
 const accessTokenRefreshSkew = 60 * 1000;
 
@@ -606,7 +611,11 @@ function getAuthenticatedSubjectHash(req) {
 }
 
 function tokenAllowsOrg(req, org) {
-  return req.authType === "session" || (Array.isArray(req.user?.orgs) && req.user.orgs.includes(org));
+  return (
+    req.authType === "session" ||
+    req.machineGitCredential?.credentialOrg === org ||
+    (Array.isArray(req.user?.orgs) && req.user.orgs.includes(org))
+  );
 }
 
 function callerCanGrantScope(req, scope) {
@@ -690,8 +699,15 @@ function requireGitBasicAuth(req, res, next) {
     return res.status(401).send("Git HTTP authentication required");
   }
   req.auditToken = token;
+  const machineCredential = machineGitCredentials.authenticate(token);
   const personalToken = personalAccessTokens.authenticate(token);
-  Promise.resolve(personalToken.recognized ? personalToken.claims : introspectAccessToken(token))
+  Promise.resolve(
+    machineCredential.recognized
+      ? machineCredential.claims
+      : personalToken.recognized
+        ? personalToken.claims
+        : introspectAccessToken(token),
+  )
     .then((claims) => {
       if (claims?.active !== true || typeof claims.sub !== "string" || !claims.sub.trim()) {
         auditSecurityFailure(req, "security.auth.denied", {
@@ -700,7 +716,7 @@ function requireGitBasicAuth(req, res, next) {
         res.set("WWW-Authenticate", 'Basic realm="GitMini", charset="UTF-8"');
         return res.status(401).send("Invalid Git credentials");
       }
-      if (!personalToken.recognized) {
+      if (!personalToken.recognized && !machineCredential.recognized) {
         const local = personalAccessTokens.findByToken(token);
         if (!local || local.ownerHash !== hashSubject(claims.sub)) {
           return res.status(403).send("Token has no local authorization");
@@ -715,7 +731,14 @@ function requireGitBasicAuth(req, res, next) {
       } else {
         req.user = claims;
       }
-      req.authType = personalToken.recognized ? "personal-access-token" : "git-token";
+      req.authType = machineCredential.recognized
+        ? "machine-git-credential"
+        : personalToken.recognized
+          ? "personal-access-token"
+          : "git-token";
+      if (machineCredential.recognized) {
+        req.machineGitCredential = machineCredential.claims;
+      }
       return next();
     })
     .catch(() => {
@@ -753,13 +776,23 @@ async function gitSmartHttp(req, res) {
   const operation = match[3];
   const subjectHash = getAuthenticatedSubjectHash(req);
   const organization = organizations.get(orgSlug);
-  if (!organization || organization.ownerHash !== subjectHash) {
+  const machine = req.machineGitCredential;
+  if (
+    !organization ||
+    (organization.ownerHash !== subjectHash && !(machine && machine.credentialOrg === organization.slug))
+  ) {
     auditSecurityFailure(req, "security.access.denied", {
       reason: "organization_not_accessible",
     });
     return res.status(404).send("Repository not found");
   }
   if (!tokenAllowsOrg(req, organization.slug)) {
+    return res.status(404).send("Repository not found");
+  }
+  if (
+    machine &&
+    (machine.credentialOrg !== organization.slug || (machine.credentialRepo && machine.credentialRepo !== repo))
+  ) {
     return res.status(404).send("Repository not found");
   }
   req.organization = organization;
@@ -1906,6 +1939,89 @@ function requireInteractiveBrowserSession(req, res, next) {
   return next();
 }
 
+function requireNoStore(req, res, next) {
+  res.set("Cache-Control", "no-store");
+  return next();
+}
+
+app.get(
+  "/api/v1/orgs/:org/machine-git-credentials",
+  requireNoStore,
+  requireAuthentication,
+  requireInteractiveBrowserSession,
+  requireScope("org:manage"),
+  (req, res) => {
+    const org = organizations.get(req.params.org);
+    if (!org || org.ownerHash !== getAuthenticatedSubjectHash(req)) {
+      return res.status(404).json({ error: "Organization not found" });
+    }
+    try {
+      return res.json({ credentials: machineGitCredentials.list(org.slug) });
+    } catch {
+      return res.status(503).json({ error: "Machine Git credential storage is unavailable" });
+    }
+  },
+);
+app.post(
+  "/api/v1/orgs/:org/machine-git-credentials",
+  requireNoStore,
+  requireAuthentication,
+  requireInteractiveBrowserSession,
+  requireScope("org:manage"),
+  (req, res) => {
+    const org = organizations.get(req.params.org);
+    if (!org || org.ownerHash !== getAuthenticatedSubjectHash(req)) {
+      return res.status(404).json({ error: "Organization not found" });
+    }
+    const body = req.body || {};
+    const label = typeof body.label === "string" ? body.label.trim() : "";
+    const repo = body.repo === undefined || body.repo === "" ? null : body.repo;
+    const scopes = body.scopes;
+    const expiry = normalizeTokenExpiry(body.expiresAt);
+    if (
+      !label ||
+      label.length > 100 ||
+      !Array.isArray(scopes) ||
+      !scopes.length ||
+      scopes.some((scope) => !["repo:read", "repo:write"].includes(scope)) ||
+      new Set(scopes).size !== scopes.length ||
+      !expiry.valid ||
+      (repo !== null && !validateRepoName(repo))
+    ) {
+      return res.status(400).json({ error: "Invalid credential details" });
+    }
+    if (repo !== null && !repositoryExists(org.slug, repo)) {
+      return res.status(404).json({ error: "Repository not found" });
+    }
+    try {
+      const created = machineGitCredentials.create({ org: org.slug, repo, label, scopes, expiresAt: expiry.expiresAt });
+      return res.status(201).json(created);
+    } catch {
+      return res.status(503).json({ error: "Machine Git credential storage is unavailable" });
+    }
+  },
+);
+app.delete(
+  "/api/v1/orgs/:org/machine-git-credentials/:id",
+  requireNoStore,
+  requireAuthentication,
+  requireInteractiveBrowserSession,
+  requireScope("org:manage"),
+  (req, res) => {
+    const org = organizations.get(req.params.org);
+    if (!org || org.ownerHash !== getAuthenticatedSubjectHash(req)) {
+      return res.status(404).json({ error: "Organization not found" });
+    }
+    try {
+      return machineGitCredentials.revoke(org.slug, req.params.id)
+        ? res.status(204).end()
+        : res.status(404).json({ error: "Credential not found" });
+    } catch {
+      return res.status(503).json({ error: "Machine Git credential storage is unavailable" });
+    }
+  },
+);
+
 app.get("/api/v1/personal-access-tokens", requireAuthentication, requireInteractiveBrowserSession, (req, res) => {
   res.set("Cache-Control", "no-store");
   return res.json({
@@ -3048,6 +3164,90 @@ function makeApiSpec() {
           ),
           security: [{ bearerAuth: [] }],
           "x-required-scope": "org:create",
+        },
+      },
+      "/api/v1/orgs/{org}/machine-git-credentials": {
+        get: {
+          summary: "List organization machine Git credentials",
+          description: "Requires the owning user's interactive browser session; secrets are not returned.",
+          parameters: [
+            {
+              name: "org",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          security: [{ cookieSession: [] }],
+          responses: {
+            200: { description: "Credential metadata without secret values" },
+            401: unauthorized,
+            403: { description: "Interactive session or repo:write permission required" },
+            404: { description: "Organization not found" },
+            503: { description: "Credential storage unavailable" },
+          },
+        },
+        post: {
+          summary: "Create an organization machine Git credential",
+          description:
+            "Creates a Git Smart HTTP Basic credential scoped to this organization and optionally one repository. The secret is returned once and cannot authorize REST API requests.",
+          parameters: [
+            {
+              name: "org",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          security: [{ cookieSession: [] }],
+          requestBody: jsonBody(
+            {
+              label: { type: "string", minLength: 1, maxLength: 100 },
+              repo: { type: "string", description: "Optional repository restriction" },
+              scopes: {
+                type: "array",
+                minItems: 1,
+                items: { type: "string", enum: ["repo:read", "repo:write"] },
+              },
+              expiresAt: { type: "string", format: "date", nullable: true },
+            },
+            ["label", "scopes"],
+          ),
+          responses: {
+            201: { description: "Credential metadata and one-time secret" },
+            400: { description: "Invalid credential details" },
+            401: unauthorized,
+            403: { description: "Interactive session or repo:write permission required" },
+            404: { description: "Organization or repository not found" },
+            503: { description: "Credential storage unavailable" },
+          },
+        },
+      },
+      "/api/v1/orgs/{org}/machine-git-credentials/{id}": {
+        delete: {
+          summary: "Revoke a machine Git credential",
+          parameters: [
+            {
+              name: "org",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string", pattern: "^mgc_[a-f0-9]{24}$" },
+            },
+          ],
+          security: [{ cookieSession: [] }],
+          responses: {
+            204: { description: "Revoked" },
+            401: unauthorized,
+            403: { description: "Interactive session or repo:write permission required" },
+            404: { description: "Organization or credential not found" },
+            503: { description: "Credential storage unavailable" },
+          },
         },
       },
       "/api/v1/orgs/{org}": {

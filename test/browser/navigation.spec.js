@@ -9,6 +9,8 @@ let currentEvents;
 let currentPersonalAccessTokens;
 let currentOrgWebhooks;
 let testWebhookRequests;
+let currentMachineCredentials;
+let machineCredentialRequests;
 let createdOrgWebhookRequest;
 let webhookApiDisabled;
 let expectedWebhookHttpErrors;
@@ -117,6 +119,8 @@ test.beforeEach(async ({ page }) => {
   createdTokenAuthorizationRequest = null;
   currentOrgWebhooks = [];
   testWebhookRequests = [];
+  currentMachineCredentials = [];
+  machineCredentialRequests = [];
   createdOrgWebhookRequest = null;
   webhookApiDisabled = false;
   expectedWebhookHttpErrors = 0;
@@ -294,6 +298,34 @@ test.beforeEach(async ({ page }) => {
     }),
   );
   await page.route("**/api/v1/orgs/example/repos", (route) => route.fulfill({ json: { repos: currentRepositories } }));
+  await page.route("**/api/v1/orgs/example/machine-git-credentials**", async (route) => {
+    const request = route.request();
+    if (request.method() === "GET") {
+      return route.fulfill({ json: { credentials: currentMachineCredentials } });
+    }
+    if (request.method() === "POST") {
+      const details = JSON.parse(request.postData());
+      machineCredentialRequests.push(details);
+      const record = {
+        id: "mgc_0123456789abcdef01234567",
+        org: "example",
+        repo: details.repo,
+        label: details.label,
+        scopes: details.scopes,
+        createdAt: "2026-10-31T00:00:00.000Z",
+        expiresAt: details.expiresAt,
+      };
+      currentMachineCredentials.unshift(record);
+      return route.fulfill({ status: 201, json: { token: "gmc_browser_test_secret", record } });
+    }
+    if (request.method() === "DELETE") {
+      currentMachineCredentials = currentMachineCredentials.filter(
+        (credential) => !request.url().endsWith(`/${credential.id}`),
+      );
+      return route.fulfill({ status: 204 });
+    }
+    return route.fulfill({ status: 405, json: { error: "Method not allowed" } });
+  });
   await page.route("**/api/v1/orgs/example/webhooks**", async (route) => {
     const request = route.request();
     if (request.method() === "GET") {
@@ -584,6 +616,31 @@ test("organization settings navigate to repositories and manage webhook subscrip
   expectedWebhookHttpErrors += 1;
   await page.reload();
   await expect(page.getByRole("alert")).toHaveText("Webhook API is disabled");
+});
+
+test("organization settings create and revoke an org-scoped machine Git credential", async ({ page }) => {
+  await page.goto("/ui/?settings=organizations&org=example");
+  await page
+    .getByRole("navigation", { name: "Organization settings" })
+    .getByRole("link", { name: "Machine Git credentials" })
+    .click();
+
+  await page.getByLabel("Credential label").fill("CI deploy");
+  await page.getByLabel("Repository restriction").fill("demo");
+  await page.getByLabel("repo:write", { exact: true }).check();
+  await page.getByRole("button", { name: "Create credential" }).click();
+
+  await expect(page.getByRole("heading", { name: "Copy this credential now" })).toBeVisible();
+  await expect(page.getByText("gmc_browser_test_secret", { exact: true })).toBeVisible();
+  expect(machineCredentialRequests).toEqual([
+    { label: "CI deploy", repo: "demo", scopes: ["repo:read", "repo:write"], expiresAt: null },
+  ]);
+  const credentialRow = page.getByRole("listitem").filter({ hasText: "CI deploy" });
+  await expect(credentialRow).toContainText("demo");
+  page.once("dialog", (dialog) => dialog.accept());
+  await credentialRow.getByRole("button", { name: "Revoke" }).click();
+  await expect(credentialRow).toHaveCount(0);
+  await expect(page.getByRole("status")).toContainText("Credential revoked.");
 });
 
 test("organization breadcrumb does not retain a repository crumb", async ({ page }) => {
