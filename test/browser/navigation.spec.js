@@ -510,7 +510,13 @@ test("team settings route history, owner management, invite acceptance, and resp
     isOwner: true,
     role: "admin",
     members: [{ id: "member-hash", memberId: "member-subject-hash", role: "viewer" }],
-    invitations: [],
+    invitations: [
+      {
+        id: "long-id-invite",
+        memberId: "1e9d31b9081953e7bd5f4c0421ae6682d88dab4dd589cf386c20b3a9e4f331e7",
+        role: "admin",
+      },
+    ],
     incomingInvitations: [],
     memberships: [],
   };
@@ -555,6 +561,11 @@ test("team settings route history, owner management, invite acceptance, and resp
   const panel = page.getByRole("region", { name: "Team" });
   await expect(page.getByRole("heading", { name: "Team", exact: true })).toBeVisible();
   await expect(panel).toContainText("current and future organizations");
+  const longInvitationHash = panel
+    .locator("code")
+    .filter({ hasText: "1e9d31b9081953e7bd5f4c0421ae6682d88dab4dd589cf386c20b3a9e4f331e7" });
+  await expect(longInvitationHash).toBeVisible();
+  expect(await longInvitationHash.evaluate((element) => element.clientWidth)).toBeGreaterThan(200);
   const navigation = page.getByRole("navigation", {
     name: "Settings navigation",
   });

@@ -83,9 +83,12 @@
         <h3 class="mb-3 text-lg font-semibold">Members</h3>
         <ul class="mb-6 space-y-2">
           <template for="member of team.members"
-            ><li class="flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 p-3 dark:border-gray-700">
-              <span class="min-w-0 flex-1 break-all">{{ member.memberId || member.id }}</span
-              ><label class="flex items-center gap-2"
+            ><li
+              class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border border-gray-200 p-3 dark:border-gray-700 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto]"
+            >
+              <code class="col-span-2 min-w-0 break-all font-mono text-sm leading-6 sm:col-span-1"
+                >{{ member.memberId || member.id }}</code
+              ><label class="col-span-2 flex items-center gap-2 sm:col-span-1"
                 >Role<select
                   attr-aria-label="'Role for member ' + member.id"
                   class="rounded-lg border border-gray-300 bg-white px-2 py-2 dark:border-gray-600 dark:bg-gray-950"
@@ -98,14 +101,14 @@
                 type="button"
                 attr-data-member-id="member.id"
                 on-click="changeRole($event)"
-                class="rounded-lg border px-3 py-2 text-sm"
+                class="col-span-1 rounded-lg border px-3 py-2 text-sm"
               >
                 Save role</button
               ><button
                 type="button"
                 attr-data-member-id="member.id"
                 on-click="removeMember($event)"
-                class="rounded-lg border border-red-300 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:text-red-300"
+                class="col-span-1 rounded-lg border border-red-300 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:text-red-300"
               >
                 Remove
               </button>
@@ -115,12 +118,16 @@
         <h3 class="mb-3 text-lg font-semibold">Pending invitations</h3>
         <ul class="space-y-2">
           <template for="invitation of team.invitations"
-            ><li class="flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 p-3 dark:border-gray-700">
-              <span class="min-w-0 flex-1 break-all">{{ invitation.memberId }}</span><span>{{ invitation.role }}</span
+            ><li
+              class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border border-gray-200 p-3 dark:border-gray-700 sm:grid-cols-[minmax(0,1fr)_auto_auto]"
+            >
+              <code class="col-span-2 min-w-0 break-all font-mono text-sm leading-6 sm:col-span-1"
+                >{{ invitation.memberId }}</code
+              ><span class="col-span-1">{{ invitation.role }}</span
               ><button
                 type="button"
                 on-click="cancelInvitation(invitation)"
-                class="rounded-lg border px-3 py-2 text-sm"
+                class="col-span-1 justify-self-end rounded-lg border px-3 py-2 text-sm"
               >
                 Cancel invitation
               </button>
