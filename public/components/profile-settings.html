@@ -28,9 +28,18 @@
       <h2 id="profile-heading" class="mb-6 text-2xl font-bold">Profile</h2>
       <div class="flex items-center gap-4">
         <img if="photoUrl" attr-src="photoUrl" alt="Profile photo" class="h-16 w-16 rounded-full object-cover" />
+        <span
+          if="!photoUrl"
+          aria-hidden="true"
+          class="inline-flex size-16 shrink-0 items-center justify-center rounded-full bg-brand text-xl font-bold text-white"
+          >{{ userInitial }}</span
+        >
         <div>
           <p class="font-semibold">{{ profile?.name || "Name not provided" }}</p>
           <p class="text-sm text-gray-600 dark:text-gray-300">{{ profile?.email || "Email not provided" }}</p>
+          <p class="mt-1 break-all text-xs text-gray-500 dark:text-gray-400">
+            {{ profile?.sub || "Subject not provided" }}
+          </p>
         </div>
       </div>
       <template if="error"
@@ -50,6 +59,10 @@
     export default function () {
       const profile = defineProp("profile", { default: null });
       const error = ref("");
+      const userInitial = computed(() => {
+        const alias = profile.value?.name || profile.value?.email?.split("@")[0] || "Signed in";
+        return alias.trim().charAt(0).toUpperCase() || "U";
+      });
       const photoUrl = computed(() => {
         const value = profile.value?.picture || profile.value?.photo;
         if (typeof value !== "string") return "";
@@ -73,7 +86,7 @@
           error.value = cause.message || "Unable to sign out. Please try again.";
         }
       };
-      return { profile, photoUrl, error, signOut };
+      return { profile, photoUrl, userInitial, error, signOut };
     }
   </script>
 </template>

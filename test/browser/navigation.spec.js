@@ -140,6 +140,7 @@ test.beforeEach(async ({ page }) => {
     authenticated: true,
     canWrite: true,
     profile: {
+      sub: "browser-tester-subject",
       name: "Browser Tester",
       email: "browser@example.test",
       picture: "https://images.example.test/avatar.png",
@@ -474,6 +475,7 @@ test("profile settings show profile, photo, and sign out", async ({ page }) => {
   const profileSection = page.getByRole("region");
   await expect(profileSection.getByText("Browser Tester", { exact: true })).toBeVisible();
   await expect(profileSection.getByText("browser@example.test", { exact: true })).toBeVisible();
+  await expect(profileSection.getByText("browser-tester-subject", { exact: true })).toBeVisible();
   await expect(page.getByRole("img", { name: "Profile photo" })).toHaveAttribute(
     "src",
     "https://images.example.test/avatar.png",
@@ -487,6 +489,19 @@ test("profile settings show profile, photo, and sign out", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
   expect(logoutRequest?.method()).toBe("POST");
   expect(runtimeErrors).toEqual([]);
+});
+
+test("profile settings show an initials fallback when no photo is available", async ({ page }) => {
+  bootstrapSession.profile.picture = "";
+  await page.goto("/ui/?settings=profile");
+  const profileSection = page.getByRole("region");
+  await expect(profileSection.getByRole("img", { name: "Profile photo" })).toHaveCount(0);
+  await expect(profileSection.getByText("B", { exact: true })).toBeVisible();
+
+  bootstrapSession.profile.picture = "javascript:alert(1)";
+  await page.goto("/ui/?settings=profile");
+  await expect(page.getByRole("img", { name: "Profile photo" })).toHaveCount(0);
+  await expect(page.getByRole("region").getByText("B", { exact: true })).toBeVisible();
 });
 
 test.afterEach(() => {
