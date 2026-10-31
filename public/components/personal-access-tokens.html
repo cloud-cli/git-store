@@ -110,13 +110,21 @@
           <fieldset class="flex flex-col gap-1 text-sm font-medium">
             <legend>Scope</legend>
             <template for="scopeOption of scopeOptions">
-              <label class="flex items-center gap-2 font-normal"
-                ><input
-                  type="checkbox"
-                  value="{{ scopeOption }}"
-                  on-change="toggleScope(scopeOption, $event.target.checked)"
-                />{{ scopeOption }}</label
-              >
+              <template if="scopeAvailable(scopeOption)">
+                <label class="flex items-center gap-2 font-normal"
+                  ><input
+                    type="checkbox"
+                    value="{{ scopeOption }}"
+                    on-change="toggleScope(scopeOption, $event.target.checked)"
+                  />{{ scopeOption }}</label
+                >
+              </template>
+              <template if="!scopeAvailable(scopeOption)">
+                <label class="flex items-center gap-2 font-normal text-gray-400 dark:text-gray-500"
+                  ><input type="checkbox" value="{{ scopeOption }}" disabled />{{ scopeOption }} (not granted to your
+                  user)</label
+                >
+              </template>
             </template>
           </fieldset>
           <label class="flex flex-col gap-1 text-sm font-medium"
@@ -170,13 +178,21 @@
           <fieldset class="flex flex-col gap-1 text-sm font-medium">
             <legend>GitMini capabilities</legend>
             <template for="scopeOption of scopeOptions">
-              <label class="flex items-center gap-2 font-normal"
-                ><input
-                  type="checkbox"
-                  value="{{ scopeOption }}"
-                  on-change="toggleBindingScope(scopeOption, $event.target.checked)"
-                />{{ scopeOption }}</label
-              >
+              <template if="scopeAvailable(scopeOption)">
+                <label class="flex items-center gap-2 font-normal"
+                  ><input
+                    type="checkbox"
+                    value="{{ scopeOption }}"
+                    on-change="toggleBindingScope(scopeOption, $event.target.checked)"
+                  />{{ scopeOption }}</label
+                >
+              </template>
+              <template if="!scopeAvailable(scopeOption)">
+                <label class="flex items-center gap-2 font-normal text-gray-400 dark:text-gray-500"
+                  ><input type="checkbox" value="{{ scopeOption }}" disabled />{{ scopeOption }} (not granted to your
+                  user)</label
+                >
+              </template>
             </template>
           </fieldset>
           <p class="text-sm text-gray-600 dark:text-gray-300">Grant only organizations this token should access.</p>
@@ -225,7 +241,8 @@
       const editingTokenId = ref("");
       const externalToken = ref("");
       const externalLabel = ref("");
-      const scopeOptions = canWrite.value ? ["repo:read", "repo:write", "org:create", "org:manage"] : ["repo:read"];
+      const scopeOptions = ["repo:read", "repo:write", "org:create", "org:manage"];
+      const scopeAvailable = (scope) => (scope === "repo:read" ? canRead.value : canWrite.value);
 
       const responseError = async (response) => {
         let body = {};
@@ -269,7 +286,7 @@
         if (!canRead.value || busy.value) {
           return;
         }
-        if (selectedScopes.value.includes("repo:write") && !canWrite.value) {
+        if (selectedScopes.value.some((scope) => !scopeAvailable(scope))) {
           return;
         }
         busy.value = true;
@@ -301,7 +318,13 @@
           await createToken();
           return;
         }
-        if (busy.value || !selectedScopes.value.length) return;
+        if (
+          busy.value ||
+          !selectedScopes.value.length ||
+          selectedScopes.value.some((scope) => !scopeAvailable(scope))
+        ) {
+          return;
+        }
         busy.value = true;
         error.value = "";
         try {
@@ -335,7 +358,7 @@
       const bindToken = async () => {
         const secret = externalToken.value;
         if (!secret || !externalLabel.value.trim() || !bindingScopes.value.length || busy.value) return;
-        if (bindingScopes.value.includes("repo:write") && !canWrite.value) return;
+        if (bindingScopes.value.some((scope) => !scopeAvailable(scope))) return;
         busy.value = true;
         error.value = "";
         try {
@@ -413,6 +436,7 @@
           label.value = value;
         },
         scopeOptions,
+        scopeAvailable,
         organizations,
         editingTokenId,
         beginEdit,

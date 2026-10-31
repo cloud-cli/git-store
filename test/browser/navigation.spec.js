@@ -461,7 +461,7 @@ test("token settings lists tokens and creates a scoped PAT", async ({ page }) =>
       orgs: ["example"],
     });
   await expect(bindForm.getByLabel("External token")).toHaveValue("");
-  expect(await page.evaluate(() => JSON.stringify(Object.values(localStorage)))).not.toContain(
+  expect(await page.evaluate(() => JSON.stringify(Object.values(window.localStorage)))).not.toContain(
     "opaque-imported-secret",
   );
 
@@ -473,6 +473,37 @@ test("token settings lists tokens and creates a scoped PAT", async ({ page }) =>
   page.once("dialog", (dialog) => dialog.accept());
   await existingToken.getByRole("button", { name: "Revoke" }).click();
   await expect(existingToken).toHaveCount(0);
+});
+
+test("token settings show all scopes and disable grants the user lacks", async ({ page }) => {
+  await page.route("**/ui/session", (route) =>
+    route.fulfill({
+      json: {
+        authenticated: true,
+        canRead: true,
+        canWrite: false,
+        profile: { name: "Read-only Browser Tester" },
+      },
+    }),
+  );
+  await page.goto("/ui/?settings=tokens");
+
+  const tokenForm = page.locator("#token-grants-form");
+  for (const scope of ["repo:read", "repo:write", "org:create", "org:manage"]) {
+    await expect(tokenForm.getByLabel(scope, { exact: false })).toBeVisible();
+  }
+  await expect(tokenForm.getByLabel("repo:read", { exact: true })).toBeEnabled();
+  for (const scope of ["repo:write", "org:create", "org:manage"]) {
+    await expect(tokenForm.getByLabel(new RegExp(`^${scope}`))).toBeDisabled();
+  }
+
+  const bindingForm = page.locator("form").filter({ hasText: "External token" });
+  for (const scope of ["repo:read", "repo:write", "org:create", "org:manage"]) {
+    await expect(bindingForm.getByLabel(new RegExp(`^${scope}`))).toBeVisible();
+  }
+  for (const scope of ["repo:write", "org:create", "org:manage"]) {
+    await expect(bindingForm.getByLabel(new RegExp(`^${scope}`))).toBeDisabled();
+  }
 });
 
 test("organization settings navigate to repositories and manage webhook subscriptions", async ({ page }) => {
