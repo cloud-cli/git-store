@@ -2074,6 +2074,86 @@ async function run() {
       "contributors cannot manage organizations",
     );
     teamStore.setRole(teamOwner, teamMember.id, "admin");
+    const teamAdminRepo = "admin-pat-push";
+    assert.equal(
+      (
+        await request(
+          port,
+          "POST",
+          `/api/v1/orgs/team-shared-org/repos/${teamAdminRepo}`,
+          {},
+          undefined,
+          sessionHeaders,
+        )
+      ).status,
+      201,
+    );
+    const teamAdminRepoPath = path.join(dataPath, "orgs", "team-shared-org", teamAdminRepo);
+    fs.writeFileSync(path.join(teamAdminRepoPath, "initial.txt"), "initial\n");
+    await git(["-C", teamAdminRepoPath, "add", "initial.txt"]);
+    await git([
+      "-C",
+      teamAdminRepoPath,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.test",
+      "commit",
+      "-m",
+      "initial team-admin repository commit",
+    ]);
+    const teamAdminPatResponse = await request(
+      port,
+      "POST",
+      "/api/v1/personal-access-tokens",
+      {
+        label: "team-admin repository push",
+        scopes: ["repo:write"],
+        orgs: ["team-shared-org"],
+        org: "team-shared-org",
+        repo: teamAdminRepo,
+      },
+      undefined,
+      sessionHeaders,
+    );
+    assert.equal(teamAdminPatResponse.status, 201, teamAdminPatResponse.body);
+    const teamAdminPat = JSON.parse(teamAdminPatResponse.body);
+    const teamAdminPatHeader = `Basic ${Buffer.from(`git:${teamAdminPat.token}`).toString("base64")}`;
+    const teamAdminPatClonePath = path.join(dataPath, "team-admin-pat-clone");
+    await git([
+      "-c",
+      `http.extraheader=Authorization: ${teamAdminPatHeader}`,
+      "clone",
+      `http://127.0.0.1:${port}/git/team-shared-org/${teamAdminRepo}.git`,
+      teamAdminPatClonePath,
+    ]);
+    fs.writeFileSync(path.join(teamAdminPatClonePath, "team-admin.txt"), "team admin PAT push works\n");
+    await git(["-C", teamAdminPatClonePath, "add", "team-admin.txt"]);
+    await git([
+      "-C",
+      teamAdminPatClonePath,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.test",
+      "commit",
+      "-m",
+      "team-admin PAT push",
+    ]);
+    await git([
+      "-c",
+      `http.extraheader=Authorization: ${teamAdminPatHeader}`,
+      "-C",
+      teamAdminPatClonePath,
+      "push",
+      "origin",
+      "HEAD:refs/heads/team-admin-pat",
+    ]);
+    assert.equal(
+      (await git(["-C", teamAdminRepoPath, "show", "refs/heads/team-admin-pat:team-admin.txt"])).stdout,
+      "team admin PAT push works\n",
+      "a team admin's explicit repo-scoped PAT grant authorizes Git receive-pack",
+    );
     assert.equal(
       (await request(port, "DELETE", "/api/v1/orgs/team-shared-org", undefined, undefined, sessionHeaders)).status,
       409,

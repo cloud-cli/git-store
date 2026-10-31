@@ -851,14 +851,14 @@ async function gitSmartHttp(req, res) {
   const orgSlug = match[1];
   const repo = match[2];
   const operation = match[3];
-  const subjectHash = getAuthenticatedSubjectHash(req);
   const organization = organizations.get(orgSlug);
   const machine = req.machineGitCredential;
   if (
     !organization ||
-    (organization.ownerHash !== subjectHash &&
+    (organization.ownerHash !== getAuthenticatedSubjectHash(req) &&
       !(req.authType === "session" && teamRole(req, organization)) &&
-      !(machine && machine.credentialOrg === organization.slug))
+      !(machine && machine.credentialOrg === organization.slug) &&
+      !(req.authType === "personal-access-token" && req.user.orgs?.includes(organization.slug)))
   ) {
     auditSecurityFailure(req, "security.access.denied", {
       reason: "organization_not_accessible",
