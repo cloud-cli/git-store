@@ -8,11 +8,21 @@ import { PersonalAccessTokenStore } from "../personal-access-tokens.js";
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), "git-store-token-test-"));
 const file = path.join(directory, "tokens.json");
 const ownerHash = crypto.createHash("sha256").update("owner").digest("hex");
+const memberHash = crypto.createHash("sha256").update("member").digest("hex");
 const store = new PersonalAccessTokenStore(file);
 const generated = store.create({ ownerHash, label: "generated", scopes: ["repo:read"], orgs: ["alpha"] });
 assert.deepEqual(generated.record.orgs, ["alpha"]);
 assert.equal(store.authenticate(generated.token).claims.scope, "repo:read");
 assert.deepEqual(store.authenticate(generated.token).claims.orgs, ["alpha"]);
+const memberToken = store.create({
+  ownerHash: memberHash,
+  label: "member",
+  scopes: ["repo:read"],
+  orgs: ["alpha", "other"],
+});
+assert.equal(store.revokeOwnerOrgGrants(memberHash, ["alpha"]), true);
+assert.deepEqual(store.findByToken(memberToken.token).orgs, ["other"]);
+assert.deepEqual(store.findByToken(generated.token).orgs, ["alpha"]);
 
 const external = "opaque-test-token";
 const record = store.bindExternal({

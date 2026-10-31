@@ -330,9 +330,16 @@ test.beforeEach(async ({ page }) => {
       return route.fulfill({ status: 201, json: { token: "gmc_browser_test_secret", record } });
     }
     if (request.method() === "DELETE") {
-      currentMachineCredentials = currentMachineCredentials.filter(
-        (credential) => !request.url().endsWith(`/${credential.id}`),
-      );
+      const path = new URL(request.url()).pathname;
+      const removing = path.endsWith("/deleted");
+      const credentialId = path.split("/").at(removing ? -2 : -1);
+      if (removing) {
+        currentMachineCredentials = currentMachineCredentials.filter((credential) => credential.id !== credentialId);
+      } else {
+        currentMachineCredentials = currentMachineCredentials.map((credential) =>
+          credential.id === credentialId ? { ...credential, revokedAt: new Date().toISOString() } : credential,
+        );
+      }
       return route.fulfill({ status: 204 });
     }
     return route.fulfill({ status: 405, json: { error: "Method not allowed" } });
@@ -707,6 +714,16 @@ test("token settings show all scopes and disable grants the user lacks", async (
       },
     }),
   );
+  await page.route("**/api/v1/orgs", (route) =>
+    route.fulfill({
+      json: {
+        orgs: [
+          { slug: "team-admin", role: "admin" },
+          { slug: "team-viewer", role: "viewer" },
+        ],
+      },
+    }),
+  );
   await page.goto("/ui/?settings=tokens");
 
   const tokenForm = page.locator("#token-grants-form");
@@ -718,10 +735,18 @@ test("token settings show all scopes and disable grants the user lacks", async (
     await expect(tokenForm.getByLabel(new RegExp(`^${scope}`))).toBeDisabled();
   }
 
-  await expect(page.getByRole("heading", { name: "Bind an existing GitMini Auth token" })).toHaveCount(0);
+  await expect(page.getByRole("checkbox", { name: /team-admin.*admin/ })).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: /team-viewer.*viewer/ })).toBeVisible();
+  await page.getByRole("checkbox", { name: /team-viewer.*viewer/ }).check();
+  await expect(tokenForm.getByRole("checkbox", { name: /^repo:write/ })).toBeDisabled();
+  await expect(tokenForm.getByRole("checkbox", { name: /^org:manage/ })).toBeDisabled();
+  await page.getByRole("checkbox", { name: /team-viewer.*viewer/ }).uncheck();
+  await page.getByRole("checkbox", { name: /team-admin.*admin/ }).check();
+  await expect(tokenForm.getByRole("checkbox", { name: /^repo:write/ })).toBeEnabled();
+  await expect(tokenForm.getByRole("checkbox", { name: /^org:manage/ })).toBeEnabled();
 });
 
-test("organization settings navigate to repositories and manage webhook subscriptions", async ({ page }) => {
+test("organization settings hide empty views and manage webhooks", async ({ page }) => {
   currentRepositories = [{ repo: "demo" }, { repo: "second" }];
   await page.goto("/ui/");
   await page.locator('button[title="Settings"]').click();
@@ -741,23 +766,12 @@ test("organization settings navigate to repositories and manage webhook subscrip
   await expect(organizationForm).toHaveCount(0);
 
   const navigation = page.getByRole("navigation", { name: "Organization settings" });
-  await expect(navigation.getByRole("link", { name: "General" })).toHaveAttribute("aria-current", "page");
-  await expect(page.getByRole("heading", { name: "General", exact: true })).toHaveCount(1);
-  await expect(page.getByTestId("organization-settings-content")).toHaveCSS("overflow-y", "auto");
-  await navigation.getByRole("link", { name: "Repositories" }).click();
-  await expect(page.getByRole("heading", { name: "Repositories", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "General", exact: true })).toHaveCount(0);
-  const repositoryLink = page.getByRole("link", { name: "demo", exact: true });
-  await expect(repositoryLink).toHaveAttribute("href", "/?org=example&repo=demo");
-  await navigation.getByRole("link", { name: "General" }).click();
-  await expect(page.getByRole("heading", { name: "General", exact: true })).toHaveCount(1);
-  await navigation.getByRole("link", { name: "Repositories" }).click();
-  await navigation.getByRole("link", { name: "Webhooks" }).click();
-  await expect(page).toHaveURL(/section=webhooks/);
+  await expect(navigation.getByRole("link", { name: "General" })).toHaveCount(0);
+  await expect(navigation.getByRole("link", { name: "Repositories" })).toHaveCount(0);
   await expect(navigation.getByRole("link", { name: "Webhooks" })).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { name: "Webhooks", exact: true })).toBeVisible();
+  await expect(page.getByTestId("organization-settings-content")).toHaveCSS("overflow-y", "auto");
   const webhookPanel = page.locator("org-webhooks");
-
   await page.getByLabel("Webhook URL").fill("https://hooks.example.test/events");
   await page.getByLabel("Webhook secret").fill("my-user-defined-secret");
   await page.getByLabel("Allowed IP ranges").fill("192.168.1.20/32");
@@ -784,7 +798,7 @@ test("organization settings navigate to repositories and manage webhook subscrip
   await expect(page.getByText("Hello event queued for delivery.")).toBeVisible();
   await subscription.getByRole("button", { name: "Delete" }).click();
   await expect(subscription).toHaveCount(0);
-  await expect(page).toHaveURL(/settings=organizations&org=example&section=webhooks/);
+  await expect(page).toHaveURL(/settings=organizations&org=example(?:&section=webhooks)?$/);
   expect(await webhookPanel.evaluate((element) => element.getBoundingClientRect().width)).toBeLessThanOrEqual(
     page.viewportSize().width,
   );
@@ -800,29 +814,36 @@ test("organization settings navigate to repositories and manage webhook subscrip
   await expect(page.getByRole("alert")).toHaveText("Webhook API is disabled");
 });
 
-test("organization settings create and revoke an org-scoped machine Git credential", async ({ page }) => {
+test("organization settings create, revoke, and hide an Org Access Token", async ({ page }) => {
   await page.goto("/ui/?settings=organizations&org=example");
   await page
     .getByRole("navigation", { name: "Organization settings" })
-    .getByRole("link", { name: "Machine Git credentials" })
+    .getByRole("link", { name: "Org Access Tokens" })
     .click();
+  await expect(page.getByRole("heading", { name: "Webhooks", exact: true })).toBeHidden();
 
-  await page.getByLabel("Credential label").fill("CI deploy");
+  await page.getByLabel("Access token label").fill("CI deploy");
   await page.getByLabel("Repository restriction").fill("demo");
   await page.getByLabel("repo:write", { exact: true }).check();
-  await page.getByRole("button", { name: "Create credential" }).click();
+  await page.getByRole("button", { name: "Create access token" }).click();
 
-  await expect(page.getByRole("heading", { name: "Copy this credential now" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Copy this token now" })).toBeVisible();
   await expect(page.getByText("gmc_browser_test_secret", { exact: true })).toBeVisible();
   expect(machineCredentialRequests).toEqual([
     { label: "CI deploy", repo: "demo", scopes: ["repo:read", "repo:write"], expiresAt: null },
   ]);
   const credentialRow = page.getByRole("listitem").filter({ hasText: "CI deploy" });
   await expect(credentialRow).toContainText("demo");
+  await expect(credentialRow.getByRole("button", { name: "Delete" })).toHaveCount(0);
   page.once("dialog", (dialog) => dialog.accept());
   await credentialRow.getByRole("button", { name: "Revoke" }).click();
+  await expect(credentialRow).toContainText("Revoked");
+  await expect(credentialRow.getByRole("button", { name: "Revoke" })).toHaveCount(0);
+  await expect(credentialRow.getByRole("button", { name: "Delete" })).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept());
+  await credentialRow.getByRole("button", { name: "Delete" }).click();
   await expect(credentialRow).toHaveCount(0);
-  await expect(page.getByRole("status")).toContainText("Credential revoked.");
+  await expect(page.getByRole("status")).toContainText("audit record remains stored");
 });
 
 test("organization breadcrumb does not retain a repository crumb", async ({ page }) => {
@@ -1190,14 +1211,14 @@ test("team roles control repository editing and organization administration UI",
   await expect(page.getByRole("button", { name: "Create branch" })).toBeVisible();
 
   role = "admin";
-  await page.goto("/ui/?settings=organizations&org=example&section=machine-credentials");
-  await expect(page.getByRole("link", { name: "Machine Git credentials" })).toBeVisible();
+  await page.goto("/ui/?settings=organizations&org=example&section=access-tokens");
+  await expect(page.getByRole("link", { name: "Org Access Tokens" })).toBeVisible();
   await page.goto("/ui/?settings=organizations&org=example&section=webhooks");
   await expect(page.getByRole("button", { name: "Create webhook" })).toBeVisible();
 
   role = "contributor";
   await page.goto("/ui/?settings=organizations&org=example&section=webhooks");
-  await expect(page.getByRole("link", { name: "Machine Git credentials" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Org Access Tokens" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Create webhook" })).toHaveCount(0);
   await expect(page.getByRole("status")).toContainText("Organization admin access is required");
 });

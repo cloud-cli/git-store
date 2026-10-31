@@ -135,19 +135,19 @@ compatibility endpoint for deployments whose OIDC client still has that URI regi
 
 ## Configuration
 
-| Variable              | Default                          | Purpose                                                                       |
-| --------------------- | -------------------------------- | ----------------------------------------------------------------------------- |
-| `DATA_PATH`           | `/data` in the image             | Repository storage root                                                       |
-| `PORT`                | `3000`                           | HTTP listen port                                                              |
-| `OIDC_ISSUER`         | unset                            | OIDC discovery issuer                                                         |
-| `OIDC_CLIENT_ID`      | unset                            | OIDC client identifier                                                        |
-| `OIDC_CLIENT_SECRET`  | unset                            | OIDC client credential and browser-session signing/encryption key             |
-| `OIDC_REDIRECT_URI`   | derived                          | Registered `/ui/auth/callback` URL (recommended)                              |
-| `PUBLIC_URL`          | derived                          | Public origin used to derive the callback URL                                 |
-| `OIDC_JWKS_URI`       | issuer metadata                  | Same-issuer JWKS override for incorrect discovery metadata                    |
-| `OIDC_BROWSER_SCOPES` | `repo:read repo:write` in Docker | Scopes granted to validated browser sessions; can be overridden               |
-| `DATABASE_URL`        | unset                            | Base URL for the d0 SQLite database used by audit and machine Git credentials |
-| `DB_AUTH_TOKEN`       | unset                            | Bearer credential for the database API, when required                         |
+| Variable              | Default                          | Purpose                                                                          |
+| --------------------- | -------------------------------- | -------------------------------------------------------------------------------- |
+| `DATA_PATH`           | `/data` in the image             | Repository storage root                                                          |
+| `PORT`                | `3000`                           | HTTP listen port                                                                 |
+| `OIDC_ISSUER`         | unset                            | OIDC discovery issuer                                                            |
+| `OIDC_CLIENT_ID`      | unset                            | OIDC client identifier                                                           |
+| `OIDC_CLIENT_SECRET`  | unset                            | OIDC client credential and browser-session signing/encryption key                |
+| `OIDC_REDIRECT_URI`   | derived                          | Registered `/ui/auth/callback` URL (recommended)                                 |
+| `PUBLIC_URL`          | derived                          | Public origin used to derive the callback URL                                    |
+| `OIDC_JWKS_URI`       | issuer metadata                  | Same-issuer JWKS override for incorrect discovery metadata                       |
+| `OIDC_BROWSER_SCOPES` | `repo:read repo:write` in Docker | Scopes granted to validated browser sessions; can be overridden                  |
+| `DATABASE_URL`        | unset                            | Base URL for the d0 SQLite database used by audit and organization access tokens |
+| `DB_AUTH_TOKEN`       | unset                            | Bearer credential for the database API, when required                            |
 
 When OIDC variables are absent, repository requests fail closed with `401`.
 The Docker image defaults browser sessions to `repo:read repo:write` so signed-in users
@@ -158,9 +158,9 @@ When `DATABASE_URL` is configured, the server creates the append-only `audit_eve
 and its organization/time index on first use. Set it to the database service base URL (for
 example `https://db.apphor.de/db~<database>/`); configure `DB_AUTH_TOKEN` with the database
 API credential when the endpoint requires bearer authentication. Events are retained indefinitely.
-Organization machine Git credentials are stored in this same database; only SHA-256 token hashes
+Organization access tokens are stored in this same database; only SHA-256 token hashes
 are persisted. Existing `machine-git-credentials.json` entries are imported transactionally once
-when the database is first initialized, and the source file is retained. Machine credentials are
+when the database is first initialized, and the source file is retained. Org Access Tokens are
 unavailable when the database is not configured and are never validated through OIDC introspection.
 They are bound to the organization (and optional repository), not to their creator's identity; removing
 the creating user from the identity provider does not invalidate Git access while the organization and

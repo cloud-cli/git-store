@@ -11,6 +11,14 @@ try {
   const file = path.join(root, "credentials.json");
   const db = createMachineDatabase();
   const store = new MachineGitCredentialStore(db, file);
+  await store.list("acme");
+  assert.ok(db.columns.has("revoked_at"));
+  assert.ok(db.columns.has("deleted_at"));
+  assert.equal(
+    db.statements.some(({ statement }) => statement.startsWith("ALTER TABLE machine_git_credentials")),
+    false,
+    "fresh schemas create lifecycle columns without redundant ALTER statements",
+  );
   const created = await store.create({
     org: "acme",
     repo: "repo-a",
@@ -31,13 +39,28 @@ try {
     false,
   );
   assert.deepEqual((await store.authenticate(created.token)).claims.credentialOrg, "acme");
+  assert.equal((await store.list("acme"))[0].revokedAt, null);
   assert.equal((await store.list("other")).length, 0);
   assert.equal(await store.revoke("other", created.record.id), false);
   assert.equal(await store.revoke("acme", created.record.id), true);
+  assert.ok((await store.list("acme")).find((record) => record.id === created.record.id).revokedAt);
+  assert.equal(await store.revoke("acme", created.record.id), true, "revocation is idempotent");
   assert.deepEqual(await store.authenticate(created.token), {
     recognized: true,
     claims: null,
   });
+  assert.equal(await store.hideRevoked("other", created.record.id), false);
+  assert.equal(await store.hideRevoked("acme", created.record.id), true);
+  assert.equal(
+    (await store.list("acme")).some((record) => record.id === created.record.id),
+    false,
+  );
+  assert.ok(db.records.get(created.record.id).deleted_at);
+  assert.equal(
+    db.records.get(created.record.id).token_hash,
+    crypto.createHash("sha256").update(created.token).digest("hex"),
+  );
+  assert.deepEqual(await store.authenticate(created.token), { recognized: true, claims: null });
 
   const expiresSoon = await store.create({
     org: "acme",
@@ -45,6 +68,7 @@ try {
     scopes: ["repo:read"],
     expiresAt: new Date(Date.now() + 50).toISOString(),
   });
+  assert.equal(await store.hideRevoked("acme", expiresSoon.record.id), false, "active credentials cannot be hidden");
   await new Promise((resolve) => setTimeout(resolve, 60));
   assert.equal((await store.authenticate(expiresSoon.token)).claims, null);
   assert.equal(
@@ -89,6 +113,16 @@ try {
   );
   assert.equal(await fs.readFile(file, "utf8").then((contents) => contents.includes(legacyToken)), false);
   assert.equal(legacyDb.migrations.has("machine-git-credentials-json-v1"), true);
+  const oldSchemaDb = createMachineDatabase({ legacySchema: true });
+  await new MachineGitCredentialStore(oldSchemaDb).list("legacy");
+  assert.ok(oldSchemaDb.columns.has("revoked_at"));
+  assert.ok(oldSchemaDb.columns.has("deleted_at"));
+  assert.equal(
+    oldSchemaDb.statements.filter(({ statement }) => statement.startsWith("ALTER TABLE machine_git_credentials"))
+      .length,
+    2,
+    "existing schemas are upgraded only for missing lifecycle columns",
+  );
   await assert.rejects(new MachineGitCredentialStore(null).authenticate(legacyToken), /unavailable/);
 } finally {
   await fs.rm(root, { recursive: true, force: true });

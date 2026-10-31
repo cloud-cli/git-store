@@ -20,30 +20,30 @@ function publicRecord({ tokenHash: _tokenHash, ownerHash: _ownerHash, ...record 
 function validRecord(record) {
   return Boolean(
     record &&
-    idPattern.test(record.id) &&
-    hashPattern.test(record.tokenHash) &&
-    hashPattern.test(record.ownerHash) &&
-    (record.kind === "generated" || record.kind === "external") &&
-    typeof record.label === "string" &&
-    record.label.length > 0 &&
-    record.label.length <= 100 &&
-    Array.isArray(record.scopes) &&
-    record.scopes.length > 0 &&
-    record.scopes.every((scope) => allowedScopes.has(scope)) &&
-    new Set(record.scopes).size === record.scopes.length &&
-    Array.isArray(record.orgs) &&
-    record.orgs.every((org) => typeof org === "string" && slugPattern.test(org)) &&
-    typeof record.createdAt === "string" &&
-    Number.isFinite(Date.parse(record.createdAt)) &&
-    (record.expiresAt === null ||
-      (typeof record.expiresAt === "string" && Number.isFinite(Date.parse(record.expiresAt)))) &&
-    (record.kind === "external"
-      ? record.org === null && record.repo === null
-      : (record.org === null && record.repo === null) ||
-        (typeof record.org === "string" &&
-          slugPattern.test(record.org) &&
-          typeof record.repo === "string" &&
-          repoPattern.test(record.repo))),
+      idPattern.test(record.id) &&
+      hashPattern.test(record.tokenHash) &&
+      hashPattern.test(record.ownerHash) &&
+      (record.kind === "generated" || record.kind === "external") &&
+      typeof record.label === "string" &&
+      record.label.length > 0 &&
+      record.label.length <= 100 &&
+      Array.isArray(record.scopes) &&
+      record.scopes.length > 0 &&
+      record.scopes.every((scope) => allowedScopes.has(scope)) &&
+      new Set(record.scopes).size === record.scopes.length &&
+      Array.isArray(record.orgs) &&
+      record.orgs.every((org) => typeof org === "string" && slugPattern.test(org)) &&
+      typeof record.createdAt === "string" &&
+      Number.isFinite(Date.parse(record.createdAt)) &&
+      (record.expiresAt === null ||
+        (typeof record.expiresAt === "string" && Number.isFinite(Date.parse(record.expiresAt)))) &&
+      (record.kind === "external"
+        ? record.org === null && record.repo === null
+        : (record.org === null && record.repo === null) ||
+          (typeof record.org === "string" &&
+            slugPattern.test(record.org) &&
+            typeof record.repo === "string" &&
+            repoPattern.test(record.repo))),
   );
 }
 
@@ -336,6 +336,40 @@ export class PersonalAccessTokenStore {
       this.persist();
     } catch (error) {
       record.orgs = record.orgs.filter((item) => item !== org);
+      throw error;
+    }
+    return true;
+  }
+
+  revokeOwnerOrgGrants(ownerHash, orgs) {
+    const revoked = new Set(orgs);
+    const changes = [];
+    for (const record of this.records.values()) {
+      if (record.ownerHash !== ownerHash) {
+        continue;
+      }
+      const orgGrants = record.orgs.filter((org) => revoked.has(org));
+      const resourceAffected = record.org && revoked.has(record.org);
+      if (orgGrants.length || resourceAffected) {
+        changes.push({ record, orgs: record.orgs, org: record.org, repo: record.repo });
+        record.orgs = record.orgs.filter((org) => !revoked.has(org));
+        if (resourceAffected) {
+          record.org = null;
+          record.repo = null;
+        }
+      }
+    }
+    if (!changes.length) {
+      return true;
+    }
+    try {
+      this.persist();
+    } catch (error) {
+      for (const { record, orgs, org, repo } of changes) {
+        record.orgs = orgs;
+        record.org = org;
+        record.repo = repo;
+      }
       throw error;
     }
     return true;

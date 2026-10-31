@@ -8,7 +8,7 @@ const orgPattern = /^[a-z0-9](?:[a-z0-9._-]{0,61}[a-z0-9])?$/;
 const repoPattern = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$/;
 const digest = (token) => crypto.createHash("sha256").update(token).digest("hex");
 const schema = [
-  "CREATE TABLE IF NOT EXISTS machine_git_credentials (id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, org_slug TEXT NOT NULL, repo TEXT, scopes TEXT NOT NULL, label TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT)",
+  "CREATE TABLE IF NOT EXISTS machine_git_credentials (id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, org_slug TEXT NOT NULL, repo TEXT, scopes TEXT NOT NULL, label TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT, revoked_at TEXT, deleted_at TEXT)",
   "CREATE INDEX IF NOT EXISTS machine_git_credentials_org_created ON machine_git_credentials (org_slug, created_at DESC, id DESC)",
   "CREATE TABLE IF NOT EXISTS machine_git_credential_migrations (name TEXT PRIMARY KEY, completed_at TEXT NOT NULL)",
 ];
@@ -22,6 +22,7 @@ function publicRecord(row) {
     label: row.label,
     createdAt: row.created_at,
     expiresAt: row.expires_at,
+    revokedAt: row.revoked_at || null,
   };
 }
 
@@ -62,6 +63,13 @@ export class MachineGitCredentialStore {
       this.initialized = (async () => {
         for (const statement of schema) {
           await this.client.query("run", statement);
+        }
+        const columns = await this.client.query("all", "PRAGMA table_info(machine_git_credentials)");
+        if (!columns.some((column) => column.name === "revoked_at")) {
+          await this.client.query("run", "ALTER TABLE machine_git_credentials ADD COLUMN revoked_at TEXT");
+        }
+        if (!columns.some((column) => column.name === "deleted_at")) {
+          await this.client.query("run", "ALTER TABLE machine_git_credentials ADD COLUMN deleted_at TEXT");
         }
         await this.importLegacy();
       })().catch((error) => {
@@ -190,10 +198,10 @@ export class MachineGitCredentialStore {
     await this.ensureSchema();
     const row = await this.client.query(
       "get",
-      "SELECT id, org_slug, repo, scopes, expires_at FROM machine_git_credentials WHERE token_hash = ?",
+      "SELECT id, org_slug, repo, scopes, expires_at, revoked_at, deleted_at FROM machine_git_credentials WHERE token_hash = ?",
       [digest(token)],
     );
-    if (!row || (row.expires_at && Date.parse(row.expires_at) <= Date.now())) {
+    if (!row || row.revoked_at || row.deleted_at || (row.expires_at && Date.parse(row.expires_at) <= Date.now())) {
       return { recognized: true, claims: null };
     }
     const scopes = Array.isArray(row.scopes) ? row.scopes : JSON.parse(row.scopes);
@@ -215,7 +223,7 @@ export class MachineGitCredentialStore {
     await this.ensureSchema();
     const rows = await this.client.query(
       "all",
-      "SELECT id, org_slug, repo, scopes, label, created_at, expires_at FROM machine_git_credentials WHERE org_slug = ? ORDER BY created_at DESC, id DESC",
+      "SELECT id, org_slug, repo, scopes, label, created_at, expires_at, revoked_at FROM machine_git_credentials WHERE org_slug = ? AND deleted_at IS NULL ORDER BY created_at DESC, id DESC",
       [org],
     );
     return rows.map(publicRecord);
@@ -223,10 +231,21 @@ export class MachineGitCredentialStore {
 
   async revoke(org, id) {
     await this.ensureSchema();
-    const result = await this.client.query("run", "DELETE FROM machine_git_credentials WHERE org_slug = ? AND id = ?", [
-      org,
-      id,
-    ]);
+    const result = await this.client.query(
+      "run",
+      "UPDATE machine_git_credentials SET revoked_at = COALESCE(revoked_at, ?) WHERE org_slug = ? AND id = ?",
+      [new Date().toISOString(), org, id],
+    );
+    return result.changes > 0;
+  }
+
+  async hideRevoked(org, id) {
+    await this.ensureSchema();
+    const result = await this.client.query(
+      "run",
+      "UPDATE machine_git_credentials SET deleted_at = COALESCE(deleted_at, ?) WHERE org_slug = ? AND id = ? AND revoked_at IS NOT NULL AND deleted_at IS NULL",
+      [new Date().toISOString(), org, id],
+    );
     return result.changes > 0;
   }
 }

@@ -435,7 +435,6 @@
                   bind-selected-org="settingsOrg"
                   bind-section="settingsSection"
                   bind-organizations="orgs"
-                  bind-repositories="orgRepositories"
                   bind-created="orgCreated"
                   bind-error="orgError"
                   on-createorg="createOrganization($event.detail)"
@@ -911,7 +910,7 @@
               const initialSettingsTab = new URL(window.location.href).searchParams.get("settings");
               const settings = ref(["profile", "organizations", "tokens", "team"].includes(initialSettingsTab));
               const settingsOrg = ref(new URL(window.location.href).searchParams.get("org") || "");
-              const settingsSection = ref(new URL(window.location.href).searchParams.get("section") || "general");
+              const settingsSection = ref(new URL(window.location.href).searchParams.get("section") || "webhooks");
               const settingsTab = ref(
                 ["profile", "organizations", "tokens", "team"].includes(initialSettingsTab)
                   ? initialSettingsTab
@@ -1176,7 +1175,7 @@
                 const requestedSettingsTab = next.searchParams.get("settings");
                 settings.value = ["profile", "organizations", "tokens", "team"].includes(requestedSettingsTab);
                 settingsOrg.value = requestedSettingsTab === "organizations" ? nextOrg : "";
-                settingsSection.value = next.searchParams.get("section") || "general";
+                settingsSection.value = next.searchParams.get("section") || "webhooks";
                 settingsTab.value = ["profile", "organizations", "tokens", "team"].includes(requestedSettingsTab)
                   ? requestedSettingsTab
                   : "organizations";

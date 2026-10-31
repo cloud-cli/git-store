@@ -50,18 +50,6 @@
         <h2 class="mb-4 text-2xl font-bold">{{ selectedOrg }} settings</h2>
         <nav aria-label="Organization settings" class="mb-6 flex flex-wrap gap-2">
           <a
-            attr-href="sectionHref('repositories')"
-            attr-aria-current="section === 'repositories' ? 'page' : null"
-            class="rounded-lg px-3 py-2 font-medium hover:bg-gray-100 dark:hover:bg-gray-900"
-            class-current="section === 'repositories'"
-            >Repositories</a
-          ><a
-            attr-href="sectionHref('general')"
-            attr-aria-current="section === 'general' ? 'page' : null"
-            class="rounded-lg px-3 py-2 font-medium hover:bg-gray-100 dark:hover:bg-gray-900"
-            class-current="section === 'general'"
-            >General</a
-          ><a
             attr-href="sectionHref('webhooks')"
             attr-aria-current="section === 'webhooks' ? 'page' : null"
             class="rounded-lg px-3 py-2 font-medium hover:bg-gray-100 dark:hover:bg-gray-900"
@@ -69,62 +57,31 @@
             >Webhooks</a
           ><template if="canManageOrg"
             ><a
-              attr-href="sectionHref('machine-credentials')"
-              attr-aria-current="section === 'machine-credentials' ? 'page' : null"
+              attr-href="sectionHref('access-tokens')"
+              attr-aria-current="section === 'access-tokens' ? 'page' : null"
               class="rounded-lg px-3 py-2 font-medium hover:bg-gray-100 dark:hover:bg-gray-900"
-              class-current="section === 'machine-credentials'"
-              >Machine Git credentials</a
+              class-current="section === 'access-tokens'"
+              >Org Access Tokens</a
             ></template
           >
         </nav>
-        <template if="section === 'webhooks'"
-          ><org-webhooks data-org-settings-view bind-org="selectedOrg" bind-can-manage-org="canManageOrg"></org-webhooks
-        ></template>
-        <template if="section === 'machine-credentials' && canManageOrg"
-          ><machine-git-credentials data-org-settings-view bind-org="selectedOrg"></machine-git-credentials
-        ></template>
-        <template if="section === 'machine-credentials' && !canManageOrg"
-          ><p role="status" class="text-sm text-amber-700 dark:text-amber-300">
-            Organization admin access is required to manage machine Git credentials.
-          </p></template
-        >
-        <template if="section === 'repositories'"
-          ><section data-org-settings-view aria-labelledby="org-repositories-heading">
-            <h3 id="org-repositories-heading" class="mb-3 text-xl font-semibold">Repositories</h3>
-            <template if="repositories.length">
-              <ul class="max-w-3xl space-y-2">
-                <template for="repository of repositories"
-                  ><li class="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900">
-                    <a attr-href="repositoryHref(repository)" class="font-medium text-brand hover:underline"
-                      >{{ repository.repo }}</a
-                    >
-                  </li></template
-                >
-              </ul>
-            </template>
-            <template if="!repositories.length"
-              ><p class="text-sm text-gray-600 dark:text-gray-300">
-                No repositories in this organization yet.
-              </p></template
-            >
-          </section></template
-        >
-        <template if="section === 'general'"
-          ><section data-org-settings-view class="max-w-3xl rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-            <h3 class="text-xl font-semibold">General</h3>
-            <dl class="mt-4 grid gap-3 sm:grid-cols-2">
-              <div>
-                <dt class="text-sm text-gray-500">Organization slug</dt>
-                <dd class="font-medium">{{ selectedOrg }}</dd>
-              </div>
-              <div>
-                <dt class="text-sm text-gray-500">Repositories</dt>
-                <dd class="font-medium">{{ repositories.length }}</dd>
-              </div>
-            </dl>
-          </section></template
-        >
       </template>
+      <template if="selectedOrg"
+        ><org-webhooks
+          data-org-settings-view
+          class-hidden="section === 'access-tokens'"
+          bind-org="selectedOrg"
+          bind-can-manage-org="canManageOrg"
+        ></org-webhooks
+      ></template>
+      <template if="selectedOrg && section === 'access-tokens' && canManageOrg"
+        ><machine-git-credentials data-org-settings-view bind-org="selectedOrg"></machine-git-credentials
+      ></template>
+      <template if="selectedOrg && section === 'access-tokens' && !canManageOrg"
+        ><p role="status" class="text-sm text-amber-700 dark:text-amber-300">
+          Organization admin access is required to manage Org Access Tokens.
+        </p></template
+      >
       <template if="!selectedOrg && canWrite"
         ><form
           data-org-settings-view
@@ -204,8 +161,7 @@
       const canWrite = defineProp("canWrite", { default: false });
       const canManageOrg = defineProp("canManageOrg", { default: false });
       const selectedOrg = defineProp("selectedOrg", { default: "" });
-      const section = defineProp("section", { default: "general" });
-      const repositories = defineProp("repositories", { default: () => [] });
+      const section = defineProp("section", { default: "webhooks" });
       const created = defineProp("created", { default: false });
       const error = defineProp("error", { default: "" });
       const emitCreate = defineEvent("createorg");
@@ -215,8 +171,6 @@
       const organizationHref = (item) => `/?settings=organizations&org=${encodeURIComponent(item.slug)}`;
       const sectionHref = (name) =>
         `/?settings=organizations&org=${encodeURIComponent(selectedOrg.value)}&section=${name}`;
-      const repositoryHref = (repository) =>
-        `/?org=${encodeURIComponent(selectedOrg.value)}&repo=${encodeURIComponent(repository.repo)}`;
       const setOrganizationName = (value) => {
         organizationName.value = value;
       };
@@ -230,8 +184,6 @@
         selectedOrg,
         section,
         sectionHref,
-        repositories,
-        repositoryHref,
         canWrite,
         canManageOrg,
         created,

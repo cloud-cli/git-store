@@ -635,7 +635,11 @@ function effectiveRole(roles) {
 }
 
 function canAccessOrg(req, org) {
-  return org?.ownerHash === getAuthenticatedSubjectHash(req) || Boolean(teamRole(req, org));
+  return (
+    org?.ownerHash === getAuthenticatedSubjectHash(req) ||
+    Boolean(teamRole(req, org)) ||
+    (req.authType !== "session" && Array.isArray(req.user?.orgs) && req.user.orgs.includes(org?.slug))
+  );
 }
 
 function teamRoleAllows(req, scope) {
@@ -674,6 +678,29 @@ function callerCanGrantScope(req, scope) {
     return scopes.has("repo:write");
   }
   return scopes.has(scope);
+}
+
+function callerCanGrantPatScope(req, scope, orgSlugs) {
+  if (!orgSlugs.length) {
+    return callerCanGrantScope(req, scope);
+  }
+  return orgSlugs.every((slug) => {
+    const organization = organizations.get(slug);
+    if (!organization) {
+      return false;
+    }
+    if (organization.ownerHash === getAuthenticatedSubjectHash(req)) {
+      return callerCanGrantScope(req, scope);
+    }
+    const role = teamRole(req, organization);
+    if (scope === "repo:read") {
+      return ["viewer", "contributor", "admin"].includes(role);
+    }
+    if (scope === "repo:write") {
+      return ["contributor", "admin"].includes(role);
+    }
+    return scope === "org:manage" && role === "admin";
+  });
 }
 
 function tokenResourceAllowsRequest(req) {
@@ -2019,7 +2046,7 @@ app.get(
     try {
       return res.json({ credentials: await machineGitCredentials.list(org.slug) });
     } catch {
-      return res.status(503).json({ error: "Machine Git credential storage is unavailable" });
+      return res.status(503).json({ error: "Org Access Token storage is unavailable" });
     }
   },
 );
@@ -2068,7 +2095,7 @@ app.post(
       });
       return res.status(201).json(created);
     } catch {
-      return res.status(503).json({ error: "Machine Git credential storage is unavailable" });
+      return res.status(503).json({ error: "Org Access Token storage is unavailable" });
     }
   },
 );
@@ -2092,7 +2119,31 @@ app.delete(
         ? res.status(204).end()
         : res.status(404).json({ error: "Credential not found" });
     } catch {
-      return res.status(503).json({ error: "Machine Git credential storage is unavailable" });
+      return res.status(503).json({ error: "Org Access Token storage is unavailable" });
+    }
+  },
+);
+app.delete(
+  "/api/v1/orgs/:org/machine-git-credentials/:id/deleted",
+  requireNoStore,
+  requireAuthentication,
+  requireInteractiveBrowserSession,
+  requireScope("org:manage"),
+  async (req, res) => {
+    const org = organizations.get(req.params.org);
+    if (
+      !org ||
+      !canAccessOrg(req, org) ||
+      (org.ownerHash !== getAuthenticatedSubjectHash(req) && teamRole(req, org) !== "admin")
+    ) {
+      return res.status(404).json({ error: "Organization not found" });
+    }
+    try {
+      return (await machineGitCredentials.hideRevoked(org.slug, req.params.id))
+        ? res.status(204).end()
+        : res.status(404).json({ error: "Revoked credential not found" });
+    } catch {
+      return res.status(503).json({ error: "Org Access Token storage is unavailable" });
     }
   },
 );
@@ -2120,11 +2171,6 @@ app.post(
     ) {
       return res.status(400).json({ error: "Unsupported token scope" });
     }
-    for (const scope of scopes) {
-      if (!callerCanGrantScope(req, scope)) {
-        return res.status(403).json({ error: `Forbidden: cannot grant ${scope}` });
-      }
-    }
     const expiry = normalizeTokenExpiry(body.expiresAt);
     if (!expiry.valid) {
       return res.status(400).json({ error: "Expiry must be a future calendar date or left blank" });
@@ -2147,7 +2193,7 @@ app.post(
     const orgs = [...new Set(requestedOrgs.map((slug) => organizations.normalizeSlug(slug)))];
     for (const slug of orgs) {
       const organization = organizations.get(slug);
-      if (!organization || organization.ownerHash !== ownerHash) {
+      if (!organization || (organization.ownerHash !== ownerHash && !teamRole(req, organization))) {
         return res.status(404).json({ error: "Organization not found" });
       }
     }
@@ -2158,19 +2204,23 @@ app.post(
         return res.status(400).json({ error: "Invalid organization or repository" });
       }
       const organization = organizations.get(org);
-      if (!organization || organization.ownerHash !== ownerHash) {
+      if (!organization || (organization.ownerHash !== ownerHash && !teamRole(req, organization))) {
         return res.status(404).json({ error: "Organization not found" });
       }
       if (!repositoryExists(org, repo)) {
         return res.status(404).json({ error: "Repository not found" });
       }
     }
+    const grantedOrgs = hasOrg ? [...new Set([...orgs, org])] : orgs;
+    if (scopes.some((scope) => !callerCanGrantPatScope(req, scope, grantedOrgs))) {
+      return res.status(403).json({ error: "Cannot grant scopes beyond your organization access" });
+    }
 
     const created = personalAccessTokens.create({
       ownerHash,
       label,
       scopes,
-      orgs: hasOrg ? [...new Set([...orgs, org])] : orgs,
+      orgs: grantedOrgs,
       org,
       repo,
       expiresAt: expiry.expiresAt,
@@ -2213,19 +2263,21 @@ app.post("/api/v1/token-authorizations", requireAuthentication, requireInteracti
   ) {
     return res.status(400).json({ error: "Unsupported local capability" });
   }
-  if (scopes.some((scope) => !callerCanGrantScope(req, scope))) {
-    return res.status(403).json({ error: "Cannot grant capabilities not held by the caller" });
-  }
   const normalizedOrgs = [...new Set(orgs.map((slug) => organizations.normalizeSlug(slug)))];
   const ownerHash = getAuthenticatedSubjectHash(req);
   if (
     orgs.some(
-      (slug, index) => !normalizedOrgs[index] || organizations.get(normalizedOrgs[index])?.ownerHash !== ownerHash,
+      (slug, index) =>
+        !normalizedOrgs[index] ||
+        (organizations.get(normalizedOrgs[index])?.ownerHash !== ownerHash && !teamRole(req, normalizedOrgs[index])),
     )
   ) {
     return res.status(400).json({
-      error: "Organization grants must name organizations owned by the caller",
+      error: "Organization grants must name organizations accessible to the caller",
     });
+  }
+  if (scopes.some((scope) => !callerCanGrantPatScope(req, scope, normalizedOrgs))) {
+    return res.status(403).json({ error: "Cannot grant capabilities beyond your organization access" });
   }
   try {
     const claims = await introspectAccessToken(token);
@@ -2247,7 +2299,11 @@ app.post("/api/v1/token-authorizations", requireAuthentication, requireInteracti
 });
 app.patch("/api/v1/personal-access-tokens/:id", requireAuthentication, requireInteractiveBrowserSession, (req, res) => {
   const { label, scopes, orgs } = req.body || {};
-  if (!Array.isArray(scopes) || scopes.some((scope) => !callerCanGrantScope(req, scope))) {
+  if (
+    !Array.isArray(scopes) ||
+    scopes.some((scope) => !["repo:read", "repo:write", "org:create", "org:manage"].includes(scope)) ||
+    new Set(scopes).size !== scopes.length
+  ) {
     return res.status(403).json({ error: "Cannot grant capabilities not held by the caller" });
   }
   const normalizedOrgs = Array.isArray(orgs)
@@ -2258,10 +2314,14 @@ app.patch("/api/v1/personal-access-tokens/:id", requireAuthentication, requireIn
     normalizedOrgs.some((slug) => !slug) ||
     orgs.some(
       (slug) =>
-        !organizations.normalizeSlug(slug) || organizations.get(slug)?.ownerHash !== getAuthenticatedSubjectHash(req),
+        !organizations.normalizeSlug(slug) ||
+        (organizations.get(slug)?.ownerHash !== getAuthenticatedSubjectHash(req) && !teamRole(req, slug)),
     )
   ) {
     return res.status(400).json({ error: "Invalid organization grants" });
+  }
+  if (scopes.some((scope) => !callerCanGrantPatScope(req, scope, normalizedOrgs))) {
+    return res.status(403).json({ error: "Cannot grant capabilities beyond your organization access" });
   }
   const record = personalAccessTokens.update(req.params.id, getAuthenticatedSubjectHash(req), {
     label,
@@ -2415,9 +2475,18 @@ app.delete(
     if (!teamStore.isOwner(hashSubject(req.user.sub))) {
       return res.status(403).json({ error: "Only organization owners manage the team" });
     }
-    return teamStore.remove(hashSubject(req.user.sub), req.params.memberId)
-      ? res.status(204).end()
-      : res.status(404).end();
+    const ownerHash = hashSubject(req.user.sub);
+    const member = teamStore.members(ownerHash).find((entry) => entry.id === req.params.memberId);
+    if (!member) {
+      return res.status(404).end();
+    }
+    try {
+      const ownedOrgSlugs = organizations.listForOwnerHash(ownerHash).map(({ slug }) => slug);
+      personalAccessTokens.revokeOwnerOrgGrants(member.subjectHash, ownedOrgSlugs);
+      return teamStore.remove(ownerHash, req.params.memberId) ? res.status(204).end() : res.status(404).end();
+    } catch {
+      return res.status(503).json({ error: "Unable to revoke member organization grants" });
+    }
   },
 );
 
@@ -3449,7 +3518,7 @@ function makeApiSpec() {
       },
       "/api/v1/orgs/{org}/machine-git-credentials": {
         get: {
-          summary: "List organization machine Git credentials",
+          summary: "List organization access tokens",
           description: "Requires the owning user's interactive browser session; secrets are not returned.",
           parameters: [
             {
@@ -3461,7 +3530,10 @@ function makeApiSpec() {
           ],
           security: [{ cookieSession: [] }],
           responses: {
-            200: { description: "Credential metadata without secret values" },
+            200: {
+              description:
+                "Credential metadata without secret values; revoked records include revokedAt and hidden records are omitted",
+            },
             401: unauthorized,
             403: { description: "Interactive session or repo:write permission required" },
             404: { description: "Organization not found" },
@@ -3469,9 +3541,9 @@ function makeApiSpec() {
           },
         },
         post: {
-          summary: "Create an organization machine Git credential",
+          summary: "Create an Org Access Token",
           description:
-            "Creates a Git Smart HTTP Basic credential scoped to this organization and optionally one repository. The secret is returned once and cannot authorize REST API requests.",
+            "Creates an Org Access Token for Git Smart HTTP Basic authentication, scoped to this organization and optionally one repository. The secret is returned once and cannot authorize REST API requests.",
           parameters: [
             {
               name: "org",
@@ -3506,7 +3578,7 @@ function makeApiSpec() {
       },
       "/api/v1/orgs/{org}/machine-git-credentials/{id}": {
         delete: {
-          summary: "Revoke a machine Git credential",
+          summary: "Revoke an Org Access Token; record remains visible for audit history",
           parameters: [
             {
               name: "org",
@@ -3527,6 +3599,23 @@ function makeApiSpec() {
             401: unauthorized,
             403: { description: "Interactive session or repo:write permission required" },
             404: { description: "Organization or credential not found" },
+            503: { description: "Credential storage unavailable" },
+          },
+        },
+      },
+      "/api/v1/orgs/{org}/machine-git-credentials/{id}/deleted": {
+        delete: {
+          summary: "Hide an already-revoked Org Access Token from management lists; retain its database audit record",
+          security: [{ cookieSession: [] }],
+          parameters: [
+            { name: "org", in: "path", required: true, schema: { type: "string" } },
+            { name: "id", in: "path", required: true, schema: { type: "string", pattern: "^mgc_[a-f0-9]{24}$" } },
+          ],
+          responses: {
+            204: { description: "Hidden; audit record retained" },
+            401: unauthorized,
+            403: { description: "Interactive session or org:manage permission required" },
+            404: { description: "Organization or revoked credential not found" },
             503: { description: "Credential storage unavailable" },
           },
         },

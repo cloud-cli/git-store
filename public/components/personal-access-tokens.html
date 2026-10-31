@@ -99,7 +99,7 @@
         </aside>
       </template>
 
-      <template if="canRead">
+      <template if="canCreateToken()">
         <h2 class="mb-3 text-lg font-semibold">Create a token</h2>
         <form
           id="token-grants-form"
@@ -145,14 +145,16 @@
               class="rounded-lg border border-gray-300 bg-white px-3 py-2 dark:border-gray-600 dark:bg-gray-950"
             />
           </label>
-          <p class="text-sm text-gray-600 dark:text-gray-300">Select one or more owned organizations to grant.</p>
+          <p class="text-sm text-gray-600 dark:text-gray-300">Select organizations you own or can access to grant.</p>
           <template for="organizationItem of organizations"
             ><label class="flex items-center gap-2 text-sm"
               ><input
                 type="checkbox"
-                value="{{ organizationItem }}"
-                on-change="toggleOrg(organizationItem, $event.target.checked)"
-              />{{ organizationItem }}</label
+                value="{{ organizationItem.slug }}"
+                on-change="toggleOrg(organizationItem.slug, $event.target.checked)"
+              />{{ organizationItem.slug }}<template if="organizationItem.role && organizationItem.role !== 'owner'"
+                ><span class="text-gray-500 dark:text-gray-400"> · {{ organizationItem.role }}</span></template
+              ></label
             ></template
           >
           <button
@@ -163,7 +165,7 @@
           </button>
         </form>
       </template>
-      <template if="!canRead">
+      <template if="!canCreateToken()">
         <p
           class="rounded-lg border border-amber-300 p-4 text-sm text-amber-800 dark:border-amber-800 dark:text-amber-200"
           role="status"
@@ -191,7 +193,28 @@
       const selectedOrgs = ref([]);
       const editingTokenId = ref("");
       const scopeOptions = ["repo:read", "repo:write", "org:create", "org:manage"];
-      const scopeAvailable = (scope) => (scope === "repo:read" ? canRead.value : canWrite.value);
+      const canCreateToken = () => canRead.value || organizations.value.length > 0;
+      const scopeAvailable = (scope) => {
+        const baseAccess = scope === "repo:read" ? canRead.value : canWrite.value;
+        const selectedOrganizations = organizations.value.filter((organization) =>
+          selectedOrgs.value.includes(organization.slug),
+        );
+        if (!selectedOrganizations.length) {
+          return baseAccess;
+        }
+        return selectedOrganizations.every((organization) => {
+          if (!organization.role || organization.role === "owner") {
+            return baseAccess;
+          }
+          if (scope === "repo:read") {
+            return ["viewer", "contributor", "admin"].includes(organization.role);
+          }
+          if (scope === "repo:write") {
+            return ["contributor", "admin"].includes(organization.role);
+          }
+          return scope === "org:manage" && organization.role === "admin";
+        });
+      };
 
       const responseError = async (response) => {
         let body = {};
@@ -220,9 +243,10 @@
           });
           if (orgResponse.ok) {
             const organizationBody = await orgResponse.json();
-            organizations.value = (organizationBody.orgs || [])
-              .filter((organization) => !organization.role || organization.role === "owner")
-              .map((organization) => organization.slug);
+            organizations.value = (organizationBody.orgs || []).filter(
+              (organization) =>
+                !organization.role || ["owner", "viewer", "contributor", "admin"].includes(organization.role),
+            );
           }
         } catch (err) {
           error.value = err.message || "Unable to load tokens";
@@ -234,7 +258,7 @@
         createdToken.value = "";
         copied.value = false;
         error.value = "";
-        if (!canRead.value || busy.value) {
+        if (!canCreateToken() || busy.value) {
           return;
         }
         if (selectedScopes.value.some((scope) => !scopeAvailable(scope))) {
@@ -346,6 +370,7 @@
       onInit(loadTokens);
       return {
         canRead,
+        canCreateToken,
         canWrite,
         tokens,
         loading,

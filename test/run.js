@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -1543,6 +1544,7 @@ async function run() {
       "/api/v1/orgs/{org}/events": ["get"],
       "/api/v1/orgs/{org}/machine-git-credentials": ["get", "post"],
       "/api/v1/orgs/{org}/machine-git-credentials/{id}": ["delete"],
+      "/api/v1/orgs/{org}/machine-git-credentials/{id}/deleted": ["delete"],
       "/api/v1/orgs/{org}/webhooks": ["get", "post"],
       "/api/v1/orgs/{org}/webhooks/{id}": ["delete", "post"],
       "/api/v1/orgs/{org}/repos": ["get"],
@@ -1790,8 +1792,120 @@ async function run() {
       Cookie: sessionCookie,
       Origin: `http://127.0.0.1:${port}`,
     };
+    assert.ok(organizations.createForOwnerHash(hashSubject("browser-subject"), "browser-machine-org"));
+    const machineCredentialPath = "/api/v1/orgs/browser-machine-org/machine-git-credentials";
+    const createdMachineCredential = await request(
+      port,
+      "POST",
+      machineCredentialPath,
+      { label: "audit cleanup", scopes: ["repo:read"] },
+      undefined,
+      sessionHeaders,
+    );
+    assert.equal(createdMachineCredential.status, 201);
+    const createdMachineRecord = JSON.parse(createdMachineCredential.body);
+    assert.equal(
+      (
+        await request(
+          port,
+          "DELETE",
+          `${machineCredentialPath}/${createdMachineRecord.record.id}/deleted`,
+          undefined,
+          undefined,
+          sessionHeaders,
+        )
+      ).status,
+      404,
+      "active credentials cannot be hidden from the management list",
+    );
+    assert.equal(
+      (
+        await request(
+          port,
+          "DELETE",
+          `${machineCredentialPath}/${createdMachineRecord.record.id}`,
+          undefined,
+          undefined,
+          sessionHeaders,
+        )
+      ).status,
+      204,
+    );
+    const revokedMachineList = JSON.parse(
+      (await request(port, "GET", machineCredentialPath, undefined, undefined, sessionHeaders)).body,
+    ).credentials;
+    assert.ok(revokedMachineList.find((record) => record.id === createdMachineRecord.record.id)?.revokedAt);
+    assert.equal((await app.locals.machineGitCredentials.authenticate(createdMachineRecord.token)).claims, null);
+    assert.equal(
+      (
+        await request(
+          port,
+          "DELETE",
+          `${machineCredentialPath}/${createdMachineRecord.record.id}/deleted`,
+          undefined,
+          undefined,
+          sessionHeaders,
+        )
+      ).status,
+      204,
+    );
+    const hiddenMachineList = JSON.parse(
+      (await request(port, "GET", machineCredentialPath, undefined, undefined, sessionHeaders)).body,
+    ).credentials;
+    assert.equal(
+      hiddenMachineList.some((record) => record.id === createdMachineRecord.record.id),
+      false,
+    );
+    const retainedMachineRecord = app.locals.machineGitCredentials.client.records.get(createdMachineRecord.record.id);
+    assert.ok(retainedMachineRecord.deleted_at, "hidden credentials remain stored as audit records");
+    assert.equal(
+      retainedMachineRecord.token_hash,
+      crypto.createHash("sha256").update(createdMachineRecord.token).digest("hex"),
+    );
+
     const teamStore = app.locals.teamStore;
     teamStore.registerOwner(hashSubject("browser-subject"));
+    const removableSub = "removable-team-member";
+    const removableHash = hashSubject(removableSub);
+    const removableInvite = teamStore.invite(hashSubject("browser-subject"), removableHash, "contributor");
+    assert.equal(teamStore.accept(removableInvite.id, removableHash), true);
+    const removablePat = app.locals.tokenAuthorizations.create({
+      ownerHash: removableHash,
+      label: "team org grant",
+      scopes: ["repo:read"],
+      orgs: ["browser-machine-org"],
+    });
+    assert.equal(
+      (await request(port, "GET", "/api/v1/orgs/browser-machine-org/repos", undefined, removablePat.token)).status,
+      200,
+    );
+    const removableMember = teamStore
+      .members(hashSubject("browser-subject"))
+      .find((member) => member.subjectHash === removableHash);
+    assert.ok(removableMember);
+    assert.equal(
+      (
+        await request(
+          port,
+          "DELETE",
+          `/api/v1/team/members/${removableMember.id}`,
+          undefined,
+          undefined,
+          sessionHeaders,
+        )
+      ).status,
+      204,
+    );
+    assert.deepEqual(
+      app.locals.tokenAuthorizations.listForOwner(removableHash).find((token) => token.id === removablePat.record.id)
+        .orgs,
+      [],
+    );
+    assert.notEqual(
+      (await request(port, "GET", "/api/v1/orgs/browser-machine-org/repos", undefined, removablePat.token)).status,
+      200,
+      "removing a member revokes that member's explicit grant for the owner's organizations",
+    );
     const teamOwner = hashSubject("separate-team-owner");
     teamStore.registerOwner(teamOwner);
     const teamOrg = organizations.createForOwnerHash(teamOwner, "team-shared-org");
@@ -1969,6 +2083,45 @@ async function run() {
       204,
     );
     teamStore.setRole(teamOwner, teamMember.id, "viewer");
+    const viewerWritePat = await request(
+      port,
+      "POST",
+      "/api/v1/personal-access-tokens",
+      {
+        label: "viewer cannot mint write token",
+        scopes: ["repo:write"],
+        orgs: ["team-shared-org"],
+      },
+      undefined,
+      sessionHeaders,
+    );
+    assert.equal(
+      viewerWritePat.status,
+      403,
+      "team member PAT scopes cannot exceed their role for shared organizations",
+    );
+    const memberPatResponse = await request(
+      port,
+      "POST",
+      "/api/v1/personal-access-tokens",
+      {
+        label: "shared organization grant",
+        scopes: ["repo:read"],
+        orgs: ["team-shared-org"],
+      },
+      undefined,
+      sessionHeaders,
+    );
+    assert.equal(memberPatResponse.status, 201, memberPatResponse.body);
+    const memberPat = JSON.parse(memberPatResponse.body);
+    assert.equal(
+      (await request(port, "GET", "/api/v1/orgs/team-shared-org/events", undefined, memberPat.token)).status,
+      200,
+    );
+    assert.notEqual(
+      (await request(port, "GET", "/api/v1/orgs/team-one/events", undefined, memberPat.token)).status,
+      200,
+    );
     const noTokenOrgGrant = await request(
       port,
       "GET",

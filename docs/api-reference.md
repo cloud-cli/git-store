@@ -8,15 +8,16 @@ All URLs are relative to the server base URL (`http://localhost:3000` by default
 - `{repo}` – string, the repository name (e.g. `myproject`).
 - `{name}` – string, the tag or branch name.
 
-## Organization machine Git credentials
+## Organization access tokens
 
-An authorized organization owner can manage headless HTTPS Git credentials in organization settings. Credentials are bound to the organization and optional repository, not to the user or agent that created them; removing that identity from the identity provider does not invalidate the automation credential as long as the organization and credential remain active. Creation/list/revocation require an interactive browser session from the current organization owner. These credentials use HTTP Basic authentication only on `/git/{org}/{repo}.git/...`; they are not bearer tokens and never authorize REST API requests. Secrets are returned only once and only their SHA-256 hashes are persisted. Scopes are `repo:read` and/or `repo:write`; credentials are constrained to exactly one organization and can optionally name one repository. Fetch requires read or write; push requires write. `expiresAt` is an optional future calendar date (`YYYY-MM-DD`).
+An authorized organization owner can manage Org Access Tokens in organization settings. Tokens are bound to the organization and optional repository, not to the user or agent that created them; removing that identity from the identity provider does not invalidate the automation token as long as the organization and token remain active. Creation, listing, revocation, and hiding require an interactive browser session from the current organization owner. These tokens use HTTP Basic authentication only on `/git/{org}/{repo}.git/...`; they are not bearer tokens and never authorize REST API requests. Secrets are returned only once and only their SHA-256 hashes are persisted. Scopes are `repo:read` and/or `repo:write`; tokens are constrained to exactly one organization and can optionally name one repository. Fetch requires read or write; push requires write. `expiresAt` is an optional future calendar date (`YYYY-MM-DD`).
 
-Credentials require the configured d0 SQLite database and are unavailable when `DATABASE_URL` is not set. Existing `machine-git-credentials.json` records are imported transactionally once; the source file is retained.
+Org Access Tokens require the configured d0 SQLite database and are unavailable when `DATABASE_URL` is not set. Existing `machine-git-credentials.json` records are imported transactionally once; the source file is retained.
 
-- `GET /api/v1/orgs/{org}/machine-git-credentials` – list non-secret metadata.
+- `GET /api/v1/orgs/{org}/machine-git-credentials` – list non-secret metadata, including revoked credentials with `revokedAt`; hidden credentials are omitted.
 - `POST /api/v1/orgs/{org}/machine-git-credentials` – create with `{ "label": "build agent", "scopes": ["repo:read"], "repo": "optional-repo", "expiresAt": "optional-date" }`; response includes the one-time `token` and public `record`.
-- `DELETE /api/v1/orgs/{org}/machine-git-credentials/{id}` – revoke.
+- `DELETE /api/v1/orgs/{org}/machine-git-credentials/{id}` – revoke (backward-compatible); revoked records remain listed for audit history.
+- `DELETE /api/v1/orgs/{org}/machine-git-credentials/{id}/deleted` – hide an already-revoked credential from lists. The database record/hash remain for audit, and active credentials cannot be hidden.
 
 Use the token as the Basic-auth password (the username is ignored), for example `https://USER:TOKEN@git.example/git/acme/widgets.git`. Avoid embedding secrets in shell history or repository remotes; use a credential helper or CI secret store.
 
@@ -73,7 +74,7 @@ Public endpoints (`/api`, `/api/v1/health`, `/ui/config`, `/ui/session`) do not 
 ## Team roles and invitations
 
 Team membership applies to same-origin browser sessions only. It does not grant access to Git Smart HTTP,
-machine Git credentials, bearer tokens, or personal access tokens; those credentials retain their own explicit
+organization access tokens, bearer tokens, or personal access tokens; those credentials retain their own explicit
 scope and organization grants. A team owner invites an OIDC subject (`sub`) directly, and the invited account
 must sign in and accept the matching invitation. Invitations expire after 30 days. The stored subject values
 are SHA-256 hashes.
