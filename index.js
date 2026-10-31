@@ -35,12 +35,10 @@ const getGit = (repoPath) => simpleGit.simpleGit(repoPath);
 const MAX_REF_FILE_BYTES = 10 * 1024 * 1024;
 
 const app = express();
-app.locals.auditStore = createAuditStore(createDatabaseClient(process.env.DATABASE_URL, process.env.DB_AUTH_TOKEN));
-app.locals.webhookStore = createWebhookStore(
-  createDatabaseClient(process.env.DATABASE_URL, process.env.DB_AUTH_TOKEN),
-  getEncryptionKey(process.env.WEBHOOK_ENCRYPTION_KEY),
-);
-app.locals.threadStore = createThreadStore(createDatabaseClient(process.env.DATABASE_URL, process.env.DB_AUTH_TOKEN));
+const databaseClient = createDatabaseClient(process.env.DATABASE_URL, process.env.DB_AUTH_TOKEN);
+app.locals.auditStore = createAuditStore(databaseClient);
+app.locals.webhookStore = createWebhookStore(databaseClient, getEncryptionKey(process.env.WEBHOOK_ENCRYPTION_KEY));
+app.locals.threadStore = createThreadStore(databaseClient);
 app.use((req, res, next) => {
   req.requestId = crypto.randomUUID();
   res.set("X-Request-Id", req.requestId);
@@ -73,6 +71,7 @@ const personalAccessTokens = new PersonalAccessTokenStore(
 );
 app.locals.tokenAuthorizations = personalAccessTokens;
 const machineGitCredentials = new MachineGitCredentialStore(
+  databaseClient,
   path.join(process.env.DATA_PATH, "machine-git-credentials.json"),
 );
 app.locals.machineGitCredentials = machineGitCredentials;
@@ -699,16 +698,19 @@ function requireGitBasicAuth(req, res, next) {
     return res.status(401).send("Git HTTP authentication required");
   }
   req.auditToken = token;
-  const machineCredential = machineGitCredentials.authenticate(token);
   const personalToken = personalAccessTokens.authenticate(token);
-  Promise.resolve(
-    machineCredential.recognized
-      ? machineCredential.claims
-      : personalToken.recognized
-        ? personalToken.claims
-        : introspectAccessToken(token),
-  )
-    .then((claims) => {
+  machineGitCredentials
+    .authenticate(token)
+    .then((machineCredential) =>
+      Promise.resolve(
+        machineCredential.recognized
+          ? machineCredential.claims
+          : personalToken.recognized
+            ? personalToken.claims
+            : introspectAccessToken(token),
+      ).then((claims) => ({ machineCredential, claims })),
+    )
+    .then(({ machineCredential, claims }) => {
       if (claims?.active !== true || typeof claims.sub !== "string" || !claims.sub.trim()) {
         auditSecurityFailure(req, "security.auth.denied", {
           reason: claims?.active ? "missing_subject" : "inactive_token",
@@ -1950,13 +1952,13 @@ app.get(
   requireAuthentication,
   requireInteractiveBrowserSession,
   requireScope("org:manage"),
-  (req, res) => {
+  async (req, res) => {
     const org = organizations.get(req.params.org);
     if (!org || org.ownerHash !== getAuthenticatedSubjectHash(req)) {
       return res.status(404).json({ error: "Organization not found" });
     }
     try {
-      return res.json({ credentials: machineGitCredentials.list(org.slug) });
+      return res.json({ credentials: await machineGitCredentials.list(org.slug) });
     } catch {
       return res.status(503).json({ error: "Machine Git credential storage is unavailable" });
     }
@@ -1968,7 +1970,7 @@ app.post(
   requireAuthentication,
   requireInteractiveBrowserSession,
   requireScope("org:manage"),
-  (req, res) => {
+  async (req, res) => {
     const org = organizations.get(req.params.org);
     if (!org || org.ownerHash !== getAuthenticatedSubjectHash(req)) {
       return res.status(404).json({ error: "Organization not found" });
@@ -1994,7 +1996,13 @@ app.post(
       return res.status(404).json({ error: "Repository not found" });
     }
     try {
-      const created = machineGitCredentials.create({ org: org.slug, repo, label, scopes, expiresAt: expiry.expiresAt });
+      const created = await machineGitCredentials.create({
+        org: org.slug,
+        repo,
+        label,
+        scopes,
+        expiresAt: expiry.expiresAt,
+      });
       return res.status(201).json(created);
     } catch {
       return res.status(503).json({ error: "Machine Git credential storage is unavailable" });
@@ -2007,13 +2015,13 @@ app.delete(
   requireAuthentication,
   requireInteractiveBrowserSession,
   requireScope("org:manage"),
-  (req, res) => {
+  async (req, res) => {
     const org = organizations.get(req.params.org);
     if (!org || org.ownerHash !== getAuthenticatedSubjectHash(req)) {
       return res.status(404).json({ error: "Organization not found" });
     }
     try {
-      return machineGitCredentials.revoke(org.slug, req.params.id)
+      return (await machineGitCredentials.revoke(org.slug, req.params.id))
         ? res.status(204).end()
         : res.status(404).json({ error: "Credential not found" });
     } catch {

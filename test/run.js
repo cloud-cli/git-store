@@ -18,6 +18,8 @@ process.env.OIDC_CLIENT_ID = "";
 process.env.OIDC_CLIENT_SECRET = "test-client-secret";
 
 const app = (await import("../index.js")).default;
+const { createMachineDatabase } = await import("./fake-machine-db.js");
+app.locals.machineGitCredentials.client = createMachineDatabase();
 const organizations = await import("../organizations.js");
 const { hashSubject } = await import("../storage.js");
 organizations.create("introspected-subject", "introspected-org");
@@ -962,7 +964,7 @@ async function run() {
     );
     assert.strictEqual(foreignGitRepo.status, 404);
 
-    const machineReadOnly = app.locals.machineGitCredentials.create({
+    const machineReadOnly = await app.locals.machineGitCredentials.create({
       org: "team-one",
       repo: "git-http",
       label: "CI read",
@@ -978,6 +980,31 @@ async function run() {
       { Authorization: machineHeader },
     );
     assert.strictEqual(machineRefs.status, 200, "machine credential can read scoped Smart HTTP refs");
+    const organizationMetadataPath = path.join(dataPath, "orgs", "team-one", ".organization.json");
+    const originalOrganizationMetadata = fs.readFileSync(organizationMetadataPath, "utf8");
+    try {
+      fs.writeFileSync(
+        organizationMetadataPath,
+        JSON.stringify({ slug: "team-one", ownerHash: hashSubject("removed-owner") }),
+      );
+      organizations.reload();
+      const ownerIndependentRefs = await request(
+        port,
+        "GET",
+        "/git/team-one/git-http.git/info/refs?service=git-upload-pack",
+        undefined,
+        undefined,
+        { Authorization: machineHeader },
+      );
+      assert.strictEqual(
+        ownerIndependentRefs.status,
+        200,
+        "machine credential remains valid if its creator is removed",
+      );
+    } finally {
+      fs.writeFileSync(organizationMetadataPath, originalOrganizationMetadata);
+      organizations.reload();
+    }
     const machineClonePath = path.join(dataPath, "machine-clone");
     await git([
       "-c",
@@ -1029,7 +1056,7 @@ async function run() {
       "token-a",
     );
     assert.strictEqual(bearerManagement.status, 403, "bearer tokens cannot manage machine Git credentials");
-    app.locals.machineGitCredentials.revoke("team-one", machineReadOnly.record.id);
+    await app.locals.machineGitCredentials.revoke("team-one", machineReadOnly.record.id);
     const revokedMachineGit = await request(
       port,
       "GET",
@@ -1039,7 +1066,7 @@ async function run() {
       { Authorization: machineHeader },
     );
     assert.strictEqual(revokedMachineGit.status, 401, "revoked machine credential no longer authenticates");
-    const machineReadWrite = app.locals.machineGitCredentials.create({
+    const machineReadWrite = await app.locals.machineGitCredentials.create({
       org: "team-one",
       repo: "git-http",
       label: "CI push",

@@ -1,9 +1,5 @@
 import assert from "node:assert/strict";
-import {
-  createAuditStore,
-  createDatabaseClient,
-  createTokenFingerprint,
-} from "../audit.js";
+import { createAuditStore, createDatabaseClient, createTokenFingerprint } from "../audit.js";
 
 async function run() {
   const originalFetch = globalThis.fetch;
@@ -13,13 +9,24 @@ async function run() {
     return { ok: true, json: async () => [] };
   };
   try {
-    await createDatabaseClient(
-      "https://db.apphor.de/db~audit/index.mjs",
-    ).query("all", "SELECT 1");
+    await createDatabaseClient("https://db.apphor.de/db~audit/index.mjs").query("all", "SELECT 1");
   } finally {
     globalThis.fetch = originalFetch;
   }
   assert.strictEqual(requestedUrl, "https://db.apphor.de/db~audit/query");
+
+  globalThis.fetch = async (_url, options) => {
+    assert.deepStrictEqual(JSON.parse(options.body), {
+      m: "transaction",
+      t: [{ s: "SELECT 1", m: "get" }],
+    });
+    return { ok: true, json: async () => ({ results: [] }) };
+  };
+  try {
+    await createDatabaseClient("https://db.apphor.de/db~audit/index.mjs").query("t", [{ s: "SELECT 1", m: "get" }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 
   const calls = [];
   const client = {
@@ -43,10 +50,7 @@ async function run() {
   });
 
   assert.match(calls[0].statement, /CREATE TABLE IF NOT EXISTS audit_events/);
-  assert.match(
-    calls[1].statement,
-    /CREATE INDEX IF NOT EXISTS audit_events_org_time/,
-  );
+  assert.match(calls[1].statement, /CREATE INDEX IF NOT EXISTS audit_events_org_time/);
   const insert = calls[2];
   assert.strictEqual(insert.mode, "run");
   assert.strictEqual(insert.bindings[4], "subject-1");
@@ -61,14 +65,8 @@ async function run() {
   assert.deepStrictEqual(query.bindings, ["example", 25, 50]);
 
   const fingerprint = createTokenFingerprint("raw-token", "test-key");
-  assert.strictEqual(
-    fingerprint,
-    createTokenFingerprint("raw-token", "test-key"),
-  );
-  assert.notStrictEqual(
-    fingerprint,
-    createTokenFingerprint("raw-token", "other-key"),
-  );
+  assert.strictEqual(fingerprint, createTokenFingerprint("raw-token", "test-key"));
+  assert.notStrictEqual(fingerprint, createTokenFingerprint("raw-token", "other-key"));
   assert.notStrictEqual(fingerprint, "raw-token");
 }
 

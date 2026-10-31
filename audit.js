@@ -25,10 +25,11 @@ function createDatabaseClient(databaseUrl, token = "") {
   }
   return {
     async query(mode, statement, bindings) {
+      const payload = mode === "t" ? { m: "transaction", t: statement } : { s: statement, d: bindings, m: mode };
       const response = await fetch(new URL("query", baseUrl), {
         method: "POST",
         headers,
-        body: JSON.stringify({ s: statement, d: bindings, m: mode }),
+        body: JSON.stringify(payload),
       });
       if (!response.ok) {
         throw new Error(`Audit database request failed (${response.status})`);
