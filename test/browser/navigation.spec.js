@@ -15,7 +15,6 @@ let createdOrgWebhookRequest;
 let webhookApiDisabled;
 let expectedWebhookHttpErrors;
 let createdPersonalAccessTokenRequest;
-let createdTokenAuthorizationRequest;
 let bootstrapSession;
 let runtimeErrors;
 let imageBytes;
@@ -116,7 +115,6 @@ test.beforeEach(async ({ page }) => {
     },
   ];
   createdPersonalAccessTokenRequest = null;
-  createdTokenAuthorizationRequest = null;
   currentOrgWebhooks = [];
   testWebhookRequests = [];
   currentMachineCredentials = [];
@@ -292,13 +290,6 @@ test.beforeEach(async ({ page }) => {
       return route.fulfill({ status: 204 });
     }
     return route.fulfill({ status: 404, json: { error: "Not found" } });
-  });
-  await page.route("**/api/v1/token-authorizations", async (route) => {
-    createdTokenAuthorizationRequest = JSON.parse(route.request().postData());
-    return route.fulfill({
-      status: 201,
-      json: { token: { id: "pat_imported", label: createdTokenAuthorizationRequest.label } },
-    });
   });
   await page.route("**/api/v1/orgs", (route) =>
     route.fulfill({ json: { orgs: [{ slug: "example", role: "owner" }] } }),
@@ -674,25 +665,7 @@ test("token settings lists tokens and creates a scoped PAT", async ({ page }) =>
     .poll(() => createdPersonalAccessTokenRequest)
     .toEqual({ label: "Automation client", scopes: ["repo:write"], orgs: ["example"] });
 
-  const bindForm = page.locator("form").filter({ hasText: "External token" });
-  await bindForm.getByLabel("External token").fill("opaque-imported-secret");
-  await bindForm.getByLabel("Label", { exact: true }).fill("Imported access");
-  await bindForm.getByLabel("repo:write", { exact: true }).check();
-  await bindForm.getByLabel("example", { exact: true }).check();
-  await expect(bindForm.getByLabel("External token")).toHaveAttribute("type", "password");
-  await bindForm.getByRole("button", { name: "Bind token" }).click();
-  await expect
-    .poll(() => createdTokenAuthorizationRequest)
-    .toEqual({
-      token: "opaque-imported-secret",
-      label: "Imported access",
-      scopes: ["repo:read", "repo:write"],
-      orgs: ["example"],
-    });
-  await expect(bindForm.getByLabel("External token")).toHaveValue("");
-  expect(await page.evaluate(() => JSON.stringify(Object.values(window.localStorage)))).not.toContain(
-    "opaque-imported-secret",
-  );
+  await expect(page.getByRole("heading", { name: "Bind an existing GitMini Auth token" })).toHaveCount(0);
 
   const existingToken = page.getByRole("listitem").filter({ hasText: "Existing integration" });
   await existingToken.getByRole("button", { name: "Edit grants" }).click();
@@ -726,13 +699,7 @@ test("token settings show all scopes and disable grants the user lacks", async (
     await expect(tokenForm.getByLabel(new RegExp(`^${scope}`))).toBeDisabled();
   }
 
-  const bindingForm = page.locator("form").filter({ hasText: "External token" });
-  for (const scope of ["repo:read", "repo:write", "org:create", "org:manage"]) {
-    await expect(bindingForm.getByLabel(new RegExp(`^${scope}`))).toBeVisible();
-  }
-  for (const scope of ["repo:write", "org:create", "org:manage"]) {
-    await expect(bindingForm.getByLabel(new RegExp(`^${scope}`))).toBeDisabled();
-  }
+  await expect(page.getByRole("heading", { name: "Bind an existing GitMini Auth token" })).toHaveCount(0);
 });
 
 test("organization settings navigate to repositories and manage webhook subscriptions", async ({ page }) => {

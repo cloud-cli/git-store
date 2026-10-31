@@ -163,63 +163,6 @@
           </button>
         </form>
       </template>
-      <template if="canRead">
-        <h2 class="mb-3 mt-8 text-lg font-semibold">Bind an existing GitMini Auth token</h2>
-        <form class="flex max-w-xl flex-col gap-3 rounded-xl border p-4" on-submit.prevent="bindToken()">
-          <p class="text-sm text-gray-600 dark:text-gray-300">
-            The token must be issued for this GitMini OIDC client; tokens minted for a different Auth client cannot be
-            introspected here.
-          </p>
-          <label
-            >External token<input
-              required
-              type="password"
-              autocomplete="new-password"
-              on-input="setExternalToken($event.target.value)"
-              class="block w-full rounded border px-3 py-2"
-          /></label>
-          <label
-            >Label<input
-              required
-              maxlength="100"
-              on-input="setExternalLabel($event.target.value)"
-              class="block w-full rounded border px-3 py-2"
-          /></label>
-          <fieldset class="flex flex-col gap-1 text-sm font-medium">
-            <legend>GitMini capabilities</legend>
-            <template for="scopeOption of scopeOptions">
-              <template if="scopeAvailable(scopeOption)">
-                <label class="flex items-center gap-2 font-normal"
-                  ><input
-                    type="checkbox"
-                    value="{{ scopeOption }}"
-                    on-change="toggleBindingScope(scopeOption, $event.target.checked)"
-                  />{{ scopeOption }}</label
-                >
-              </template>
-              <template if="!scopeAvailable(scopeOption)">
-                <label class="flex items-center gap-2 font-normal text-gray-400 dark:text-gray-500"
-                  ><input type="checkbox" value="{{ scopeOption }}" disabled />{{ scopeOption }} (not granted to your
-                  user)</label
-                >
-              </template>
-            </template>
-          </fieldset>
-          <p class="text-sm text-gray-600 dark:text-gray-300">Grant only organizations this token should access.</p>
-          <template for="organizationItem of organizations"
-            ><label class="flex items-center gap-2 text-sm"
-              ><input
-                type="checkbox"
-                value="{{ organizationItem }}"
-                on-change="toggleBindingOrg(organizationItem, $event.target.checked)"
-              />{{ organizationItem }}</label
-            ></template
-          >
-          <button type="submit" class="self-start rounded-lg border px-4 py-2">
-            {{ busy ? "Binding…" : "Bind token" }}
-          </button>
-        </form>
-      </template>
       <template if="!canRead">
         <p
           class="rounded-lg border border-amber-300 p-4 text-sm text-amber-800 dark:border-amber-800 dark:text-amber-200"
@@ -246,11 +189,7 @@
       const organizations = ref([]);
       const selectedScopes = ref([]);
       const selectedOrgs = ref([]);
-      const bindingScopes = ref(["repo:read"]);
-      const bindingOrgs = ref([]);
       const editingTokenId = ref("");
-      const externalToken = ref("");
-      const externalLabel = ref("");
       const scopeOptions = ["repo:read", "repo:write", "org:create", "org:manage"];
       const scopeAvailable = (scope) => (scope === "repo:read" ? canRead.value : canWrite.value);
 
@@ -367,36 +306,6 @@
           input.checked = selectedScopes.value.includes(input.value) || selectedOrgs.value.includes(input.value);
         });
       };
-      const bindToken = async () => {
-        const secret = externalToken.value;
-        if (!secret || !externalLabel.value.trim() || !bindingScopes.value.length || busy.value) return;
-        if (bindingScopes.value.some((scope) => !scopeAvailable(scope))) return;
-        busy.value = true;
-        error.value = "";
-        try {
-          const response = await fetch("/api/v1/token-authorizations", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Accept: "application/json" },
-            body: JSON.stringify({
-              token: secret,
-              label: externalLabel.value,
-              scopes: bindingScopes.value,
-              orgs: bindingOrgs.value,
-            }),
-          });
-          if (!response.ok) throw new Error(await responseError(response));
-          externalToken.value = "";
-          const passwordInput = document.querySelector('input[type="password"]');
-          if (passwordInput) {
-            passwordInput.value = "";
-          }
-          await loadTokens();
-        } catch (err) {
-          error.value = err.message || "Unable to bind token";
-        } finally {
-          busy.value = false;
-        }
-      };
       const loadTokensPreservingSecret = async () => {
         const secret = createdToken.value;
         await loadTokens();
@@ -463,23 +372,6 @@
             ? [...new Set([...selectedOrgs.value, org])]
             : selectedOrgs.value.filter((item) => item !== org);
         },
-        toggleBindingScope: (scope, enabled) => {
-          bindingScopes.value = enabled
-            ? [...new Set([...bindingScopes.value, scope])]
-            : bindingScopes.value.filter((item) => item !== scope);
-        },
-        toggleBindingOrg: (org, enabled) => {
-          bindingOrgs.value = enabled
-            ? [...new Set([...bindingOrgs.value, org])]
-            : bindingOrgs.value.filter((item) => item !== org);
-        },
-        setExternalToken: (value) => {
-          externalToken.value = value;
-        },
-        setExternalLabel: (value) => {
-          externalLabel.value = value;
-        },
-        bindToken,
         setExpiry: (value) => {
           expiresAt.value = value;
         },
