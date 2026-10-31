@@ -495,6 +495,14 @@ test("profile settings show an initials fallback when no photo is available", as
   await page.goto("/ui/?settings=profile");
   await expect(page.getByRole("img", { name: "Profile photo" })).toHaveCount(0);
   await expect(page.getByRole("region").getByText("B", { exact: true })).toBeVisible();
+
+  await page.route("https://images.broken.test/**", (route) =>
+    route.fulfill({ status: 200, contentType: "image/png", body: "not-an-image" }),
+  );
+  bootstrapSession.profile.picture = "https://images.broken.test/avatar.png";
+  await page.goto("/ui/?settings=profile");
+  await expect(page.getByRole("img", { name: "Profile photo" })).toHaveCount(0);
+  await expect(page.getByRole("region").getByText("B", { exact: true })).toBeVisible();
 });
 
 test("team settings route history, owner management, invite acceptance, and responsive bounds", async ({ page }) => {
