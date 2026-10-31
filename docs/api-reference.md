@@ -70,6 +70,30 @@ also issues local personal access tokens; both credential kinds use the same loc
 
 Public endpoints (`/api`, `/api/v1/health`, `/ui/config`, `/ui/session`) do not require authentication.
 
+## Team roles and invitations
+
+Team membership applies to same-origin browser sessions only. It does not grant access to Git Smart HTTP,
+machine Git credentials, bearer tokens, or personal access tokens; those credentials retain their own explicit
+scope and organization grants. A team owner invites an OIDC subject (`sub`) directly, and the invited account
+must sign in and accept the matching invitation. Invitations expire after 30 days. The stored subject values
+are SHA-256 hashes.
+
+The roles apply to all current and future organizations owned by the inviter:
+
+- `viewer`: read repositories (`repo:read`).
+- `contributor`: read and write repositories (`repo:read`, `repo:write`).
+- `admin`: read/write repositories and manage owned organizations (`repo:read`, `repo:write`, `org:manage`).
+  Organization creation and team-roster administration remain owner-only.
+
+Team endpoints require an authenticated same-origin browser session. `GET /api/v1/team` returns the current
+user's team roster, outgoing and incoming invitations, and memberships. `POST /api/v1/team/invitations`
+accepts `{ "sub": "<invitee-sub>", "role": "viewer|contributor|admin" }`; owners can cancel with
+`DELETE /api/v1/team/invitations/{id}`. The target account accepts with
+`POST /api/v1/team/invitations/{id}/accept`. Owners change a member's role with
+`PATCH /api/v1/team/members/{memberId}` using `{ "role": "viewer|contributor|admin" }` and remove a member
+with `DELETE /api/v1/team/members/{memberId}`. The member ID is an opaque per-team identifier returned by
+the team endpoint.
+
 ## Endpoints
 
 ### Token authorization management

@@ -18,6 +18,7 @@
     <link rel="component" href="/ui/components/machine-git-credentials.html" />
     <link rel="component" href="/ui/components/personal-access-tokens.html" />
     <link rel="component" href="/ui/components/profile-settings.html" />
+    <link rel="component" href="/ui/components/team-settings.html" />
     <link rel="component" href="/ui/components/sign-in-landing.html" />
     <script type="module">
       import "@li3/web";
@@ -430,6 +431,7 @@
                 ><organization-settings
                   class="flex min-h-0 flex-1"
                   bind-can-write="canWrite"
+                  bind-can-manage-org="canManageOrg"
                   bind-selected-org="settingsOrg"
                   bind-section="settingsSection"
                   bind-organizations="orgs"
@@ -444,9 +446,12 @@
               <template if="authStatus === 'authenticated' && settings && settingsTab === 'tokens'"
                 ><personal-access-tokens
                   class="flex min-h-0 flex-1"
-                  bind-can-read="canRead"
-                  bind-can-write="canWrite"
+                  bind-can-read="sessionCanRead"
+                  bind-can-write="sessionCanWrite"
                 ></personal-access-tokens
+              ></template>
+              <template if="authStatus === 'authenticated' && settings && settingsTab === 'team'"
+                ><team-settings class="flex min-h-0 flex-1" on-teamchanged="refreshOrganizations()"></team-settings
               ></template>
               <template if="authStatus === 'authenticated' && repoLoadError && !settings"
                 ><section class="m-auto max-w-xl p-6 text-center">
@@ -904,20 +909,23 @@
                   : "anonymous",
               );
               const initialSettingsTab = new URL(window.location.href).searchParams.get("settings");
-              const settings = ref(["profile", "organizations", "tokens"].includes(initialSettingsTab));
+              const settings = ref(["profile", "organizations", "tokens", "team"].includes(initialSettingsTab));
               const settingsOrg = ref(new URL(window.location.href).searchParams.get("org") || "");
               const settingsSection = ref(new URL(window.location.href).searchParams.get("section") || "general");
               const settingsTab = ref(
-                ["profile", "organizations", "tokens"].includes(initialSettingsTab)
+                ["profile", "organizations", "tokens", "team"].includes(initialSettingsTab)
                   ? initialSettingsTab
                   : "organizations",
               );
               const profile = ref(serverSession.value?.authenticated ? serverSession.value.profile : null);
-              const canRead = ref(
+              const sessionCanRead = ref(
                 serverSession.value?.authenticated &&
                   (serverSession.value.canRead === true || serverSession.value.canWrite === true),
               );
-              const canWrite = ref(serverSession.value?.authenticated && serverSession.value.canWrite === true);
+              const sessionCanWrite = ref(serverSession.value?.authenticated && serverSession.value.canWrite === true);
+              const canRead = ref(!routeOrg.value && sessionCanRead.value);
+              const canWrite = ref(!routeOrg.value && sessionCanWrite.value);
+              const canManageOrg = ref(!routeOrg.value && sessionCanWrite.value);
               const userUrl = ref("#");
               const darkMode = ref(window.matchMedia("(prefers-color-scheme: dark)").matches);
               const showWorkspace = ref(false);
@@ -989,6 +997,25 @@
                 `/?org=${encodeURIComponent(org.value)}&repo=${encodeURIComponent(item.repo)}`;
               const isSelected = (item) => repoLabel.value === item.repo;
               const openSettings = () => navigate("/?settings=profile");
+              const applyOrgCapabilities = (slug) => {
+                const access = orgs.value.find((item) => item.slug === slug);
+                if (slug && (!organizationsLoaded.value || !access)) {
+                  canRead.value = false;
+                  canWrite.value = false;
+                  canManageOrg.value = false;
+                  return;
+                }
+                const role = access?.role;
+                if (["viewer", "contributor", "admin"].includes(role)) {
+                  canRead.value = true;
+                  canWrite.value = role === "contributor" || role === "admin";
+                  canManageOrg.value = role === "admin";
+                  return;
+                }
+                canRead.value = sessionCanRead.value;
+                canWrite.value = sessionCanWrite.value;
+                canManageOrg.value = sessionCanWrite.value;
+              };
               const toggleTheme = () => {
                 darkMode.value = !darkMode.value;
                 document.documentElement.classList.toggle("dark", darkMode.value);
@@ -1136,7 +1163,7 @@
                 routeRepo.value = nextRepo || "";
                 if (
                   !nextRepo ||
-                  ["profile", "organizations", "tokens"].includes(next.searchParams.get("settings")) ||
+                  ["profile", "organizations", "tokens", "team"].includes(next.searchParams.get("settings")) ||
                   nextRepo !== previous.searchParams.get("repo") ||
                   next.searchParams.get("org") !== previous.searchParams.get("org")
                 ) {
@@ -1145,11 +1172,12 @@
                 }
                 orgError.value = "";
                 org.value = nextOrg;
+                applyOrgCapabilities(nextOrg);
                 const requestedSettingsTab = next.searchParams.get("settings");
-                settings.value = ["profile", "organizations", "tokens"].includes(requestedSettingsTab);
+                settings.value = ["profile", "organizations", "tokens", "team"].includes(requestedSettingsTab);
                 settingsOrg.value = requestedSettingsTab === "organizations" ? nextOrg : "";
                 settingsSection.value = next.searchParams.get("section") || "general";
-                settingsTab.value = ["profile", "organizations", "tokens"].includes(requestedSettingsTab)
+                settingsTab.value = ["profile", "organizations", "tokens", "team"].includes(requestedSettingsTab)
                   ? requestedSettingsTab
                   : "organizations";
                 const organizationChanged = nextOrg !== (previous.searchParams.get("org") || "");
@@ -1242,7 +1270,10 @@
                 }
               };
               const deleteOrganization = async (slug) => {
-                if (!canWrite.value || !window.confirm(`Delete the empty organization “${slug}”?`)) {
+                const role = orgs.value.find((item) => item.slug === slug)?.role;
+                const canDelete =
+                  role === "admin" || (role !== "viewer" && role !== "contributor" && sessionCanWrite.value);
+                if (!canDelete || !window.confirm(`Delete the empty organization “${slug}”?`)) {
                   return;
                 }
                 orgError.value = "";
@@ -1422,6 +1453,7 @@
                 const result = await response.json();
                 orgs.value = Array.isArray(result) ? result : Array.isArray(result.orgs) ? result.orgs : [];
                 organizationsLoaded.value = true;
+                applyOrgCapabilities(routeOrg.value || org.value);
               };
               const refreshOrgRepositories = async () => {
                 const slug = url().searchParams.get("org");
@@ -2008,17 +2040,21 @@
                 if (!session.authenticated) {
                   profile.value = null;
                   authStatus.value = "anonymous";
+                  sessionCanRead.value = false;
+                  sessionCanWrite.value = false;
+                  applyOrgCapabilities("");
                   return;
                 }
                 profile.value = session.profile || null;
-                canRead.value = session.canRead === true || session.canWrite === true;
-                canWrite.value = session.canWrite === true;
+                sessionCanRead.value = session.canRead === true || session.canWrite === true;
+                sessionCanWrite.value = session.canWrite === true;
+                applyOrgCapabilities(org.value);
                 const params = currentUrl.searchParams;
                 org.value = params.get("org") || "";
                 routeOrg.value = org.value;
                 const requestedSettingsTab = params.get("settings");
-                settings.value = ["profile", "organizations", "tokens"].includes(requestedSettingsTab);
-                settingsTab.value = ["profile", "organizations", "tokens"].includes(requestedSettingsTab)
+                settings.value = ["profile", "organizations", "tokens", "team"].includes(requestedSettingsTab);
+                settingsTab.value = ["profile", "organizations", "tokens", "team"].includes(requestedSettingsTab)
                   ? requestedSettingsTab
                   : "organizations";
                 try {
@@ -2086,6 +2122,9 @@
                 profile,
                 canRead,
                 canWrite,
+                canManageOrg,
+                sessionCanRead,
+                sessionCanWrite,
                 userUrl,
                 darkMode,
                 showWorkspace,
@@ -2173,6 +2212,7 @@
                 createFirstRepository,
                 createOrganization,
                 deleteOrganization,
+                refreshOrganizations,
                 createRepository,
                 deleteRepository,
                 setRepositoryTokenLabel,

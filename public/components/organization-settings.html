@@ -20,6 +20,11 @@
         class="block rounded-lg px-3 py-2.5 font-medium text-[#455149] hover:bg-white/60 dark:text-gray-300 dark:hover:bg-white/10"
         >Personal access tokens</a
       >
+      <a
+        href="/?settings=team"
+        class="block rounded-lg px-3 py-2.5 font-medium text-[#455149] hover:bg-white/60 dark:text-gray-300 dark:hover:bg-white/10"
+        >Team</a
+      >
     </nav>
     <div
       data-testid="organization-settings-content"
@@ -62,20 +67,27 @@
             class="rounded-lg px-3 py-2 font-medium hover:bg-gray-100 dark:hover:bg-gray-900"
             class-current="section === 'webhooks'"
             >Webhooks</a
-          ><a
-            attr-href="sectionHref('machine-credentials')"
-            attr-aria-current="section === 'machine-credentials' ? 'page' : null"
-            class="rounded-lg px-3 py-2 font-medium hover:bg-gray-100 dark:hover:bg-gray-900"
-            class-current="section === 'machine-credentials'"
-            >Machine Git credentials</a
+          ><template if="canManageOrg"
+            ><a
+              attr-href="sectionHref('machine-credentials')"
+              attr-aria-current="section === 'machine-credentials' ? 'page' : null"
+              class="rounded-lg px-3 py-2 font-medium hover:bg-gray-100 dark:hover:bg-gray-900"
+              class-current="section === 'machine-credentials'"
+              >Machine Git credentials</a
+            ></template
           >
         </nav>
         <template if="section === 'webhooks'"
-          ><org-webhooks data-org-settings-view bind-org="selectedOrg"></org-webhooks
+          ><org-webhooks data-org-settings-view bind-org="selectedOrg" bind-can-manage-org="canManageOrg"></org-webhooks
         ></template>
-        <template if="section === 'machine-credentials'"
+        <template if="section === 'machine-credentials' && canManageOrg"
           ><machine-git-credentials data-org-settings-view bind-org="selectedOrg"></machine-git-credentials
         ></template>
+        <template if="section === 'machine-credentials' && !canManageOrg"
+          ><p role="status" class="text-sm text-amber-700 dark:text-amber-300">
+            Organization admin access is required to manage machine Git credentials.
+          </p></template
+        >
         <template if="section === 'repositories'"
           ><section data-org-settings-view aria-labelledby="org-repositories-heading">
             <h3 id="org-repositories-heading" class="mb-3 text-xl font-semibold">Repositories</h3>
@@ -157,7 +169,7 @@
                 ><lucide-icon icon="building" size="18" class="shrink-0 text-brand"></lucide-icon
                 ><span class="truncate font-medium">{{ item.slug }}</span></a
               >
-              <template if="canWrite"
+              <template if="canDeleteOrganization(item)"
                 ><button
                   class="inline-flex shrink-0 items-center gap-1 rounded-lg px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40"
                   type="button"
@@ -168,13 +180,13 @@
                   <lucide-icon icon="trash" size="14"></lucide-icon><span class="hidden md:inline">Delete</span>
                 </button></template
               >
-              <template if="!canWrite"
+              <template if="!canDeleteOrganization(item)"
                 ><button
                   class="inline-flex shrink-0 items-center gap-1 rounded-lg px-3 py-2 text-xs font-medium text-gray-400 dark:text-gray-500"
                   type="button"
                   disabled
-                  title="Repository write access is required"
-                  aria-label="Delete organization (write access required)"
+                  title="Organization admin access is required"
+                  aria-label="Delete organization (admin access required)"
                 >
                   <lucide-icon icon="trash" size="14"></lucide-icon><span class="hidden md:inline">Delete</span>
                 </button></template
@@ -190,6 +202,7 @@
     export default function () {
       const organizations = defineProp("organizations", { default: () => [] });
       const canWrite = defineProp("canWrite", { default: false });
+      const canManageOrg = defineProp("canManageOrg", { default: false });
       const selectedOrg = defineProp("selectedOrg", { default: "" });
       const section = defineProp("section", { default: "general" });
       const repositories = defineProp("repositories", { default: () => [] });
@@ -209,6 +222,8 @@
       };
       const createOrganization = () => emitCreate(organizationName.value.trim());
       const deleteOrganization = (slug) => emitDelete(slug);
+      const canDeleteOrganization = (item) =>
+        item.role === "admin" || (item.role !== "viewer" && item.role !== "contributor" && canWrite.value);
       const retry = () => emitRetry();
       return {
         organizations,
@@ -218,12 +233,14 @@
         repositories,
         repositoryHref,
         canWrite,
+        canManageOrg,
         created,
         error,
         organizationHref,
         setOrganizationName,
         createOrganization,
         deleteOrganization,
+        canDeleteOrganization,
         retry,
       };
     }

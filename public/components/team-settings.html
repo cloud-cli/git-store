@@ -1,0 +1,292 @@
+<template component="team-settings">
+  <div class="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-4 md:flex-row md:gap-6">
+    <nav class="w-full flex-shrink-0 pb-2 md:w-52 md:pb-0" aria-label="Settings navigation">
+      <h1 class="mb-4 px-3 text-xs font-bold uppercase tracking-[0.1em] text-[#78847c] dark:text-[#aab6ac]">
+        Settings
+      </h1>
+      <a
+        href="/?settings=profile"
+        class="block rounded-lg px-3 py-2.5 font-medium text-[#455149] hover:bg-white/60 dark:text-gray-300 dark:hover:bg-white/10"
+        >Profile</a
+      >
+      <a
+        href="/?settings=organizations"
+        class="block rounded-lg px-3 py-2.5 font-medium text-[#455149] hover:bg-white/60 dark:text-gray-300 dark:hover:bg-white/10"
+        >Organizations</a
+      >
+      <a
+        href="/?settings=tokens"
+        class="block rounded-lg px-3 py-2.5 font-medium text-[#455149] hover:bg-white/60 dark:text-gray-300 dark:hover:bg-white/10"
+        >Personal access tokens</a
+      >
+      <a
+        href="/?settings=team"
+        aria-current="page"
+        class="mb-1 block rounded-lg border border-[#cdded0] bg-white px-3 py-2.5 font-semibold text-brand dark:border-[#3d5844] dark:bg-[#1a231d] dark:text-[#a4d1ae]"
+        >Team</a
+      >
+    </nav>
+    <section
+      class="min-h-0 min-w-0 flex-1 overflow-y-auto rounded-2xl border border-[#dce3dc] bg-white p-4 shadow-[0_2px_8px_rgba(28,32,30,0.06)] sm:p-6 dark:border-[#344039] dark:bg-[#1a231d]"
+      aria-labelledby="team-heading"
+    >
+      <h2 id="team-heading" class="mb-2 text-2xl font-bold">Team</h2>
+      <p class="mb-6 max-w-3xl text-sm text-gray-600 dark:text-gray-300">
+        Invite teammates using the OIDC subject they can copy from Profile. Team access applies to all of the owner's
+        current and future organizations. Personal access tokens keep separate permissions. Only the owner can manage
+        this team.
+      </p>
+      <template if="loading"><p role="status" class="py-4">Loading team…</p></template>
+      <template if="error"
+        ><p role="alert" class="mb-3 text-red-700 dark:text-red-300">{{ error }}</p>
+        <button type="button" on-click="loadTeam()" class="mb-4 rounded-lg border px-3 py-2">
+          Try again
+        </button></template
+      >
+      <template if="!loading && !error && team.isOwner">
+        <h3 class="mb-3 text-lg font-semibold">Invite a teammate</h3>
+        <form
+          class="mb-6 flex max-w-xl flex-col gap-3 rounded-xl border border-gray-200 p-4 dark:border-gray-700"
+          on-submit.prevent="invite()"
+        >
+          <label class="flex flex-col gap-1"
+            >Invitee OIDC subject<input
+              aria-label="Invitee OIDC subject"
+              required
+              autocomplete="off"
+              on-input="setSubject($event.target.value)"
+              class="rounded-lg border border-gray-300 bg-white px-3 py-2 dark:border-gray-600 dark:bg-gray-950"
+          /></label>
+          <label class="flex flex-col gap-1"
+            >Role<select
+              aria-label="Invitation role"
+              on-change="setRole($event.target.value)"
+              class="rounded-lg border border-gray-300 bg-white px-3 py-2 dark:border-gray-600 dark:bg-gray-950"
+            >
+              <option value="viewer">Viewer</option>
+              <option value="contributor">Contributor</option>
+              <option value="admin">Admin</option>
+            </select></label
+          >
+          <p class="text-sm text-gray-600 dark:text-gray-300">
+            Ask teammates to copy their subject from Profile. They accept after signing in to the matching account.
+            Viewer can read, Contributor can read and write, and Admin can also manage organizations. Only you can
+            manage this team; API tokens keep their separate permissions.
+          </p>
+          <button
+            type="submit"
+            class="self-start rounded-lg bg-brand px-4 py-2 font-medium text-white hover:bg-brand-hover"
+          >
+            {{ busy ? 'Sending…' : 'Send invitation' }}
+          </button>
+        </form>
+        <h3 class="mb-3 text-lg font-semibold">Members</h3>
+        <ul class="mb-6 space-y-2">
+          <template for="member of team.members"
+            ><li class="flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 p-3 dark:border-gray-700">
+              <span class="min-w-0 flex-1 break-all">{{ member.memberId || member.id }}</span
+              ><label class="flex items-center gap-2"
+                >Role<select
+                  attr-aria-label="'Role for member ' + member.id"
+                  class="rounded-lg border border-gray-300 bg-white px-2 py-2 dark:border-gray-600 dark:bg-gray-950"
+                >
+                  <option value="viewer" attr-selected="member.role === 'viewer'">Viewer</option>
+                  <option value="contributor" attr-selected="member.role === 'contributor'">Contributor</option>
+                  <option value="admin" attr-selected="member.role === 'admin'">Admin</option>
+                </select></label
+              ><button
+                type="button"
+                attr-data-member-id="member.id"
+                on-click="changeRole($event)"
+                class="rounded-lg border px-3 py-2 text-sm"
+              >
+                Save role</button
+              ><button
+                type="button"
+                attr-data-member-id="member.id"
+                on-click="removeMember($event)"
+                class="rounded-lg border border-red-300 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:text-red-300"
+              >
+                Remove
+              </button>
+            </li></template
+          >
+        </ul>
+        <h3 class="mb-3 text-lg font-semibold">Pending invitations</h3>
+        <ul class="space-y-2">
+          <template for="invitation of team.invitations"
+            ><li class="flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 p-3 dark:border-gray-700">
+              <span class="min-w-0 flex-1 break-all">{{ invitation.memberId }}</span><span>{{ invitation.role }}</span
+              ><button
+                type="button"
+                on-click="cancelInvitation(invitation)"
+                class="rounded-lg border px-3 py-2 text-sm"
+              >
+                Cancel invitation
+              </button>
+            </li></template
+          >
+        </ul>
+      </template>
+      <template if="!loading && !error && !team.isOwner">
+        <p class="mb-5 rounded-lg border border-gray-200 p-4" role="status">
+          Your team role: <strong>{{ team.role }}</strong>
+        </p>
+        <h3 class="mb-3 text-lg font-semibold">Team memberships</h3>
+        <ul class="space-y-2">
+          <template for="membership of team.memberships"
+            ><li class="flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 p-3 dark:border-gray-700">
+              <span class="min-w-0 flex-1 break-all">{{ membership.ownerName || membership.ownerId }}</span
+              ><span>{{ membership.role }}</span>
+            </li></template
+          >
+        </ul>
+      </template>
+      <template if="!loading && !error && team.incomingInvitations.length">
+        <h3 class="mb-3 mt-6 text-lg font-semibold">Invitations for you</h3>
+        <ul class="space-y-2">
+          <template for="invitation of team.incomingInvitations"
+            ><li class="flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 p-3 dark:border-gray-700">
+              <span class="min-w-0 flex-1">{{ invitationLabel(invitation) }}</span><span>{{ invitation.role }}</span
+              ><button
+                type="button"
+                on-click="acceptInvitation(invitation)"
+                class="rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white"
+              >
+                Accept invitation
+              </button>
+            </li></template
+          >
+        </ul>
+      </template>
+      <p if="status" role="status" class="mt-4 text-sm text-green-700 dark:text-green-300">{{ status }}</p>
+    </section>
+  </div>
+  <script setup>
+    import { ref, onInit, defineEvent } from "@li3/web";
+    export default function () {
+      const emitTeamChanged = defineEvent("teamchanged");
+      const team = ref({
+        isOwner: false,
+        role: "viewer",
+        members: [],
+        invitations: [],
+        incomingInvitations: [],
+        memberships: [],
+      });
+      const loading = ref(true);
+      const busy = ref(false);
+      const error = ref("");
+      const status = ref("");
+      const subject = ref("");
+      const role = ref("viewer");
+      const errorFor = async (response) => {
+        let body = {};
+        try {
+          body = await response.json();
+        } catch {}
+        return body.error || `Request failed (${response.status})`;
+      };
+      const loadTeam = async () => {
+        loading.value = true;
+        error.value = "";
+        try {
+          const response = await fetch("/api/v1/team", {
+            headers: { Accept: "application/json" },
+            cache: "no-store",
+          });
+          if (!response.ok) throw new Error(await errorFor(response));
+          const data = await response.json();
+          team.value = {
+            ...data,
+            members: Array.isArray(data.members) ? data.members : [],
+            invitations: Array.isArray(data.invitations) ? data.invitations : [],
+            incomingInvitations: Array.isArray(data.incomingInvitations) ? data.incomingInvitations : [],
+            memberships: Array.isArray(data.memberships) ? data.memberships : [],
+          };
+        } catch (cause) {
+          error.value = cause.message || "Unable to load team";
+        } finally {
+          loading.value = false;
+        }
+      };
+      const mutate = async (path, method, body, message) => {
+        if (busy.value) return;
+        busy.value = true;
+        error.value = "";
+        status.value = "";
+        try {
+          const response = await fetch(path, {
+            method,
+            headers: body
+              ? {
+                  "Content-Type": "application/json",
+                  Accept: "application/json",
+                }
+              : { Accept: "application/json" },
+            ...(body ? { body: JSON.stringify(body) } : {}),
+          });
+          if (!response.ok) throw new Error(await errorFor(response));
+          status.value = message;
+          await loadTeam();
+          emitTeamChanged();
+        } catch (cause) {
+          error.value = cause.message || "Unable to update team";
+        } finally {
+          busy.value = false;
+        }
+      };
+      const invite = () => {
+        if (!subject.value.trim()) return;
+        return mutate(
+          "/api/v1/team/invitations",
+          "POST",
+          { sub: subject.value.trim(), role: role.value },
+          "Invitation sent.",
+        );
+      };
+      const acceptInvitation = (item) =>
+        mutate(`/api/v1/team/invitations/${encodeURIComponent(item.id)}/accept`, "POST", null, "Invitation accepted.");
+      const cancelInvitation = (item) =>
+        mutate(`/api/v1/team/invitations/${encodeURIComponent(item.id)}`, "DELETE", null, "Invitation cancelled.");
+      const changeRole = (event) => {
+        const row = event.target.closest("li");
+        return mutate(
+          `/api/v1/team/members/${encodeURIComponent(event.target.dataset.memberId)}`,
+          "PATCH",
+          { role: row.querySelector("select").value },
+          "Member role updated.",
+        );
+      };
+      const removeMember = (event) =>
+        mutate(
+          `/api/v1/team/members/${encodeURIComponent(event.target.dataset.memberId)}`,
+          "DELETE",
+          null,
+          "Member removed.",
+        );
+      const invitationLabel = (invitation) => `Invited by ${invitation.ownerName} (${invitation.ownerId})`;
+      onInit(loadTeam);
+      return {
+        team,
+        loading,
+        busy,
+        error,
+        status,
+        loadTeam,
+        invite,
+        acceptInvitation,
+        cancelInvitation,
+        changeRole,
+        removeMember,
+        invitationLabel,
+        setSubject: (value) => {
+          subject.value = value;
+        },
+        setRole: (value) => {
+          role.value = value;
+        },
+      };
+    }
+  </script>
+</template>

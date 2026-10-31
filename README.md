@@ -17,6 +17,13 @@ participate in organization or repository naming.
   `org:manage` (delete empty organizations and manage webhook settings). Every local
   credential has explicit organization slug grants; no API/Git token gets owner-wide access.
   Browser sessions retain owner-wide same-origin UI access.
+- Team membership is browser-session-only and stored in `DATA_PATH/teams.json`; invite targets are
+  SHA-256 hashes of OIDC `sub` values. Owners can invite members as `viewer`, `contributor`, or `admin`.
+  Viewers read, contributors read/write, and admins additionally manage existing organizations. Membership
+  does not grant `org:create`, change PAT/bearer grants, or authorize Git Smart HTTP credentials. Team
+  endpoints require a same-origin browser session; invitations expire after 30 days and are single-use.
+  PAT/token authorization management and the explicit organization grants accepted by those routes remain
+  subject-owner-only; team membership never broadens their organization allowlists or scopes.
 - Git Smart HTTP is available at `/git/<org>/<repo>.git`. Git clients use HTTP Basic auth
   with any username and an active OIDC access token with a local GitMini authorization
   record as the password; fetch needs locally granted `repo:read` (or `repo:write`) and

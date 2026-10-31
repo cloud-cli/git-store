@@ -56,22 +56,16 @@ function migrate() {
     return;
   }
   if (!registryStat.isFile() || registryStat.isSymbolicLink()) {
-    throw new Error(
-      "Organization migration deferred: organizations.json is not a regular file",
-    );
+    throw new Error("Organization migration deferred: organizations.json is not a regular file");
   }
   let parsed;
   try {
     parsed = JSON.parse(fs.readFileSync(registryPath, "utf8"));
   } catch (error) {
-    throw new Error(
-      `Organization migration deferred: unable to parse organizations.json (${error.message})`,
-    );
+    throw new Error(`Organization migration deferred: unable to parse organizations.json (${error.message})`);
   }
   if (!Array.isArray(parsed)) {
-    throw new Error(
-      "Organization migration deferred: organizations.json must contain an array",
-    );
+    throw new Error("Organization migration deferred: organizations.json must contain an array");
   }
   const entries = [];
   let invalidEntries = false;
@@ -99,9 +93,7 @@ function migrate() {
     seen.add(entry.slug);
     uniqueEntries.push(entry);
   }
-  const migrationEntries = uniqueEntries.filter(
-    (entry) => !duplicates.has(entry.slug),
-  );
+  const migrationEntries = uniqueEntries.filter((entry) => !duplicates.has(entry.slug));
   if (duplicates.size > 0) {
     invalidEntries = true;
   }
@@ -134,9 +126,7 @@ function migrate() {
   }
   const archive = `${registryPath}.migrated`;
   if (lstatIfExists(archive)) {
-    throw new Error(
-      "Organization migration failed: organizations.json.migrated already exists",
-    );
+    throw new Error("Organization migration failed: organizations.json.migrated already exists");
   }
   fs.mkdirSync(organizationsPath, { recursive: true });
   for (const entry of safeEntries) {
@@ -148,10 +138,7 @@ function migrate() {
       if (lstatIfExists(metadata)) {
         continue;
       }
-      temporary = path.join(
-        directory,
-        `${metadataName}.${crypto.randomBytes(8).toString("hex")}.tmp`,
-      );
+      temporary = path.join(directory, `${metadataName}.${crypto.randomBytes(8).toString("hex")}.tmp`);
       fs.writeFileSync(temporary, JSON.stringify(entry), {
         flag: "wx",
         mode: 0o600,
@@ -164,15 +151,11 @@ function migrate() {
         }
       } catch {}
       invalidEntries = true;
-      process.stderr.write(
-        `[organizations] migration skipped ${entry.slug}: ${error.message}\n`,
-      );
+      process.stderr.write(`[organizations] migration skipped ${entry.slug}: ${error.message}\n`);
     }
   }
   if (invalidEntries) {
-    throw new Error(
-      "Organization migration deferred: malformed legacy records were skipped",
-    );
+    throw new Error("Organization migration deferred: malformed legacy records were skipped");
   }
   // Hard-link publication is exclusive: concurrent startups cannot overwrite an archive.
   fs.linkSync(registryPath, archive);
@@ -201,17 +184,9 @@ function reload() {
       continue;
     }
     try {
-      next.set(
-        entry.name,
-        parseMetadata(
-          path.join(organizationsPath, entry.name, metadataName),
-          entry.name,
-        ),
-      );
+      next.set(entry.name, parseMetadata(path.join(organizationsPath, entry.name, metadataName), entry.name));
     } catch (error) {
-      process.stderr.write(
-        `[organizations] skipped ${entry.name}: ${error.message}\n`,
-      );
+      process.stderr.write(`[organizations] skipped ${entry.name}: ${error.message}\n`);
     }
   }
   index = next;
@@ -222,6 +197,10 @@ function listForOwnerHash(ownerHash) {
     .filter((org) => org.ownerHash === ownerHash)
     .map(({ slug }) => ({ slug }))
     .sort((left, right) => left.slug.localeCompare(right.slug));
+}
+
+function listAll() {
+  return [...index.values()].map(({ slug }) => ({ slug })).sort((a, b) => a.slug.localeCompare(b.slug));
 }
 
 function listForSubject(sub) {
@@ -254,10 +233,7 @@ function createForOwnerHash(ownerHash, value) {
     createdDirectory = true;
     const organization = { slug, ownerHash };
     const metadata = path.join(dir, metadataName);
-    temporary = path.join(
-      dir,
-      `${metadataName}.${crypto.randomBytes(8).toString("hex")}.tmp`,
-    );
+    temporary = path.join(dir, `${metadataName}.${crypto.randomBytes(8).toString("hex")}.tmp`);
     fs.writeFileSync(temporary, JSON.stringify(organization), {
       flag: "wx",
       mode: 0o600,
@@ -307,10 +283,7 @@ function deleteEmptyForOwnerHash(ownerHash, value) {
   }
   const metadata = path.join(directory, metadataName);
   parseMetadata(metadata, slug);
-  const temporaryDirectory = path.join(
-    organizationsPath,
-    `.deleted-${crypto.randomBytes(12).toString("hex")}`,
-  );
+  const temporaryDirectory = path.join(organizationsPath, `.deleted-${crypto.randomBytes(12).toString("hex")}`);
   fs.renameSync(directory, temporaryDirectory);
   try {
     fs.unlinkSync(path.join(temporaryDirectory, metadataName));
@@ -337,6 +310,7 @@ export {
   isCanonicalSlug,
   listForSubject,
   listForOwnerHash,
+  listAll,
   get,
   create,
   createForOwnerHash,

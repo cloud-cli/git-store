@@ -300,7 +300,9 @@ test.beforeEach(async ({ page }) => {
       json: { token: { id: "pat_imported", label: createdTokenAuthorizationRequest.label } },
     });
   });
-  await page.route("**/api/v1/orgs", (route) => route.fulfill({ json: { orgs: [{ slug: "example" }] } }));
+  await page.route("**/api/v1/orgs", (route) =>
+    route.fulfill({ json: { orgs: [{ slug: "example", role: "owner" }] } }),
+  );
   await page.route("**/api/v1/recent", (route) =>
     route.fulfill({
       json: {
@@ -504,6 +506,133 @@ test("profile settings show an initials fallback when no photo is available", as
   await expect(page.getByRole("region").getByText("B", { exact: true })).toBeVisible();
 });
 
+test("team settings route history, owner management, invite acceptance, and responsive bounds", async ({ page }) => {
+  let team = {
+    isOwner: true,
+    role: "admin",
+    members: [{ id: "member-hash", memberId: "member-subject-hash", role: "viewer" }],
+    invitations: [],
+    incomingInvitations: [],
+    memberships: [],
+  };
+  const calls = [];
+  await page.route("**/api/v1/orgs", (route) => route.fulfill({ json: { orgs: [] } }));
+  await page.route("**/api/v1/team**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    const body = request.postData() ? JSON.parse(request.postData()) : null;
+    calls.push({ method: request.method(), path, body });
+    if (request.method() === "GET") {
+      return route.fulfill({ json: team });
+    }
+    if (path === "/api/v1/team/invitations" && request.method() === "POST") {
+      team.invitations.push({
+        id: "invite-1",
+        memberId: body.sub,
+        role: body.role,
+      });
+      return route.fulfill({ status: 201, json: {} });
+    }
+    if (path.endsWith("/accept")) {
+      const invitationId = path.split("/").at(-2);
+      team.incomingInvitations = team.incomingInvitations.filter((invitation) => invitation.id !== invitationId);
+      return route.fulfill({ json: {} });
+    }
+    if (path.includes("/members/") && request.method() === "PATCH") {
+      team.members[0].role = body.role;
+      return route.fulfill({ json: {} });
+    }
+    if (path.includes("/members/") && request.method() === "DELETE") {
+      team.members = [];
+      return route.fulfill({ status: 204 });
+    }
+    if (path.includes("/invitations/") && request.method() === "DELETE") {
+      team.invitations = [];
+      return route.fulfill({ status: 204 });
+    }
+    return route.fulfill({ status: 404, json: { error: "Not found" } });
+  });
+  await page.goto("/ui/?settings=team");
+  const panel = page.getByRole("region", { name: "Team" });
+  await expect(page.getByRole("heading", { name: "Team", exact: true })).toBeVisible();
+  await expect(panel).toContainText("current and future organizations");
+  const navigation = page.getByRole("navigation", {
+    name: "Settings navigation",
+  });
+  await navigation.getByRole("link", { name: "Profile" }).click();
+  await page.goBack();
+  await expect(page).toHaveURL(/settings=team/);
+  await page.getByLabel("Invitee OIDC subject").fill("invitee-sub");
+  await page.getByLabel("Invitation role").selectOption("contributor");
+  await page.getByRole("button", { name: "Send invitation" }).click();
+  expect(calls.find((call) => call.path === "/api/v1/team/invitations" && call.method === "POST").body).toEqual({
+    sub: "invitee-sub",
+    role: "contributor",
+  });
+  const member = page.getByRole("listitem").filter({ hasText: "member-subject-hash" });
+  await member.getByRole("combobox").selectOption("admin");
+  await expect(member.getByRole("combobox")).toHaveValue("admin");
+  await member.getByRole("button", { name: "Save role" }).click();
+  await expect
+    .poll(() =>
+      calls.some(
+        (call) => call.method === "PATCH" && call.path.endsWith("/members/member-hash") && call.body.role === "admin",
+      ),
+    )
+    .toBe(true);
+  await member.getByRole("button", { name: "Remove" }).click();
+  await expect(member).toHaveCount(0);
+  const invite = page.getByRole("listitem").filter({ hasText: "invitee-sub" });
+  await invite.getByRole("button", { name: "Cancel invitation" }).click();
+  await expect(invite).toHaveCount(0);
+  team = {
+    isOwner: false,
+    role: "viewer",
+    members: [],
+    invitations: [],
+    incomingInvitations: [
+      {
+        id: "incoming-1",
+        ownerId: "owner-sub",
+        ownerName: "Team owner",
+        role: "viewer",
+        createdAt: "2026-10-30",
+        expiresAt: "2026-11-06",
+      },
+    ],
+    memberships: [{ ownerId: "owner-sub", role: "viewer" }],
+  };
+  await page.reload();
+  await expect(page.getByRole("region", { name: "Team" })).toContainText("owner-sub");
+  await expect(page.getByText("Invited by Team owner (owner-sub)")).toBeVisible();
+  await page.getByRole("button", { name: "Accept invitation" }).click();
+  await expect(page.getByText("Invitation accepted.")).toBeVisible();
+  expect(
+    calls.some((call) => call.path === "/api/v1/team/invitations/incoming-1/accept" && call.method === "POST"),
+  ).toBe(true);
+  team = {
+    isOwner: true,
+    role: null,
+    members: [],
+    invitations: [],
+    incomingInvitations: [
+      {
+        id: "incoming-owner",
+        ownerId: "another-owner",
+        ownerName: "Another team",
+        role: "viewer",
+      },
+    ],
+    memberships: [],
+  };
+  await page.reload();
+  await expect(page.getByText("Invited by Another team (another-owner)")).toBeVisible();
+  await page.getByRole("button", { name: "Accept invitation" }).click();
+  await expect(page.getByText("Invitation accepted.")).toBeVisible();
+  expect(await panel.evaluate((element) => element.getBoundingClientRect().right)).toBeLessThanOrEqual(
+    page.viewportSize().width,
+  );
+});
 test.afterEach(() => {
   expect(runtimeErrors).toEqual([]);
 });
@@ -662,11 +791,11 @@ test("organization settings navigate to repositories and manage webhook subscrip
   await expect(page.getByLabel("Webhook secret")).toHaveValue("");
   const subscription = page.getByRole("listitem").filter({ hasText: "https://hooks.example.test/events" });
   await expect(subscription).toContainText("git, repo, thread");
-  await expect(page.getByRole("status")).toContainText("Hello event queued for delivery");
+  await expect(page.getByText("Webhook created. Hello event queued for delivery.")).toBeVisible();
   await subscription.getByRole("button", { name: "Send hello event" }).click();
   await expect.poll(() => testWebhookRequests.length).toBe(1);
   expect(new URL(testWebhookRequests[0]).pathname).toBe("/api/v1/orgs/example/webhooks/hook-1/test");
-  await expect(page.getByRole("status")).toContainText("Hello event queued for delivery");
+  await expect(page.getByText("Hello event queued for delivery.")).toBeVisible();
   await subscription.getByRole("button", { name: "Delete" }).click();
   await expect(subscription).toHaveCount(0);
   await expect(page).toHaveURL(/settings=organizations&org=example&section=webhooks/);
@@ -1049,4 +1178,40 @@ test("read-only UI hides write controls", async ({ page }) => {
   await expect(page.getByText("notes.txt", { exact: true }).first()).toBeVisible();
   await expect(page.getByLabel("Select files to upload")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Create branch" })).toHaveCount(0);
+});
+
+test("team roles control repository editing and organization administration UI", async ({ page }) => {
+  bootstrapSession = {
+    checked: true,
+    authenticated: true,
+    canRead: false,
+    canWrite: false,
+    profile: { name: "Team Member" },
+  };
+  let role = "viewer";
+  await page.route("**/ui/session", (route) =>
+    route.fulfill({ json: { authenticated: true, canRead: false, canWrite: false, profile: { name: "Team Member" } } }),
+  );
+  await page.route("**/api/v1/orgs", (route) => route.fulfill({ json: { orgs: [{ slug: "example", role }] } }));
+
+  await page.goto("/ui/?org=example&repo=demo");
+  await expect(page.getByText("notes.txt", { exact: true }).first()).toBeVisible();
+  await expect(page.getByLabel("Select files to upload")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Create branch" })).toHaveCount(0);
+
+  role = "contributor";
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Create branch" })).toBeVisible();
+
+  role = "admin";
+  await page.goto("/ui/?settings=organizations&org=example&section=machine-credentials");
+  await expect(page.getByRole("link", { name: "Machine Git credentials" })).toBeVisible();
+  await page.goto("/ui/?settings=organizations&org=example&section=webhooks");
+  await expect(page.getByRole("button", { name: "Create webhook" })).toBeVisible();
+
+  role = "contributor";
+  await page.goto("/ui/?settings=organizations&org=example&section=webhooks");
+  await expect(page.getByRole("link", { name: "Machine Git credentials" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Create webhook" })).toHaveCount(0);
+  await expect(page.getByRole("status")).toContainText("Organization admin access is required");
 });

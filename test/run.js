@@ -219,10 +219,14 @@ async function run() {
     "changing organizations clears dependent repo state",
   );
   assert.ok(ui.includes("initialSettingsTab"), "settings route is selected in-app via initialSettingsTab");
+  const unauthenticatedBranch = ui.slice(
+    ui.indexOf("if (!session.authenticated) {"),
+    ui.indexOf("if (!session.authenticated) {") + 300,
+  );
   assert.ok(
-    ui.includes(
-      'if (!session.authenticated) {\n                  profile.value = null;\n                  authStatus.value = "anonymous";\n                  return;',
-    ),
+    unauthenticatedBranch.includes("profile.value = null;") &&
+      unauthenticatedBranch.includes('authStatus.value = "anonymous";') &&
+      unauthenticatedBranch.includes("return;"),
     "anonymous visitors do not load private organization/repository state",
   );
   const server = app.listen(0);
@@ -1530,6 +1534,11 @@ async function run() {
       "/api/v1/personal-access-tokens": ["get", "post"],
       "/api/v1/personal-access-tokens/{id}": ["delete", "patch"],
       "/api/v1/token-authorizations": ["post"],
+      "/api/v1/team": ["get"],
+      "/api/v1/team/invitations": ["post"],
+      "/api/v1/team/invitations/{id}": ["delete"],
+      "/api/v1/team/invitations/{id}/accept": ["post"],
+      "/api/v1/team/members/{memberId}": ["patch", "delete"],
       "/api/v1/orgs/{org}": ["delete"],
       "/api/v1/orgs/{org}/events": ["get"],
       "/api/v1/orgs/{org}/machine-git-credentials": ["get", "post"],
@@ -1781,6 +1790,208 @@ async function run() {
       Cookie: sessionCookie,
       Origin: `http://127.0.0.1:${port}`,
     };
+    const teamStore = app.locals.teamStore;
+    teamStore.registerOwner(hashSubject("browser-subject"));
+    const teamOwner = hashSubject("separate-team-owner");
+    teamStore.registerOwner(teamOwner);
+    const teamOrg = organizations.createForOwnerHash(teamOwner, "team-shared-org");
+    assert.ok(teamOrg);
+    const teamInvite = teamStore.invite(teamOwner, hashSubject("browser-subject"), "viewer");
+    const pendingTeamView = JSON.parse(
+      (await request(port, "GET", "/api/v1/team", undefined, undefined, sessionHeaders)).body,
+    );
+    assert.ok(pendingTeamView.incomingInvitations.some((invitation) => invitation.ownerId === teamOwner.slice(0, 12)));
+    assert.equal(teamStore.accept(teamInvite.id, hashSubject("browser-subject")), true);
+    assert.equal(
+      (await request(port, "POST", `/api/v1/team/invitations/${teamInvite.id}/accept`, {}, undefined, sessionHeaders))
+        .status,
+      404,
+    );
+    organizations.createForOwnerHash(teamOwner, "team-future-org");
+    const teamView = await request(port, "GET", "/api/v1/team", undefined, undefined, sessionHeaders);
+    assert.equal(teamView.status, 200);
+    const teamData = JSON.parse(teamView.body);
+    assert.deepEqual(
+      Object.keys(teamData).sort(),
+      ["incomingInvitations", "invitations", "isOwner", "members", "memberships", "role"].sort(),
+    );
+    assert.equal(teamData.isOwner, true);
+    assert.equal(teamData.role, "viewer");
+    assert.ok(
+      teamData.memberships.some(
+        (membership) => membership.ownerId === teamOwner.slice(0, 12) && membership.role === "viewer",
+      ),
+    );
+    assert.ok(
+      JSON.parse((await request(port, "GET", "/api/v1/orgs", undefined, undefined, sessionHeaders)).body).orgs.some(
+        (org) => org.slug === "team-shared-org",
+      ),
+    );
+    assert.ok(
+      JSON.parse((await request(port, "GET", "/api/v1/orgs", undefined, undefined, sessionHeaders)).body).orgs.some(
+        (org) => org.slug === "team-future-org",
+      ),
+    );
+    assert.equal(
+      (await request(port, "GET", "/api/v1/orgs/team-shared-org/repos", undefined, undefined, sessionHeaders)).status,
+      200,
+    );
+    const ownedMemberInvite = app.locals.teamStore.invite(
+      hashSubject("browser-subject"),
+      hashSubject("owned-team-member"),
+      "viewer",
+    );
+    assert.equal(app.locals.teamStore.accept(ownedMemberInvite.id, hashSubject("owned-team-member")), true);
+    const ownedMember = app.locals.teamStore.members(hashSubject("browser-subject"))[0];
+    assert.equal(
+      (
+        await request(
+          port,
+          "PATCH",
+          `/api/v1/team/members/${ownedMember.id}`,
+          { role: "contributor" },
+          undefined,
+          sessionHeaders,
+        )
+      ).status,
+      204,
+    );
+    assert.equal(
+      (await request(port, "DELETE", `/api/v1/team/members/${ownedMember.id}`, undefined, undefined, sessionHeaders))
+        .status,
+      204,
+    );
+    const outgoing = await request(
+      port,
+      "POST",
+      "/api/v1/team/invitations",
+      { sub: "pending-subject", role: "viewer" },
+      undefined,
+      sessionHeaders,
+    );
+    assert.equal(outgoing.status, 201);
+    const outgoingInvite = JSON.parse(outgoing.body);
+    assert.equal(outgoingInvite.memberId, hashSubject("pending-subject"));
+    assert.equal(
+      fs.readFileSync(teamStore.filePath, "utf8").includes("pending-subject"),
+      false,
+      "team storage persists subject hashes, not raw OIDC subjects",
+    );
+    assert.equal(
+      (
+        await request(
+          port,
+          "POST",
+          `/api/v1/team/invitations/${outgoingInvite.id}/accept`,
+          {},
+          undefined,
+          sessionHeaders,
+        )
+      ).status,
+      404,
+    );
+    assert.equal(
+      (
+        await request(
+          port,
+          "DELETE",
+          `/api/v1/team/invitations/${outgoingInvite.id}`,
+          undefined,
+          undefined,
+          sessionHeaders,
+        )
+      ).status,
+      204,
+    );
+    assert.equal(
+      (await request(port, "POST", "/api/v1/orgs/team-shared-org/repos/viewer-blocked", {}, undefined, sessionHeaders))
+        .status,
+      403,
+    );
+    organizations.createForOwnerHash(teamOwner, "team-empty-org");
+    assert.equal(
+      (await request(port, "DELETE", "/api/v1/orgs/team-empty-org", undefined, undefined, sessionHeaders)).status,
+      403,
+      "viewers cannot manage organizations",
+    );
+    for (const sub of ["", "  ", " valid-sub ", 123, "s".repeat(513)]) {
+      assert.equal(
+        (await request(port, "POST", "/api/v1/team/invitations", { sub, role: "viewer" }, undefined, sessionHeaders))
+          .status,
+        400,
+        "malformed invitation subjects are rejected",
+      );
+    }
+    const teamMember = teamStore.members(teamOwner)[0];
+    assert.notEqual(
+      (
+        await request(
+          port,
+          "PATCH",
+          `/api/v1/team/members/${teamMember.id}`,
+          { role: "admin" },
+          undefined,
+          sessionHeaders,
+        )
+      ).status,
+      204,
+    );
+    assert.notEqual(
+      (await request(port, "GET", "/api/v1/orgs/team-shared-org/events", undefined, "browser-session-token")).status,
+      200,
+    );
+    teamStore.setRole(teamOwner, teamMember.id, "contributor");
+    assert.equal(
+      (
+        await request(
+          port,
+          "POST",
+          "/api/v1/orgs/team-shared-org/repos/contributor-write",
+          {},
+          undefined,
+          sessionHeaders,
+        )
+      ).status,
+      201,
+    );
+    assert.equal(
+      (await request(port, "DELETE", "/api/v1/orgs/team-empty-org", undefined, undefined, sessionHeaders)).status,
+      403,
+      "contributors cannot manage organizations",
+    );
+    teamStore.setRole(teamOwner, teamMember.id, "admin");
+    assert.equal(
+      (await request(port, "DELETE", "/api/v1/orgs/team-shared-org", undefined, undefined, sessionHeaders)).status,
+      409,
+    );
+    assert.equal(
+      (await request(port, "DELETE", "/api/v1/orgs/team-empty-org", undefined, undefined, sessionHeaders)).status,
+      204,
+    );
+    teamStore.setRole(teamOwner, teamMember.id, "viewer");
+    const noTokenOrgGrant = await request(
+      port,
+      "GET",
+      "/api/v1/orgs/team-shared-org/repos",
+      undefined,
+      "browser-session-token",
+    );
+    assert.notEqual(
+      noTokenOrgGrant.status,
+      200,
+      "team membership must not grant bearer credentials organization access",
+    );
+    const scopedPat = app.locals.tokenAuthorizations.create({
+      ownerHash: hashSubject("browser-subject"),
+      label: "explicit owner-only test grant",
+      scopes: ["repo:read", "repo:write"],
+      orgs: ["browser-org"],
+    });
+    assert.notEqual(
+      (await request(port, "GET", "/api/v1/orgs/team-shared-org/events", undefined, scopedPat.token)).status,
+      200,
+      "a PAT's explicit grants do not expand through team membership",
+    );
     const privateOrg = await request(
       port,
       "POST",

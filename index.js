@@ -14,6 +14,7 @@ import { createDatabaseClient, createAuditStore, createTokenFingerprint } from "
 import { PersonalAccessTokenStore, normalizeTokenExpiry } from "./personal-access-tokens.js";
 import { MachineGitCredentialStore } from "./machine-git-credentials.js";
 import { createThreadStore } from "./threads.js";
+import { TeamStore, TEAM_ROLES } from "./teams.js";
 import { execGit, atomicCommit } from "./git.js";
 import {
   createWebhookStore,
@@ -70,6 +71,8 @@ const personalAccessTokens = new PersonalAccessTokenStore(
   path.join(process.env.DATA_PATH, "personal-access-tokens.json"),
 );
 app.locals.tokenAuthorizations = personalAccessTokens;
+const teamStore = new TeamStore(path.join(process.env.DATA_PATH, "teams.json"));
+app.locals.teamStore = teamStore;
 const machineGitCredentials = new MachineGitCredentialStore(
   databaseClient,
   path.join(process.env.DATA_PATH, "machine-git-credentials.json"),
@@ -617,8 +620,53 @@ function tokenAllowsOrg(req, org) {
   );
 }
 
+function teamRole(req, org) {
+  const target = typeof org === "string" ? organizations.get(org) : org;
+  return req.authType === "session" && target ? teamStore.roleFor(hashSubject(req.user.sub), target.ownerHash) : null;
+}
+function effectiveRole(roles) {
+  return roles.includes("admin")
+    ? "admin"
+    : roles.includes("contributor")
+      ? "contributor"
+      : roles.includes("viewer")
+        ? "viewer"
+        : null;
+}
+
+function canAccessOrg(req, org) {
+  return org?.ownerHash === getAuthenticatedSubjectHash(req) || Boolean(teamRole(req, org));
+}
+
+function teamRoleAllows(req, scope) {
+  const role = teamRole(req, req.organization || req.organizationSlug || req.params?.org);
+  if (scope === "repo:read") {
+    return ["viewer", "contributor", "admin"].includes(role);
+  }
+  if (scope === "repo:write") {
+    return ["contributor", "admin"].includes(role);
+  }
+  return scope === "org:manage" && role === "admin";
+}
+
 function callerCanGrantScope(req, scope) {
   const scopes = getTokenScopes(req.user);
+  if (req.authType === "session" && scope === "org:create") {
+    return scopes.has("repo:write");
+  }
+  if (req.authType === "session" && teamRole(req, req.organization || req.params?.org)) {
+    return teamRoleAllows(req, scope);
+  }
+  if (
+    req.authType === "session" &&
+    scope === "repo:read" &&
+    teamStore.membershipsFor(hashSubject(req.user.sub)).length
+  ) {
+    return true;
+  }
+  if (req.authType === "session" && teamRoleAllows(req, scope)) {
+    return true;
+  }
   if (scope === "repo:read") {
     return scopes.has("repo:read") || scopes.has("repo:write");
   }
@@ -781,7 +829,9 @@ async function gitSmartHttp(req, res) {
   const machine = req.machineGitCredential;
   if (
     !organization ||
-    (organization.ownerHash !== subjectHash && !(machine && machine.credentialOrg === organization.slug))
+    (organization.ownerHash !== subjectHash &&
+      !(req.authType === "session" && teamRole(req, organization)) &&
+      !(machine && machine.credentialOrg === organization.slug))
   ) {
     auditSecurityFailure(req, "security.access.denied", {
       reason: "organization_not_accessible",
@@ -825,9 +875,14 @@ async function gitSmartHttp(req, res) {
     return res.status(405).send("Method not allowed");
   }
   const scopes = getTokenScopes(req.user);
+  const teamGrant = req.authType === "session" && teamRole(req, organization);
+  const teamAllowed =
+    teamGrant === "admin" ||
+    (write && teamGrant === "contributor") ||
+    (!write && ["viewer", "contributor"].includes(teamGrant));
   if (
     !tokenAllowsOrg(req, organization.slug) ||
-    (write ? !scopes.has("repo:write") : !scopes.has("repo:read") && !scopes.has("repo:write"))
+    (!teamAllowed && (write ? !scopes.has("repo:write") : !scopes.has("repo:read") && !scopes.has("repo:write")))
   ) {
     if (write) {
       auditSecurityFailure(req, "security.access.denied", {
@@ -1954,7 +2009,11 @@ app.get(
   requireScope("org:manage"),
   async (req, res) => {
     const org = organizations.get(req.params.org);
-    if (!org || org.ownerHash !== getAuthenticatedSubjectHash(req)) {
+    if (
+      !org ||
+      !canAccessOrg(req, org) ||
+      (org.ownerHash !== getAuthenticatedSubjectHash(req) && teamRole(req, org) !== "admin")
+    ) {
       return res.status(404).json({ error: "Organization not found" });
     }
     try {
@@ -1972,7 +2031,11 @@ app.post(
   requireScope("org:manage"),
   async (req, res) => {
     const org = organizations.get(req.params.org);
-    if (!org || org.ownerHash !== getAuthenticatedSubjectHash(req)) {
+    if (
+      !org ||
+      !canAccessOrg(req, org) ||
+      (org.ownerHash !== getAuthenticatedSubjectHash(req) && teamRole(req, org) !== "admin")
+    ) {
       return res.status(404).json({ error: "Organization not found" });
     }
     const body = req.body || {};
@@ -2017,7 +2080,11 @@ app.delete(
   requireScope("org:manage"),
   async (req, res) => {
     const org = organizations.get(req.params.org);
-    if (!org || org.ownerHash !== getAuthenticatedSubjectHash(req)) {
+    if (
+      !org ||
+      !canAccessOrg(req, org) ||
+      (org.ownerHash !== getAuthenticatedSubjectHash(req) && teamRole(req, org) !== "admin")
+    ) {
       return res.status(404).json({ error: "Organization not found" });
     }
     try {
@@ -2232,14 +2299,151 @@ app.delete(
   },
 );
 
-// List, create, and remove organizations for the authenticated subject.
-app.get("/api/v1/orgs", requireAuthentication, requireScope("repo:read"), (req, res) =>
-  res.json({
-    orgs: organizations
-      .listForOwnerHash(getAuthenticatedSubjectHash(req))
-      .filter((org) => tokenAllowsOrg(req, org.slug)),
-  }),
+// Team endpoints are intentionally browser-session-only; bearer/PAT grants never inherit membership.
+app.get("/api/v1/team", requireNoStore, requireAuthentication, requireInteractiveBrowserSession, (req, res) => {
+  const subjectHash = hashSubject(req.user.sub);
+  const memberships = teamStore.membershipsFor(subjectHash);
+  const incoming = teamStore.incoming(subjectHash);
+  if (organizations.listForOwnerHash(subjectHash).length || (!memberships.length && !incoming.length)) {
+    teamStore.registerOwner(subjectHash);
+  }
+  return res.json({
+    isOwner: teamStore.isOwner(subjectHash),
+    role: effectiveRole(memberships.map((m) => m.role)),
+    members: teamStore.members(subjectHash).map(({ id, subjectHash: memberId, role, joinedAt }) => ({
+      id,
+      memberId,
+      role,
+      joinedAt,
+    })),
+    invitations: teamStore.invitations(subjectHash).map((i) => ({
+      id: i.id,
+      memberId: i.subjectHash,
+      role: i.role,
+      createdAt: i.createdAt,
+      expiresAt: i.expiresAt,
+    })),
+    incomingInvitations: incoming.map((i) => ({
+      id: i.id,
+      ownerId: i.ownerHash.slice(0, 12),
+      ownerName: organizations.listForOwnerHash(i.ownerHash)[0]?.slug || "GitMini team",
+      role: i.role,
+      createdAt: i.createdAt,
+      expiresAt: i.expiresAt,
+    })),
+    memberships: memberships.map((m) => ({
+      ownerId: m.ownerHash.slice(0, 12),
+      ownerName: organizations.listForOwnerHash(m.ownerHash)[0]?.slug || "GitMini team",
+      role: m.role,
+    })),
+  });
+});
+app.post(
+  "/api/v1/team/invitations",
+  requireNoStore,
+  requireAuthentication,
+  requireInteractiveBrowserSession,
+  (req, res) => {
+    const ownerHash = hashSubject(req.user.sub);
+    teamStore.registerOwner(ownerHash);
+    const inviteeSub = req.body?.sub;
+    if (
+      typeof inviteeSub !== "string" ||
+      !inviteeSub.trim() ||
+      inviteeSub !== inviteeSub.trim() ||
+      Buffer.byteLength(inviteeSub, "utf8") > 512
+    ) {
+      return res.status(400).json({ error: "A valid OIDC subject is required" });
+    }
+    try {
+      const invite = teamStore.invite(ownerHash, hashSubject(inviteeSub), req.body?.role);
+      return res.status(201).json({
+        id: invite.id,
+        memberId: invite.subjectHash,
+        role: invite.role,
+        createdAt: invite.createdAt,
+        expiresAt: invite.expiresAt,
+      });
+    } catch {
+      return res.status(400).json({ error: "Invalid or duplicate invitation" });
+    }
+  },
 );
+app.delete(
+  "/api/v1/team/invitations/:id",
+  requireNoStore,
+  requireAuthentication,
+  requireInteractiveBrowserSession,
+  (req, res) => {
+    const ownerHash = hashSubject(req.user.sub);
+    if (!teamStore.isOwner(ownerHash)) {
+      return res.status(403).json({ error: "Only organization owners manage the team" });
+    }
+    return teamStore.revoke(ownerHash, req.params.id) ? res.status(204).end() : res.status(404).end();
+  },
+);
+app.post(
+  "/api/v1/team/invitations/:id/accept",
+  requireNoStore,
+  requireAuthentication,
+  requireInteractiveBrowserSession,
+  (req, res) =>
+    teamStore.accept(req.params.id, hashSubject(req.user.sub))
+      ? res.status(204).end()
+      : res.status(404).json({ error: "Invitation unavailable" }),
+);
+app.patch(
+  "/api/v1/team/members/:memberId",
+  requireNoStore,
+  requireAuthentication,
+  requireInteractiveBrowserSession,
+  (req, res) => {
+    if (!teamStore.isOwner(hashSubject(req.user.sub))) {
+      return res.status(403).json({ error: "Only organization owners manage the team" });
+    }
+    return teamStore.setRole(hashSubject(req.user.sub), req.params.memberId, req.body?.role)
+      ? res.status(204).end()
+      : res.status(400).json({ error: "Invalid member or role" });
+  },
+);
+app.delete(
+  "/api/v1/team/members/:memberId",
+  requireNoStore,
+  requireAuthentication,
+  requireInteractiveBrowserSession,
+  (req, res) => {
+    if (!teamStore.isOwner(hashSubject(req.user.sub))) {
+      return res.status(403).json({ error: "Only organization owners manage the team" });
+    }
+    return teamStore.remove(hashSubject(req.user.sub), req.params.memberId)
+      ? res.status(204).end()
+      : res.status(404).end();
+  },
+);
+
+// List, create, and remove organizations for the authenticated subject.
+app.get("/api/v1/orgs", requireAuthentication, requireScope("repo:read"), (req, res) => {
+  const ownerHash = getAuthenticatedSubjectHash(req);
+  const ownedOrgs = organizations.listForOwnerHash(ownerHash);
+  const ownedSlugs = new Set(ownedOrgs.map(({ slug }) => slug));
+  const accessibleOrgs = ownedOrgs.map(({ slug }) => ({
+    slug,
+    ...(req.authType === "session" ? { role: "owner" } : {}),
+  }));
+  if (req.authType === "session") {
+    for (const { slug } of organizations.listAll()) {
+      const role = teamRole(req, slug);
+      if (role && !ownedSlugs.has(slug)) {
+        accessibleOrgs.push({ slug, role });
+      }
+    }
+  }
+  return res.json({
+    orgs: accessibleOrgs
+      .filter((org) => tokenAllowsOrg(req, org.slug))
+      .map(({ slug, role }) => (req.authType === "session" ? { slug, role } : { slug })),
+  });
+});
 app.post("/api/v1/orgs", requireAuthentication, requireScope("org:create"), async (req, res) => {
   const result = organizations.createForOwnerHash(getAuthenticatedSubjectHash(req), req.body?.slug);
   if (result === null) {
@@ -2263,7 +2467,14 @@ app.post("/api/v1/orgs", requireAuthentication, requireScope("org:create"), asyn
   return res.status(201).json({ org: result });
 });
 app.delete("/api/v1/orgs/:org", requireAuthentication, requireScope("org:manage"), async (req, res) => {
-  const result = organizations.deleteEmptyForOwnerHash(getAuthenticatedSubjectHash(req), req.params.org);
+  const target = organizations.get(req.params.org);
+  if (target && target.ownerHash !== getAuthenticatedSubjectHash(req) && teamRole(req, target) !== "admin") {
+    return res.status(404).json({ error: "Organization not found" });
+  }
+  const result = organizations.deleteEmptyForOwnerHash(
+    target?.ownerHash || getAuthenticatedSubjectHash(req),
+    req.params.org,
+  );
   if (result === null) {
     return res.status(400).json({ error: "Invalid organization slug" });
   }
@@ -2284,7 +2495,7 @@ function accessibleWebhookOrg(req, res) {
     return null;
   }
   const org = organizations.get(req.params.org);
-  if (!org || org.ownerHash !== getAuthenticatedSubjectHash(req)) {
+  if (!org || !canAccessOrg(req, org)) {
     auditSecurityFailure(req, "security.access.denied", {
       reason: "organization_not_accessible",
     });
@@ -2426,7 +2637,7 @@ app.get("/api/v1/orgs/:org/events", requireAuthentication, requireScope("repo:re
     return res.status(400).json({ error: "Invalid organization slug" });
   }
   const organization = organizations.get(req.params.org);
-  if (!organization || organization.ownerHash !== getAuthenticatedSubjectHash(req)) {
+  if (!organization || !canAccessOrg(req, organization)) {
     auditSecurityFailure(req, "security.access.denied", {
       reason: "organization_not_accessible",
     });
@@ -2459,9 +2670,15 @@ app.get("/api/v1/orgs/:org/events", requireAuthentication, requireScope("repo:re
   }
 });
 app.get("/api/v1/recent", requireAuthentication, requireScope("repo:read"), async (req, res) => {
-  const ownedOrganizations = organizations
-    .listForOwnerHash(getAuthenticatedSubjectHash(req))
-    .filter((org) => tokenAllowsOrg(req, org.slug));
+  let accessibleOrganizations;
+  if (req.authType === "session") {
+    accessibleOrganizations = organizations
+      .listAll()
+      .filter((org) => org.ownerHash === getAuthenticatedSubjectHash(req) || teamRole(req, org.slug));
+  } else {
+    accessibleOrganizations = organizations.listForOwnerHash(getAuthenticatedSubjectHash(req));
+  }
+  const ownedOrganizations = accessibleOrganizations.filter((org) => tokenAllowsOrg(req, org.slug));
   const allCommits = [];
   for (const org of ownedOrganizations) {
     const orgReposPath = path.join(process.env.DATA_PATH, "orgs", org.slug);
@@ -2508,7 +2725,7 @@ app.use("/api/v1/orgs/:org/repos", requireAuthentication, (req, res, next) => {
     return res.status(400).json({ error: "Invalid organization slug" });
   }
   const organization = organizations.get(req.params.org);
-  if (!organization || organization.ownerHash !== getAuthenticatedSubjectHash(req)) {
+  if (!organization || !canAccessOrg(req, organization)) {
     auditSecurityFailure(req, "security.access.denied", {
       reason: "organization_not_accessible",
     });
@@ -2524,10 +2741,7 @@ app.use("/api/v1/orgs/:org/repos", requireAuthentication, (req, res, next) => {
     if (req.method !== "GET") {
       return next();
     }
-    if (
-      (!getTokenScopes(req.user).has("repo:read") && !getTokenScopes(req.user).has("repo:write")) ||
-      !tokenAllowsOrg(req, organization.slug)
-    ) {
+    if (!callerCanGrantScope(req, "repo:read") || !tokenAllowsOrg(req, organization.slug)) {
       return res.status(403).json({ error: "Forbidden: requires repo:read scope" });
     }
     const reposPath = req.organizationPath;
@@ -3131,6 +3345,65 @@ function makeApiSpec() {
     },
     servers: [{ url: "/", description: "This GitMini server" }],
     paths: {
+      "/api/v1/team": {
+        get: {
+          summary: "Get team roster, invitations, and memberships",
+          description: "Same-origin browser session only; membership roles never expand bearer/PAT grants.",
+          security: [{ cookieSession: [] }],
+          responses: {
+            200: { description: "Team state: isOwner, role, members, invitations, incomingInvitations, memberships" },
+            401: unauthorized,
+            403: { description: "Browser session required" },
+          },
+        },
+      },
+      "/api/v1/team/invitations": {
+        post: {
+          summary: "Invite a team member",
+          description: "Owner browser session only. Target is an OIDC sub; invitations expire after 30 days.",
+          security: [{ cookieSession: [] }],
+          requestBody: jsonBody({ sub: { type: "string" }, role: { type: "string", enum: TEAM_ROLES } }, [
+            "sub",
+            "role",
+          ]),
+          responses: {
+            201: { description: "Invitation created" },
+            400: { description: "Invalid invitation" },
+            403: { description: "Owner session required" },
+          },
+        },
+      },
+      "/api/v1/team/invitations/{id}": {
+        delete: {
+          summary: "Revoke team invitation",
+          security: [{ cookieSession: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+          responses: { 204: { description: "Revoked" }, 403: { description: "Owner session required" } },
+        },
+      },
+      "/api/v1/team/invitations/{id}/accept": {
+        post: {
+          summary: "Accept an invitation addressed to the current subject",
+          security: [{ cookieSession: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+          responses: { 204: { description: "Accepted" }, 404: { description: "Invitation unavailable" } },
+        },
+      },
+      "/api/v1/team/members/{memberId}": {
+        patch: {
+          summary: "Change team member role",
+          security: [{ cookieSession: [] }],
+          parameters: [{ name: "memberId", in: "path", required: true, schema: { type: "string" } }],
+          requestBody: jsonBody({ role: { type: "string", enum: TEAM_ROLES } }, ["role"]),
+          responses: { 204: { description: "Updated" }, 403: { description: "Owner session required" } },
+        },
+        delete: {
+          summary: "Remove team member",
+          security: [{ cookieSession: [] }],
+          parameters: [{ name: "memberId", in: "path", required: true, schema: { type: "string" } }],
+          responses: { 204: { description: "Removed" }, 403: { description: "Owner session required" } },
+        },
+      },
       "/api/v1/health": {
         get: operation("Health check", { 200: { description: "Healthy" } }, null, []),
       },
