@@ -4,6 +4,7 @@ import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -143,6 +144,29 @@ function request(port, method, requestPath, body, token, extraHeaders = {}, rawP
       req.write(payload);
     }
     req.end();
+  });
+}
+
+function rawRequest(port, method, requestPath, body, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        hostname: "127.0.0.1",
+        port,
+        method,
+        path: requestPath,
+        headers: { ...headers, "Content-Length": body.length },
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () =>
+          resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }),
+        );
+      },
+    );
+    req.once("error", reject);
+    req.end(body);
   });
 }
 
@@ -892,6 +916,27 @@ async function run() {
     const gitUrl = `http://127.0.0.1:${port}/git/team-one/git-http.git`;
     await git(["-c", `http.extraheader=${authHeader}`, "clone", gitUrl, gitClonePath]);
     assert.strictEqual(fs.readFileSync(path.join(gitClonePath, "initial.txt"), "utf8"), "initial\n");
+    const uploadPackHead = (
+      await git(["--git-dir", path.join(gitRepoPath, ".git"), "rev-parse", "refs/heads/main"])
+    ).stdout.trim();
+    const packet = (value) => `${(Buffer.byteLength(value) + 4).toString(16).padStart(4, "0")}${value}`;
+    const uploadPackRequest = Buffer.from(
+      `${packet(`want ${uploadPackHead} multi_ack_detailed side-band-64k ofs-delta\n`)}0000${packet("done\n")}0000`,
+    );
+    const compressedUpload = await rawRequest(
+      port,
+      "POST",
+      "/git/team-one/git-http.git/git-upload-pack",
+      gzipSync(uploadPackRequest),
+      {
+        Authorization: `Basic ${Buffer.from("arbitrary-user:token-a").toString("base64")}`,
+        "Content-Type": "application/x-git-upload-pack-request",
+        "Content-Encoding": "gzip",
+      },
+    );
+    assert.strictEqual(compressedUpload.status, 200);
+    assert.match(compressedUpload.headers["content-type"], /application\/x-git-upload-pack-result/);
+    assert.ok(compressedUpload.body.length > 0, "git-http-backend inflates the gzip request before parsing pkt-lines");
     fs.writeFileSync(path.join(gitClonePath, "pushed.txt"), "push works\n");
     await git(["-C", gitClonePath, "add", "pushed.txt"]);
     await git([

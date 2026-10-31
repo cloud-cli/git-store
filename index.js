@@ -943,6 +943,7 @@ async function gitSmartHttp(req, res) {
     REQUEST_METHOD: req.method,
     QUERY_STRING: queryService ? `service=${queryService}` : "",
     CONTENT_TYPE: req.get("content-type") || "",
+    HTTP_CONTENT_ENCODING: req.get("content-encoding") || "",
     CONTENT_LENGTH: req.get("content-length") || "0",
     REMOTE_USER: req.user.sub,
   };
