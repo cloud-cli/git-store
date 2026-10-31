@@ -5,6 +5,11 @@
         Settings
       </h1>
       <a
+        href="/?settings=profile"
+        class="block rounded-lg px-3 py-2.5 font-medium text-[#455149] hover:bg-white/60 dark:text-gray-300 dark:hover:bg-white/10"
+        >Profile</a
+      >
+      <a
         href="/?settings=organizations"
         aria-current="page"
         class="mb-1 block rounded-lg border border-[#cdded0] bg-white px-3 py-2.5 font-semibold text-brand dark:border-[#3d5844] dark:bg-[#1a231d] dark:text-[#a4d1ae]"
@@ -160,7 +165,7 @@
                   aria-label="Delete empty organization"
                   title="Delete organization (remove its repositories first)"
                 >
-                  <lucide-icon icon="trash" size="14"></lucide-icon><span>Delete</span>
+                  <lucide-icon icon="trash" size="14"></lucide-icon><span class="hidden md:inline">Delete</span>
                 </button></template
               >
               <template if="!canWrite"
@@ -171,7 +176,7 @@
                   title="Repository write access is required"
                   aria-label="Delete organization (write access required)"
                 >
-                  <lucide-icon icon="trash" size="14"></lucide-icon><span>Delete</span>
+                  <lucide-icon icon="trash" size="14"></lucide-icon><span class="hidden md:inline">Delete</span>
                 </button></template
               >
             </li></template

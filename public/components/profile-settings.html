@@ -1,0 +1,79 @@
+<template component="profile-settings">
+  <div class="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-4 md:flex-row md:gap-6">
+    <nav class="w-full flex-shrink-0 pb-2 md:w-52 md:pb-0" aria-label="Settings navigation">
+      <h1 class="mb-4 px-3 text-xs font-bold uppercase tracking-[0.1em] text-[#78847c] dark:text-[#aab6ac]">
+        Settings
+      </h1>
+      <a
+        href="/?settings=profile"
+        aria-current="page"
+        class="mb-1 block rounded-lg border border-[#cdded0] bg-white px-3 py-2.5 font-semibold text-brand dark:border-[#3d5844] dark:bg-[#1a231d] dark:text-[#a4d1ae]"
+        >Profile</a
+      >
+      <a
+        href="/?settings=organizations"
+        class="block rounded-lg px-3 py-2.5 font-medium text-[#455149] hover:bg-white/60 dark:text-gray-300 dark:hover:bg-white/10"
+        >Organizations</a
+      >
+      <a
+        href="/?settings=tokens"
+        class="block rounded-lg px-3 py-2.5 font-medium text-[#455149] hover:bg-white/60 dark:text-gray-300 dark:hover:bg-white/10"
+        >Personal access tokens</a
+      >
+    </nav>
+    <section
+      class="min-h-0 min-w-0 flex-1 overflow-y-auto rounded-2xl border border-[#dce3dc] bg-white p-4 shadow-[0_2px_8px_rgba(28,32,30,0.06)] sm:p-6 dark:border-[#344039] dark:bg-[#1a231d]"
+      aria-labelledby="profile-heading"
+    >
+      <h2 id="profile-heading" class="mb-6 text-2xl font-bold">Profile</h2>
+      <div class="flex items-center gap-4">
+        <img if="photoUrl" attr-src="photoUrl" alt="Profile photo" class="h-16 w-16 rounded-full object-cover" />
+        <div>
+          <p class="font-semibold">{{ profile?.name || "Name not provided" }}</p>
+          <p class="text-sm text-gray-600 dark:text-gray-300">{{ profile?.email || "Email not provided" }}</p>
+        </div>
+      </div>
+      <template if="error"
+        ><p role="alert" class="mt-4 text-sm text-red-700 dark:text-red-300">{{ error }}</p></template
+      >
+      <button
+        type="button"
+        on-click="signOut()"
+        class="mt-8 rounded-lg border border-red-300 px-4 py-2 font-medium text-red-700 hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950"
+      >
+        Sign out
+      </button>
+    </section>
+  </div>
+  <script setup>
+    import { defineProp, computed, ref } from "@li3/web";
+    export default function () {
+      const profile = defineProp("profile", { default: null });
+      const error = ref("");
+      const photoUrl = computed(() => {
+        const value = profile.value?.picture || profile.value?.photo;
+        if (typeof value !== "string") return "";
+        try {
+          const url = new URL(value, window.location.href);
+          return url.protocol === "https:" || url.origin === window.location.origin ? url.href : "";
+        } catch {
+          return "";
+        }
+      });
+      const signOut = async () => {
+        error.value = "";
+        try {
+          const response = await fetch("/ui/auth/logout", {
+            method: "POST",
+            headers: { Accept: "application/json" },
+          });
+          if (!response.ok) throw new Error("Unable to sign out. Please try again.");
+          window.location.assign("/ui/");
+        } catch (cause) {
+          error.value = cause.message || "Unable to sign out. Please try again.";
+        }
+      };
+      return { profile, photoUrl, error, signOut };
+    }
+  </script>
+</template>

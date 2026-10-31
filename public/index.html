@@ -17,6 +17,7 @@
     <link rel="component" href="/ui/components/org-webhooks.html" />
     <link rel="component" href="/ui/components/machine-git-credentials.html" />
     <link rel="component" href="/ui/components/personal-access-tokens.html" />
+    <link rel="component" href="/ui/components/profile-settings.html" />
     <link rel="component" href="/ui/components/sign-in-landing.html" />
     <script type="module">
       import "@li3/web";
@@ -422,6 +423,9 @@
                   files.
                 </div></template
               >
+              <template if="authStatus === 'authenticated' && settings && settingsTab === 'profile'"
+                ><profile-settings class="flex min-h-0 flex-1" bind-profile="profile"></profile-settings
+              ></template>
               <template if="authStatus === 'authenticated' && settings && settingsTab === 'organizations'"
                 ><organization-settings
                   class="flex min-h-0 flex-1"
@@ -739,7 +743,7 @@
                           >
                           <ul
                             data-testid="repository-file-list"
-                            class="min-h-0 flex-1 divide-y divide-gray-100 overflow-y-auto dark:divide-gray-800"
+                            class="m-2 min-h-0 flex-1 divide-y divide-gray-100 overflow-y-auto dark:divide-gray-800"
                           >
                             <template for="entry of entries"
                               ><li
@@ -900,10 +904,14 @@
                   : "anonymous",
               );
               const initialSettingsTab = new URL(window.location.href).searchParams.get("settings");
-              const settings = ref(initialSettingsTab === "organizations" || initialSettingsTab === "tokens");
+              const settings = ref(["profile", "organizations", "tokens"].includes(initialSettingsTab));
               const settingsOrg = ref(new URL(window.location.href).searchParams.get("org") || "");
               const settingsSection = ref(new URL(window.location.href).searchParams.get("section") || "general");
-              const settingsTab = ref(initialSettingsTab === "tokens" ? "tokens" : "organizations");
+              const settingsTab = ref(
+                ["profile", "organizations", "tokens"].includes(initialSettingsTab)
+                  ? initialSettingsTab
+                  : "organizations",
+              );
               const profile = ref(serverSession.value?.authenticated ? serverSession.value.profile : null);
               const canRead = ref(
                 serverSession.value?.authenticated &&
@@ -980,7 +988,7 @@
               const repositoryNavHref = (item) =>
                 `/?org=${encodeURIComponent(org.value)}&repo=${encodeURIComponent(item.repo)}`;
               const isSelected = (item) => repoLabel.value === item.repo;
-              const openSettings = () => navigate("/?settings=organizations");
+              const openSettings = () => navigate("/?settings=profile");
               const toggleTheme = () => {
                 darkMode.value = !darkMode.value;
                 document.documentElement.classList.toggle("dark", darkMode.value);
@@ -1128,7 +1136,7 @@
                 routeRepo.value = nextRepo || "";
                 if (
                   !nextRepo ||
-                  ["organizations", "tokens"].includes(next.searchParams.get("settings")) ||
+                  ["profile", "organizations", "tokens"].includes(next.searchParams.get("settings")) ||
                   nextRepo !== previous.searchParams.get("repo") ||
                   next.searchParams.get("org") !== previous.searchParams.get("org")
                 ) {
@@ -1138,10 +1146,12 @@
                 orgError.value = "";
                 org.value = nextOrg;
                 const requestedSettingsTab = next.searchParams.get("settings");
-                settings.value = requestedSettingsTab === "organizations" || requestedSettingsTab === "tokens";
+                settings.value = ["profile", "organizations", "tokens"].includes(requestedSettingsTab);
                 settingsOrg.value = requestedSettingsTab === "organizations" ? nextOrg : "";
                 settingsSection.value = next.searchParams.get("section") || "general";
-                settingsTab.value = requestedSettingsTab === "tokens" ? "tokens" : "organizations";
+                settingsTab.value = ["profile", "organizations", "tokens"].includes(requestedSettingsTab)
+                  ? requestedSettingsTab
+                  : "organizations";
                 const organizationChanged = nextOrg !== (previous.searchParams.get("org") || "");
                 const refreshOrganization = organizationChanged
                   ? refreshOrgRepositories().catch(() => {
@@ -2007,8 +2017,10 @@
                 org.value = params.get("org") || "";
                 routeOrg.value = org.value;
                 const requestedSettingsTab = params.get("settings");
-                settings.value = requestedSettingsTab === "organizations" || requestedSettingsTab === "tokens";
-                settingsTab.value = requestedSettingsTab === "tokens" ? "tokens" : "organizations";
+                settings.value = ["profile", "organizations", "tokens"].includes(requestedSettingsTab);
+                settingsTab.value = ["profile", "organizations", "tokens"].includes(requestedSettingsTab)
+                  ? requestedSettingsTab
+                  : "organizations";
                 try {
                   await refreshOrganizations();
                 } catch {

@@ -139,7 +139,11 @@ test.beforeEach(async ({ page }) => {
     checked: true,
     authenticated: true,
     canWrite: true,
-    profile: { name: "Browser Tester" },
+    profile: {
+      name: "Browser Tester",
+      email: "browser@example.test",
+      picture: "https://images.example.test/avatar.png",
+    },
   };
   await page.addInitScript(() => {
     window.__documentNavigationCount = 0;
@@ -215,6 +219,16 @@ test.beforeEach(async ({ page }) => {
   await page.route("https://cdnjs.cloudflare.com/**", (route) =>
     route.fulfill({ status: 200, contentType: "text/css", body: "" }),
   );
+  await page.route("https://images.example.test/**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "image/png",
+      body: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/rWQAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    }),
+  );
   await page.route("**/ui/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname !== "/ui/" && pathname !== "/ui/index.html") {
@@ -231,12 +245,15 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/ui/session", (route) =>
     route.fulfill({
       json: {
-        authenticated: true,
-        canWrite: true,
-        profile: { name: "Browser Tester" },
+        ...bootstrapSession,
+        authenticated: bootstrapSession.authenticated,
       },
     }),
   );
+  await page.route("**/ui/auth/logout", (route) => {
+    bootstrapSession = { checked: true, authenticated: false, profile: null, canWrite: false };
+    return route.fulfill({ status: 204 });
+  });
   await page.route("**/ui/config", (route) => route.fulfill({ json: {} }));
   await page.route("**/api/v1/personal-access-tokens**", async (route) => {
     const request = route.request();
@@ -445,6 +462,33 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+test("profile settings show profile, photo, and sign out", async ({ page }) => {
+  let logoutRequest;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/ui/auth/logout") {
+      logoutRequest = request;
+    }
+  });
+  await page.goto("/ui/?settings=profile");
+  await expect(page.getByRole("heading", { name: "Profile", exact: true })).toBeVisible();
+  const profileSection = page.getByRole("region");
+  await expect(profileSection.getByText("Browser Tester", { exact: true })).toBeVisible();
+  await expect(profileSection.getByText("browser@example.test", { exact: true })).toBeVisible();
+  await expect(page.getByRole("img", { name: "Profile photo" })).toHaveAttribute(
+    "src",
+    "https://images.example.test/avatar.png",
+  );
+
+  await page.getByRole("link", { name: "Personal access tokens" }).click();
+  await expect(page).toHaveURL(/settings=tokens/);
+  await page.goBack();
+  await expect(page).toHaveURL(/settings=profile/);
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
+  expect(logoutRequest?.method()).toBe("POST");
+  expect(runtimeErrors).toEqual([]);
+});
+
 test.afterEach(() => {
   expect(runtimeErrors).toEqual([]);
 });
@@ -551,9 +595,17 @@ test("organization settings navigate to repositories and manage webhook subscrip
   currentRepositories = [{ repo: "demo" }, { repo: "second" }];
   await page.goto("/ui/");
   await page.locator('button[title="Settings"]').click();
-  await expect(page).toHaveURL(/settings=organizations/);
+  await expect(page).toHaveURL(/settings=profile/);
+  await page.getByRole("link", { name: "Organizations", exact: true }).click();
   const organizationForm = page.locator("form").filter({ has: page.getByLabel("Organization slug") });
   await expect(organizationForm).toBeVisible();
+  const deleteButton = page.getByRole("button", { name: "Delete empty organization" });
+  const deleteLabel = deleteButton.getByText("Delete", { exact: true });
+  if (page.viewportSize().width < 768) {
+    await expect(deleteLabel).toBeHidden();
+  } else {
+    await expect(deleteLabel).toBeVisible();
+  }
   await page.getByRole("link", { name: "example", exact: true }).click();
   await expect(page).toHaveURL(/settings=organizations&org=example/);
   await expect(organizationForm).toHaveCount(0);
@@ -886,6 +938,7 @@ test("SPA navigation, file pages, history, and read-only controls", async ({ pag
   await page.goto("/ui/?org=example&repo=demo");
   await expect(page.getByText("notes.txt", { exact: true }).first()).toBeVisible();
   const repositoryPanel = page.getByTestId("repository-content-panel");
+  await expect(repositoryPanel.getByTestId("repository-file-list")).toHaveCSS("margin", "8px");
   await expect(repositoryPanel.getByTestId("latest-commit-header")).toHaveCount(1);
   await expect(repositoryPanel.getByTestId("folder-path-toolbar")).toHaveCount(1);
   await expect(repositoryPanel.getByTestId("repository-file-list")).toHaveCount(1);
